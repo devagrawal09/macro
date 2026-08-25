@@ -262,6 +262,7 @@ async fn build_tool_context(args: ToolContextBuildArgs<'_>) -> anyhow::Result<To
             ),
         foreign_entity_service: ForeignEntityServiceImpl::new(PgForeignEntityRepo::new(db.clone())),
         macro_event_broker: macro_event_broker.clone(),
+        task_event_publisher: None,
     };
     let lexical_client_for_tools = (*lexical_client).clone();
     let document_tool_context = DocumentToolContext::new(

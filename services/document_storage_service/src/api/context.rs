@@ -43,6 +43,7 @@ use connection::{
 use connection_gateway_client::client::ConnectionGatewayClient;
 use documents_hex::domain::ports::{TaskPropertiesPort, task_property_edit_receipt};
 use documents_hex::domain::service::DocumentServiceImpl;
+use documents_hex::domain::task_events::ReceiptFilteredTaskEventSubscription;
 use documents_hex::inbound::axum_router::DocumentRouterState;
 use documents_hex::outbound::pg_document_repo::PgDocumentRepo;
 use documents_hex::outbound::s3_upload_url::S3UploadUrlAdapter;
@@ -87,7 +88,7 @@ use notification::outbound::queue::SqsQueue;
 use opensearch_client::OpensearchClient;
 use projects_hex::{
     domain::service::ProjectServiceImpl,
-    inbound::axum_router::ProjectRouterState,
+    inbound::axum_router::{ProjectRouterState, task_events::TaskEventsRouterState},
     outbound::{
         DynamoBulkUploadAdapter, PgProjectRepo, S3ProjectUploadAdapter, ShaCountAdapter,
         SqsProjectSearchIndexer,
@@ -331,6 +332,14 @@ pub(crate) type ProjectService = ProjectServiceImpl<
 pub(crate) type ProjectsState =
     ProjectRouterState<ProjectService, EntityAccessService, AuthorizationService>;
 
+/// Type alias for the dedicated task-events router state.
+pub(crate) type TaskEventsState = TaskEventsRouterState<
+    ProjectService,
+    ReceiptFilteredTaskEventSubscription,
+    EntityAccessService,
+    AuthorizationService,
+>;
+
 /// Type alias for the legacy channel list service.
 pub(crate) type DssChannelListService =
     ChannelListServiceImpl<PgChannelsRepo, PgChannelsRepo, FrecencyPgStorage>;
@@ -556,6 +565,7 @@ pub(crate) struct ApiContext {
     pub calendar_state: DssCalendarState,
     pub documents_state: DocumentsState,
     pub projects_state: ProjectsState,
+    pub task_events_state: TaskEventsState,
     pub channels_state: DssChannelsState,
     /// Shared channel service, for calling channel domain operations outside
     /// the channels router (starter-doc seeding records mention backlinks).

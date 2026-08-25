@@ -205,3 +205,7 @@ Event names and payloads are **generated from the backend**: the Rust webhook
 crate exposes a `WebhookEvent` union in the storage OpenAPI spec, and
 `src/events/types.ts` derives `EventName` / `EventPayload` from it. SSE
 (`listen()`) and persisted webhooks (`webhook()`) dispatch the same union.
+
+## Local host resolution
+
+The root `@macro/sdk` package uses the fixed `HOSTS.local` and `WEB_APP_URLS.local` defaults. It no longer reads the local stack portmap automatically. Pass `hosts` and `webAppUrl` explicitly when your local stack uses different addresses. The Node-only webhook helper still supports portmap discovery.

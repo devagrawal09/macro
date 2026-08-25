@@ -72,6 +72,7 @@ use collab_surface::inbound::axum_router::{
     CollabSurfaceResponse, CollabSurfaceTokenResponse, EnsureCollabSurfaceRequest,
 };
 use document_sub_type::DocumentSubType;
+use documents_hex::domain::task_events::{TaskEvent, TaskEventType};
 use documents_hex::inbound::axum_router::{
     edit_document::EditDocumentResponse, get_branch_name::BranchNameResponse,
     get_short_id::ShortIdResponse,
@@ -320,6 +321,7 @@ use utoipa::OpenApi;
         projects_hex::inbound::axum_router::get_batch_preview::get_batch_preview_handler,
         projects_hex::inbound::axum_router::get_project::get_project_handler,
         projects_hex::inbound::axum_router::revert_delete_project::revert_delete_project_handler,
+        projects_hex::inbound::axum_router::task_events::task_events_handler,
 
         entity::get_entity_permission::handler,
 
@@ -388,6 +390,8 @@ use utoipa::OpenApi;
     components(
         schemas(
             DocumentStorageServiceApiVersion,
+            TaskEvent,
+            TaskEventType,
             GenericResponse,
             GenericErrorResponse,
             GenericSuccessResponse,

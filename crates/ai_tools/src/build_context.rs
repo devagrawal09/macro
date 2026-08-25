@@ -295,6 +295,7 @@ pub async fn build_tool_service_context_from_env(
             pool.clone(),
         )),
         macro_event_broker: macro_event_broker.clone(),
+        task_event_publisher: None,
     };
 
     let document_tool_context = DocumentToolContext::new(

@@ -12,6 +12,4 @@ await build({
   outbase: '.',
   platform: 'neutral',
   target: 'node18',
-  // No third-party runtime deps; only Node builtins are imported.
-  external: ['node:*'],
 });

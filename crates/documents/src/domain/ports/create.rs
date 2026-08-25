@@ -63,6 +63,11 @@ pub trait DocumentCreationService: Send + Sync {
         content: DocumentContent,
     ) -> impl Future<Output = Result<(), DocumentError>> + Send;
 
+    /// Publish a successfully finalized task creation to the optional live feed.
+    ///
+    /// The default is a no-op so non-DSS construction paths remain unchanged.
+    fn publish_task_created(&self, _document_id: &str, _project_id: &str) {}
+
     /// Clean up a document that failed after its database row was created.
     fn cleanup_created_document(&self, document_id: &str) -> impl Future<Output = ()> + Send;
 }
@@ -102,6 +107,10 @@ where
         content: DocumentContent,
     ) -> Result<(), DocumentError> {
         (**self).set_document_content(document_id, content).await
+    }
+
+    fn publish_task_created(&self, document_id: &str, project_id: &str) {
+        (**self).publish_task_created(document_id, project_id)
     }
 
     async fn cleanup_created_document(&self, document_id: &str) {

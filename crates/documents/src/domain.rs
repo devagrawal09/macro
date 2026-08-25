@@ -15,6 +15,8 @@ pub mod markdown_backfill;
 pub mod create;
 
 #[cfg(feature = "ports")]
+pub mod task_events;
+#[cfg(feature = "ports")]
 pub mod upload_finalize;
 
 pub mod models;

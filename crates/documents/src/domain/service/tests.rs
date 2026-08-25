@@ -12,6 +12,9 @@ use crate::domain::models::{
     EmailImportRepoOutcome, GithubPullRequest, ImportEmailAttachmentRepoArgs,
 };
 use crate::domain::ports::{DocumentContentEventService, MockDocumentRepo};
+use crate::domain::task_events::{
+    TaskEvent, TaskEventPublishError, TaskEventPublisher, TaskEventType,
+};
 
 use super::*;
 use activity::{Actor, Attribution};
@@ -2262,4 +2265,190 @@ async fn join_and_leave_interactions_publish_without_bumping_document() {
         assert_eq!(published[0].payload["event_type"], "document.interaction");
         assert_eq!(published[0].payload["metadata"]["reason"], expected_reason);
     }
+}
+
+#[derive(Default)]
+struct RecordingTaskPublisher {
+    events: Mutex<Vec<TaskEvent>>,
+    fail: bool,
+}
+impl TaskEventPublisher for RecordingTaskPublisher {
+    fn publish(&self, event: TaskEvent) -> Result<(), TaskEventPublishError> {
+        if self.fail {
+            return Err(TaskEventPublishError("test failure".into()));
+        }
+        self.events.lock().unwrap().push(event);
+        Ok(())
+    }
+}
+
+fn service_with_task_publisher(
+    repo: MockDocumentRepo,
+    publisher: Arc<RecordingTaskPublisher>,
+) -> TestDocumentService {
+    make_test_service(repo).with_task_event_publisher(publisher)
+}
+
+#[tokio::test]
+async fn task_rename_publishes_live_update_for_existing_project() {
+    let mut repo = make_mock_repo();
+    repo.expect_edit_document()
+        .returning(|_| Box::pin(std::future::ready(Ok(()))));
+    let publisher = Arc::new(RecordingTaskPublisher::default());
+    let service = service_with_task_publisher(repo, publisher.clone());
+    let mut context = task_document_context("doc-live");
+    context.project_id = Some("project-live".into());
+
+    service
+        .edit_document(
+            edit_receipt("doc-live"),
+            context,
+            EditDocumentServiceArgs {
+                document_name: Some("Renamed.md".into()),
+                project_id: None,
+                share_permission: None,
+                file_type: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let events = publisher.events.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, TaskEventType::TaskUpdated);
+    assert_eq!(events[0].document_id, "doc-live");
+    assert_eq!(events[0].project_id, "project-live");
+    assert_eq!(
+        uuid::Uuid::parse_str(&events[0].event_id)
+            .unwrap()
+            .get_version(),
+        Some(uuid::Version::Random)
+    );
+}
+
+#[tokio::test]
+async fn live_update_excludes_non_rename_non_task_projectless_and_project_move() {
+    for (mut context, args) in [
+        (
+            {
+                let mut c = task_document_context("share");
+                c.project_id = Some("project".into());
+                c
+            },
+            EditDocumentServiceArgs {
+                document_name: None,
+                project_id: None,
+                share_permission: None,
+                file_type: None,
+            },
+        ),
+        (
+            {
+                let mut c = task_document_context("note");
+                c.sub_type = None;
+                c.project_id = Some("project".into());
+                c
+            },
+            EditDocumentServiceArgs {
+                document_name: Some("name".into()),
+                project_id: None,
+                share_permission: None,
+                file_type: None,
+            },
+        ),
+        (
+            task_document_context("projectless"),
+            EditDocumentServiceArgs {
+                document_name: Some("name".into()),
+                project_id: None,
+                share_permission: None,
+                file_type: None,
+            },
+        ),
+        (
+            {
+                let mut c = task_document_context("move");
+                c.project_id = None;
+                c
+            },
+            EditDocumentServiceArgs {
+                document_name: Some("name".into()),
+                project_id: Some(String::new()),
+                share_permission: None,
+                file_type: None,
+            },
+        ),
+    ] {
+        let mut repo = make_mock_repo();
+        repo.expect_edit_document()
+            .returning(|_| Box::pin(std::future::ready(Ok(()))));
+        let publisher = Arc::new(RecordingTaskPublisher::default());
+        let service = service_with_task_publisher(repo, publisher.clone());
+        let document_id = context.document_id.clone();
+        service
+            .edit_document(
+                edit_receipt(&document_id),
+                std::mem::replace(&mut context, task_document_context("unused")),
+                args,
+            )
+            .await
+            .unwrap();
+        assert!(publisher.events.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn task_publisher_failure_is_non_fatal() {
+    let mut repo = make_mock_repo();
+    repo.expect_edit_document()
+        .returning(|_| Box::pin(std::future::ready(Ok(()))));
+    let publisher = Arc::new(RecordingTaskPublisher {
+        events: Mutex::new(Vec::new()),
+        fail: true,
+    });
+    let service = service_with_task_publisher(repo, publisher);
+    let mut context = task_document_context("doc-failure");
+    context.project_id = Some("project".into());
+    assert!(
+        service
+            .edit_document(
+                edit_receipt("doc-failure"),
+                context,
+                EditDocumentServiceArgs {
+                    document_name: Some("name".into()),
+                    project_id: None,
+                    share_permission: None,
+                    file_type: None,
+                }
+            )
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn failed_task_rename_does_not_publish_live_update() {
+    let mut repo = make_mock_repo();
+    repo.expect_edit_document()
+        .returning(|_| Box::pin(std::future::ready(Err(anyhow::anyhow!("edit failed")))));
+    let publisher = Arc::new(RecordingTaskPublisher::default());
+    let service = service_with_task_publisher(repo, publisher.clone());
+    let mut context = task_document_context("doc-failed-rename");
+    context.project_id = Some("project".into());
+
+    let result = service
+        .edit_document(
+            edit_receipt("doc-failed-rename"),
+            context,
+            EditDocumentServiceArgs {
+                document_name: Some("name".into()),
+                project_id: None,
+                share_permission: None,
+                file_type: None,
+            },
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert!(publisher.events.lock().unwrap().is_empty());
 }
