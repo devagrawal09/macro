@@ -3,12 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild:sdk": "bun --cwd ../../../packages/sdk run build",
+    "prebuild:sdk": "bun run --cwd ../../../packages/sdk build",
     "dev": "bun run prebuild:sdk && vite build --watch",
-    "build": "bun run prebuild:sdk && vite build",
+    "build": "bun run prebuild:sdk && vite build && bun run validate:dist",
     "deploy": "bun run build && bun src/deploy.ts",
     "worker": "bun src/worker.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "validate:dist": "bun scripts/validate-browser-output.ts"
   },
   "dependencies": {
     "@macro/sdk": "file:../../../packages/sdk",

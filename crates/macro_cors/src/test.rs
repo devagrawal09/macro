@@ -1,5 +1,12 @@
 use std::sync::Mutex;
 
+use axum::{
+    Router,
+    body::Body,
+    http::{Method, Request, StatusCode, header},
+};
+use tower::ServiceExt;
+
 use super::*;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -88,4 +95,29 @@ fn configured_null_cannot_bypass_default_rejection() {
         assert!(is_allowed_origin("https://configured.example", false));
         assert!(!is_allowed_origin("https://rejected.example", true));
     });
+}
+
+#[tokio::test]
+async fn explicit_opaque_origin_layer_returns_preflight_header() {
+    let response = Router::new()
+        .route("/events", axum::routing::get(|| async { StatusCode::OK }))
+        .layer(cors_layer_allow_opaque_origin())
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/events")
+                .header(header::ORIGIN, "null")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "authorization")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some(&header::HeaderValue::from_static("null")),
+    );
 }

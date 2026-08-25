@@ -3,7 +3,9 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"start": "bun run index.ts"
+		"start": "bun run index.ts",
+		"check:port": "tsc --noEmit --strict --skipLibCheck --module Preserve --moduleResolution bundler --target ESNext src/server-config.ts",
+		"test:port": "bun test src/server-config.test.ts"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^1.2.1",

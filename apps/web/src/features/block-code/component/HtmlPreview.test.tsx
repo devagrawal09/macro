@@ -6,9 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   metadata: { documentId: 'fixed-doc' } as { documentId?: string },
   getToken: vi.fn<() => Promise<string>>(),
+  local: true,
+  develop: false,
 }));
 
-vi.mock('@core/constant/featureFlags', () => ({ LOCAL_ONLY: true, DEV_MODE_ENV: false }));
+vi.mock('@core/constant/featureFlags', () => ({
+  get LOCAL_ONLY() { return mocks.local; },
+  get DEV_MODE_ENV() { return mocks.develop; },
+}));
 vi.mock('@core/signal/load', () => ({
   blockTextSignal: { get: () => '<p>artifact</p>' },
   blockMetadataSignal: () => mocks.metadata,
@@ -53,6 +58,8 @@ function mountConfigured() {
 
 beforeEach(() => {
   mocks.metadata = { documentId: 'fixed-doc' };
+  mocks.local = true;
+  mocks.develop = false;
   mocks.getToken.mockReset().mockResolvedValue('secret-token');
   channels = [];
   vi.stubGlobal('MessageChannel', class {
@@ -72,6 +79,30 @@ describe('task inbox host gate', () => {
     expect(taskInboxGate({ local: true, develop: false, configuredDocumentId: '', currentDocumentId: '' })).toBe(false);
     expect(taskInboxGate({ local: false, develop: true, configuredDocumentId: 'fixed', currentDocumentId: 'other' })).toBe(false);
     expect(taskInboxGate({ local: false, develop: true, configuredDocumentId: 'fixed', currentDocumentId: 'fixed' })).toBe(true);
+  });
+
+  it('mounts fail-closed in Production and initializes in Develop', async () => {
+    vi.stubEnv('VITE_TASK_INBOX_DOCUMENT_ID', 'fixed-doc');
+    mocks.local = false;
+    mocks.develop = false;
+    const production = render(() => <HtmlPreview />);
+    const productionIframe = production.container.querySelector('iframe')!;
+    const productionPost = vi.spyOn(productionIframe.contentWindow!, 'postMessage');
+    fireEvent.load(productionIframe);
+    expect(productionPost.mock.calls.some((call) => (call[0] as any).type === 'macro-task-inbox-init')).toBe(false);
+    expect(mocks.getToken).not.toHaveBeenCalled();
+    production.unmount();
+
+    mocks.develop = true;
+    const develop = render(() => <HtmlPreview />);
+    const developIframe = develop.container.querySelector('iframe')!;
+    const developPost = vi.spyOn(developIframe.contentWindow!, 'postMessage');
+    fireEvent.load(developIframe);
+    const init = developPost.mock.calls.find((call) => (call[0] as any).type === 'macro-task-inbox-init')![0] as { nonce: string };
+    ready(developIframe.contentWindow!, init.nonce);
+    await vi.waitFor(() => expect(channels).toHaveLength(1));
+    expect(mocks.getToken).toHaveBeenCalledOnce();
+    develop.unmount();
   });
 
   it('does not initialize when external config is absent or mismatched', () => {

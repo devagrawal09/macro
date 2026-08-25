@@ -1,4 +1,4 @@
-import type { Macro } from '@macro/sdk';
+import type { Macro } from '@macro/sdk/browser';
 
 /** Create an artifact task without inheriting the SDK's team-sharing default. */
 export async function createPrivateTask(macro: Macro, projectId: string, name: string) {

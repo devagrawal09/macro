@@ -209,3 +209,10 @@ crate exposes a `WebhookEvent` union in the storage OpenAPI spec, and
 ## Local host resolution
 
 The root `@macro/sdk` package uses the fixed `HOSTS.local` and `WEB_APP_URLS.local` defaults. It no longer reads the local stack portmap automatically. Pass `hosts` and `webAppUrl` explicitly when your local stack uses different addresses. The Node-only webhook helper still supports portmap discovery.
+
+### Browser entrypoint
+
+Browser bundles should import `Macro` from `@macro/sdk/browser` and pass an
+explicit `token` or `auth` option. This entrypoint never reads process
+environment variables or includes the inbound webhook receiver. The root
+entrypoint keeps Bun/Node environment fallbacks for server applications.

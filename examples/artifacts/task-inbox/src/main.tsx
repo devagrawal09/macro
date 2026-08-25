@@ -1,4 +1,4 @@
-import { Macro } from '@macro/sdk';
+import { Macro } from '@macro/sdk/browser';
 import { render } from 'solid-js/web';
 import { createSignal, For, Show } from 'solid-js';
 import { receiveTaskInboxToken } from './protocol';

@@ -7,8 +7,8 @@ import { ensureWebhook } from './webhook';
 const webhookSecret = await ensureWebhook(`${env.PUBLIC_URL}/macro-events`);
 
 /** The one Macro SDK client, shared by everything in this worker. The SDK
- * resolves service hosts itself (MACRO_ENV, plus the local-stack portmap
- * when it's `local`). */
+ * resolves fixed environment hosts itself from MACRO_ENV; explicit host
+ * overrides remain available to callers that need them. */
 export const macro = new Macro({ webhookSecret }).requestedAs(
   env.MACRO_USER_ID
 );

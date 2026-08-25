@@ -1,4 +1,4 @@
-import { envsafe, str, url } from 'envsafe';
+import { envsafe, num, str, url } from 'envsafe';
 
 // Validated at import time: the process fails at boot with a readable report
 // if anything is missing, instead of erroring on the first request.
@@ -20,6 +20,10 @@ export const env = envsafe({
   }),
   PUBLIC_URL: url({
     desc: 'Public base url Macro webhooks can reach this worker at (e.g. an ngrok tunnel)',
+  }),
+  SDK_WEBHOOK_HOST_RECEIVER_PORT: num({
+    default: 8787,
+    desc: 'Explicit host port that receives local SDK webhook relay traffic',
   }),
   UPSTREAM_WS_URL: str({
     default: '',

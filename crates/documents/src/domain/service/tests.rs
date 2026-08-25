@@ -2452,3 +2452,48 @@ async fn failed_task_rename_does_not_publish_live_update() {
     assert!(result.is_err());
     assert!(publisher.events.lock().unwrap().is_empty());
 }
+
+#[test]
+fn task_creation_seam_with_no_publisher_is_a_noop() {
+    let service = make_test_service(make_mock_repo());
+    crate::domain::ports::create::DocumentCreationService::publish_task_created(
+        &service, "document", "project",
+    );
+}
+
+#[test]
+fn task_creation_seam_emits_distinct_uuid_v4_created_events() {
+    let publisher = Arc::new(RecordingTaskPublisher::default());
+    let service = service_with_task_publisher(make_mock_repo(), publisher.clone());
+
+    for document_id in ["document-one", "document-two"] {
+        crate::domain::ports::create::DocumentCreationService::publish_task_created(
+            &service,
+            document_id,
+            "project",
+        );
+    }
+
+    let events = publisher.events.lock().unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().all(|event| {
+        event.event_type == TaskEventType::TaskCreated
+            && event.project_id == "project"
+            && uuid::Uuid::parse_str(&event.event_id)
+                .is_ok_and(|id| id.get_version() == Some(uuid::Version::Random))
+    }));
+    assert_ne!(events[0].event_id, events[1].event_id);
+}
+
+#[test]
+fn task_creation_seam_publisher_failure_is_non_fatal() {
+    let publisher = Arc::new(RecordingTaskPublisher {
+        events: Mutex::new(Vec::new()),
+        fail: true,
+    });
+    let service = service_with_task_publisher(make_mock_repo(), publisher);
+
+    crate::domain::ports::create::DocumentCreationService::publish_task_created(
+        &service, "document", "project",
+    );
+}

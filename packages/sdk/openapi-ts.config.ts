@@ -1,5 +1,13 @@
 import { defineConfig } from '@hey-api/openapi-ts';
-import { services } from './services';
+import { services, type ServiceSpec } from './services';
+
+const requestedService = process.env.SDK_GENERATE_SERVICE;
+if (requestedService && !services.includes(requestedService as ServiceSpec)) {
+  throw new Error(`unknown SDK service ${requestedService}`);
+}
+const selectedServices = requestedService
+  ? services.filter((service) => service === requestedService)
+  : services;
 
 /**
  * hey-api config for the SDK's generated layer.
@@ -19,10 +27,16 @@ import { services } from './services';
  * Rust services with `just update-generated`).
  */
 export default defineConfig(
-  services.map((service) => ({
+  selectedServices.map((service) => ({
     input: `./specs/${service}.json`,
     output: {
       path: `./generated/${service}`,
+      postProcess: [
+        {
+          command: process.execPath,
+          args: ['scripts/format-generated.mjs', '{{path}}'],
+        },
+      ],
     },
     plugins: [
       '@hey-api/client-fetch',
