@@ -105,6 +105,7 @@ export function HtmlPreview() {
     if (
       !node ||
       event.source !== node.contentWindow ||
+      event.origin !== 'null' ||
       !exactMessage(event.data, 'macro-task-inbox-ready') ||
       !state ||
       state.claimed ||

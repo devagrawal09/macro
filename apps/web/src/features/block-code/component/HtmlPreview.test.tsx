@@ -56,6 +56,7 @@ const deferred = <T,>() => {
 function ready(source: Window, nonce: string, extra?: object) {
   window.dispatchEvent(new MessageEvent('message', {
     source,
+    origin: 'null',
     data: { type: 'macro-task-inbox-ready', nonce, ...extra },
   }));
 }
@@ -173,9 +174,23 @@ describe('task inbox host gate', () => {
   it('rejects malformed, excess-key, wrong-source, and wrong-nonce ready messages', async () => {
     const view = mountConfigured();
     ready(window, view.init.nonce); ready(view.iframe.contentWindow!, 'wrong'); ready(view.iframe.contentWindow!, view.init.nonce, { extra: true });
-    window.dispatchEvent(new MessageEvent('message', { source: view.iframe.contentWindow, data: 'ready' }));
-    window.dispatchEvent(new MessageEvent('message', { source: view.iframe.contentWindow, data: { type: 'macro-task-inbox-ready' } }));
+    window.dispatchEvent(new MessageEvent('message', { source: view.iframe.contentWindow, origin: 'null', data: 'ready' }));
+    window.dispatchEvent(new MessageEvent('message', { source: view.iframe.contentWindow, origin: 'null', data: { type: 'macro-task-inbox-ready' } }));
     await Promise.resolve(); expect(mocks.getToken).not.toHaveBeenCalled(); expect(channels).toHaveLength(0); view.unmount();
+  });
+
+  it('rejects a valid current source and nonce from a non-opaque origin', async () => {
+    const view = mountConfigured();
+    window.dispatchEvent(new MessageEvent('message', {
+      source: view.iframe.contentWindow,
+      origin: 'http://localhost',
+      data: { type: 'macro-task-inbox-ready', nonce: view.init.nonce },
+    }));
+    await Promise.resolve();
+    expect(mocks.getToken).not.toHaveBeenCalled();
+    expect(channels).toHaveLength(0);
+    expect(view.postMessage.mock.calls.some((call) => (call[0] as any).type === 'macro-task-inbox-grant')).toBe(false);
+    view.unmount();
   });
 
   it('claims duplicate ready synchronously before the token await', async () => {
