@@ -8,7 +8,9 @@
     "build": "bun run prebuild:sdk && vite build && bun run validate:dist",
     "deploy": "bun run build && bun src/deploy.ts",
     "worker": "bun src/worker.ts",
-    "test": "bun test",
+    "test": "bun run test:unit && bun run test:ui",
+    "test:unit": "bun test src",
+    "test:ui": "vitest run --config vitest.config.ts",
     "validate:dist": "bun scripts/validate-browser-output.ts"
   },
   "dependencies": {
@@ -20,6 +22,9 @@
     "typescript": "^5.9.2",
     "vite": "^7.3.1",
     "vite-plugin-singlefile": "^2.3.0",
-    "vite-plugin-solid": "^2.11.11"
+    "vite-plugin-solid": "^2.11.11",
+    "@solidjs/testing-library": "^0.8.10",
+    "jsdom": "^26.1.0",
+    "vitest": "^3.2.4"
   }
 }

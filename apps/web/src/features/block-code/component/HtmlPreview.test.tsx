@@ -8,16 +8,30 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn<() => Promise<string>>(),
   local: true,
   develop: false,
+  metadataGetterCaptures: 0,
+  directMetadataCalls: 0,
 }));
 
 vi.mock('@core/constant/featureFlags', () => ({
   get LOCAL_ONLY() { return mocks.local; },
   get DEV_MODE_ENV() { return mocks.develop; },
 }));
-vi.mock('@core/signal/load', () => ({
-  blockTextSignal: { get: () => '<p>artifact</p>' },
-  blockMetadataSignal: () => mocks.metadata,
-}));
+vi.mock('@core/signal/load', () => {
+  const blockMetadataSignal = () => {
+    mocks.directMetadataCalls += 1;
+    return undefined;
+  };
+  Object.defineProperty(blockMetadataSignal, 'get', {
+    get() {
+      mocks.metadataGetterCaptures += 1;
+      return () => mocks.metadata;
+    },
+  });
+  return {
+    blockTextSignal: { get: () => '<p>artifact</p>' },
+    blockMetadataSignal,
+  };
+});
 vi.mock('@service-auth/fetch', () => ({ getMacroApiToken: mocks.getToken }));
 
 import { HtmlPreview, taskInboxGate } from './HtmlPreview';
@@ -60,6 +74,8 @@ beforeEach(() => {
   mocks.metadata = { documentId: 'fixed-doc' };
   mocks.local = true;
   mocks.develop = false;
+  mocks.metadataGetterCaptures = 0;
+  mocks.directMetadataCalls = 0;
   mocks.getToken.mockReset().mockResolvedValue('secret-token');
   channels = [];
   vi.stubGlobal('MessageChannel', class {
@@ -79,6 +95,28 @@ describe('task inbox host gate', () => {
     expect(taskInboxGate({ local: true, develop: false, configuredDocumentId: '', currentDocumentId: '' })).toBe(false);
     expect(taskInboxGate({ local: false, develop: true, configuredDocumentId: 'fixed', currentDocumentId: 'other' })).toBe(false);
     expect(taskInboxGate({ local: false, develop: true, configuredDocumentId: 'fixed', currentDocumentId: 'fixed' })).toBe(true);
+  });
+
+  it('captures the context-bound metadata getter and initializes only the matching document on load', () => {
+    vi.stubEnv('VITE_TASK_INBOX_DOCUMENT_ID', 'fixed-doc');
+    const matching = render(() => <HtmlPreview />);
+    const matchingIframe = matching.container.querySelector('iframe')!;
+    const matchingPost = vi.spyOn(matchingIframe.contentWindow!, 'postMessage');
+    fireEvent.load(matchingIframe);
+    expect(matchingPost.mock.calls.filter((call) => (call[0] as any).type === 'macro-task-inbox-init')).toHaveLength(1);
+    expect(mocks.metadataGetterCaptures).toBe(1);
+    expect(mocks.directMetadataCalls).toBe(0);
+    matching.unmount();
+
+    mocks.metadata = { documentId: 'other-doc' };
+    const mismatched = render(() => <HtmlPreview />);
+    const mismatchedIframe = mismatched.container.querySelector('iframe')!;
+    const mismatchedPost = vi.spyOn(mismatchedIframe.contentWindow!, 'postMessage');
+    fireEvent.load(mismatchedIframe);
+    expect(mismatchedPost.mock.calls.some((call) => (call[0] as any).type === 'macro-task-inbox-init')).toBe(false);
+    expect(mocks.metadataGetterCaptures).toBe(2);
+    expect(mocks.directMetadataCalls).toBe(0);
+    mismatched.unmount();
   });
 
   it('mounts fail-closed in Production and initializes in Develop', async () => {
@@ -166,6 +204,7 @@ describe('task inbox host gate', () => {
     await vi.waitFor(() => expect(mocks.getToken).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(channels).toHaveLength(1));
     expect(channels[0].port1.postMessage).toHaveBeenCalledWith({ type: 'macro-task-inbox-token', nonce: freshNonce, token: 'fresh-token' });
+    expect(mocks.directMetadataCalls).toBe(0);
     view.unmount();
   });
 

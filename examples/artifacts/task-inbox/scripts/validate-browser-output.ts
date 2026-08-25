@@ -17,6 +17,7 @@ const forbidden = [
   'VITE_TASK_INBOX_DOCUMENT_ID',
   'deployment cancelled',
   '[processed] ',
+  '<form',
 ];
 const sentinel = process.env[apiKeyName];
 if (sentinel) forbidden.push(sentinel);

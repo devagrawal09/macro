@@ -44,6 +44,7 @@ export function taskInboxGate(args: {
 
 export function HtmlPreview() {
   const blockText = createMemo(blockTextSignal.get);
+  const blockMetadata = blockMetadataSignal.get;
   let iframe: HTMLIFrameElement | undefined;
   let active = true;
   let generation = 0;
@@ -59,7 +60,7 @@ export function HtmlPreview() {
         local: LOCAL_ONLY,
         develop: DEV_MODE_ENV,
         configuredDocumentId: configuredId,
-        currentDocumentId: blockMetadataSignal()?.documentId,
+        currentDocumentId: blockMetadata()?.documentId,
       }) &&
       iframe === node
     );
