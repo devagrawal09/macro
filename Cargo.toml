@@ -65,6 +65,7 @@ members = [
   "crates/pipedream_mcp",
   "crates/onboarding",
   "crates/predicate_index",
+  "crates/plugin_platform",
   "crates/prompt",
   "crates/properties_service",
   "crates/reminders",
