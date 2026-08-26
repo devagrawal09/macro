@@ -71,7 +71,9 @@
 			"services/ai-editing-worker",
 			"services/bots/anthropic-status-bot",
 			"services/bots/stripe-payment-bot",
-			"services/lexical-service"
+			"services/lexical-service",
+			"packages/plugin",
+			"packages/plugin-cli"
 		],
 		"catalog": {
 			"loro-crdt": "1.13.7"
