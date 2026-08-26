@@ -74,7 +74,8 @@
 			"services/lexical-service",
 			"packages/plugin",
 			"packages/plugin-cli",
-			"packages/plugin-ui"
+			"packages/plugin-ui",
+			"services/plugin-runtime"
 		],
 		"catalog": {
 			"loro-crdt": "1.13.7"

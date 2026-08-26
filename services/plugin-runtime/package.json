@@ -1,0 +1,23 @@
+{
+	"name": "@macro/plugin-runtime",
+	"version": "0.0.1",
+	"type": "module",
+	"description": "Local in-process executor for compiled Macro Plugin server bundles. Trusted local/dev code only; Bun is not a security sandbox.",
+	"bin": {
+		"macro-plugin-runtime": "./src/cli.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@macro/plugin": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.5"
+	},
+	"files": [
+		"src",
+		"README.md"
+	]
+}
