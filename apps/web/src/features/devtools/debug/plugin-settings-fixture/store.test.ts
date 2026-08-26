@@ -3,8 +3,8 @@ import {
   createPluginSettingsStore,
   MOCK_INSTALLATION,
   MOCK_RUNS,
-  type PluginInstallationMock,
 } from './store';
+import type { PluginInstallationMock } from './types';
 
 describe('createPluginSettingsStore', () => {
   it('defaults to the mock installation and run history', () => {

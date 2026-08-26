@@ -41,7 +41,8 @@ export default function PluginSettingsFixture(props: {
       <header class="space-y-1">
         <h1 class="text-base font-medium">Plugin settings</h1>
         <p class="text-ink-secondary text-xs">
-          Dev fixture backed by mock data; not wired to the plugin backend yet.
+          Dev fixture for the plugin settings surface. Store is injected: mock
+          by default, HTTP-backed when VITE_PLUGIN_SETTINGS_URL is set.
         </p>
       </header>
 

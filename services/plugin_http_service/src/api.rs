@@ -50,7 +50,6 @@ impl<R> Clone for PluginHttpState<R> {
     }
 }
 
-/// Build the dev-only plugin HTTP router.
 pub fn plugin_router<R: ServerPluginRuntime + 'static>(state: PluginHttpState<R>) -> Router {
     Router::new()
         .route("/health", get(health_handler))
@@ -62,11 +61,53 @@ pub fn plugin_router<R: ServerPluginRuntime + 'static>(state: PluginHttpState<R>
             "/plugins/settings/handlers/{handler_id}/paused",
             post(set_handler_paused_handler::<R>),
         )
+        .route_layer(axum::middleware::from_fn(cors_middleware))
         .with_state(state)
 }
 
 async fn health_handler() -> &'static str {
     "healthy"
+}
+
+/// Dev-only permissive CORS + preflight handling for the local HTTP surface.
+async fn cors_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{HeaderValue, Method, header};
+    use axum::response::IntoResponse;
+
+    if request.method() == Method::OPTIONS {
+        let mut response = axum::response::Response::new(axum::body::Body::empty());
+        for (name, value) in cors_headers() {
+            response.headers_mut().insert(name, value);
+        }
+        return response;
+    }
+
+    let mut response = next.run(request).await;
+    for (name, value) in cors_headers() {
+        response.headers_mut().insert(name, value);
+    }
+    response
+}
+
+fn cors_headers() -> [(axum::http::HeaderName, axum::http::HeaderValue); 3] {
+    use axum::http::{HeaderName, HeaderValue};
+    [
+        (
+            HeaderName::from_static("access-control-allow-origin"),
+            HeaderValue::from_static("*"),
+        ),
+        (
+            HeaderName::from_static("access-control-allow-methods"),
+            HeaderValue::from_static("GET, POST, OPTIONS"),
+        ),
+        (
+            HeaderName::from_static("access-control-allow-headers"),
+            HeaderValue::from_static("*"),
+        ),
+    ]
 }
 
 /// Request body for POST /plugins/invoke.

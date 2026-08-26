@@ -119,7 +119,15 @@ import { TaskRoute } from './TaskRoute';
 
 /** Dev-only plugin frame demo. The component fails closed outside local/dev. */
 const PluginFrameDemoRoute = lazy(
-  () => import('@app/features/plugins/demo/PluginFrameDemo'),
+  () => import('@app/features/plugins/demo/PluginFrameDemo')
+);
+
+/** Dev-only plugin settings fixture (mock store unless VITE_PLUGIN_SETTINGS_URL is set). */
+const PluginSettingsFixtureRoute = lazy(
+  () =>
+    import(
+      '@app/features/devtools/debug/plugin-settings-fixture/PluginSettingsFixtureRoute'
+    )
 );
 
 /** Syncs login cookie with auth state. Only updates on successful query (not errors/loading). */
@@ -366,6 +374,12 @@ const ROUTES: RouteDefinition[] = [
     // local/dev; this checkpoint has no production plugin routes.
     path: '/dev/plugin-frame',
     component: PluginFrameDemoRoute,
+  },
+  {
+    // Dev-only plugin settings fixture. Mock store by default; pass
+    // VITE_PLUGIN_SETTINGS_URL to point it at the plugin HTTP surface.
+    path: '/dev/plugin-settings',
+    component: PluginSettingsFixtureRoute,
   },
   {
     path: '/team-invite',

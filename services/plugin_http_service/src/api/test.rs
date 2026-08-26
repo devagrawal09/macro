@@ -415,3 +415,52 @@ async fn invoke_appends_a_failed_run_with_an_error_summary() {
     assert_eq!(recorded.outcome, "failed");
     assert_eq!(recorded.error_summary.as_deref(), Some("boom"));
 }
+
+#[tokio::test]
+async fn cors_headers_are_emitted_for_browser_origins() {
+    let router = test_router(completed_outcome());
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .header("Origin", "http://localhost:3000")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok()),
+        Some("*")
+    );
+
+    // Browser preflight for JSON POSTs must short-circuit with CORS headers.
+    let preflight = router
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/plugins/settings/enabled")
+                .header("Origin", "http://localhost:3000")
+                .header("Access-Control-Request-Method", "POST")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(preflight.status(), 200);
+    assert_eq!(
+        preflight
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok()),
+        Some("*")
+    );
+}
