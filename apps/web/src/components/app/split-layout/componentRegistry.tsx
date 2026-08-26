@@ -837,6 +837,23 @@ if (DEV_MODE_ENV) {
   );
 
   registerComponent(
+    'plugin-settings-fixture',
+    withAuth(
+      lazy(
+        () =>
+          import(
+            '@app/features/devtools/debug/plugin-settings-fixture/PluginSettingsFixture'
+          )
+      )
+    )
+  );
+
+  // NOTE (seamus) : putting pixel icons on dev/staging for aidan
+  registerComponent(
+    'pixel-icon',
+    lazy(() => import('@core/internal/PixelArtIconDemo'))
+  );
+  registerComponent(
     'md-parse',
     lazy(
       () =>
