@@ -5,6 +5,7 @@ import { transform } from "@dom-expressions/compiler";
 import type { LoadedEntry, LoadedPlugin } from "./config";
 import { selectedSource } from "./select";
 import { assertBundle, projectPolicy } from "./policy";
+import { assertPathInside } from "./paths";
 function virtual(source: string, resolveDir: string): Plugin {
 	const id = "\0macro-plugin-selected.tsx";
 	return {
@@ -71,8 +72,10 @@ export async function buildEntry(
 	plugin: LoadedPlugin,
 	outputPath: string,
 	solidRoot: string,
+	ownedRoot = path.dirname(outputPath),
 ): Promise<void> {
-	await mkdir(path.dirname(outputPath), { recursive: true });
+	const safeOutputPath = assertPathInside(ownedRoot, outputPath);
+	await mkdir(path.dirname(safeOutputPath), { recursive: true });
 	const output = (await viteBuild({
 		configFile: false,
 		root: path.dirname(plugin.path),
@@ -106,7 +109,7 @@ export async function buildEntry(
 		(item): item is Rollup.OutputChunk => item.type === "chunk",
 	);
 	if (!chunk) throw new Error(`MPC501 Vite emitted no ${entry.target} chunk`);
-	assertBundle(entry.target, chunk.code, outputPath);
+	assertBundle(entry.target, chunk.code, safeOutputPath);
 	if (
 		entry.target === "client" &&
 		!chunk.code.includes("createRoot") &&
@@ -115,12 +118,15 @@ export async function buildEntry(
 		throw new Error(
 			"MPC502 client bundle does not contain the pinned Solid runtime",
 		);
-	await writeFile(outputPath, chunk.code);
+	await writeFile(safeOutputPath, chunk.code);
 	for (const asset of output.output.filter(
 		(item): item is Rollup.OutputAsset => item.type === "asset",
 	))
 		await writeFile(
-			path.join(path.dirname(outputPath), asset.fileName),
+			assertPathInside(
+				ownedRoot,
+				path.resolve(path.dirname(safeOutputPath), asset.fileName),
+			),
 			asset.source,
 		);
 }

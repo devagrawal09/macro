@@ -23,6 +23,21 @@ export interface LoadedPlugin {
 function diagnostic(code: string, message: string): never {
 	throw new Error(`${code} ${message}`);
 }
+
+const ENTRY_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const RESERVED_ENTRY_IDS = new Set(["__proto__", "prototype", "constructor"]);
+function entryId(value: string): string {
+	if (
+		!ENTRY_ID.test(value) ||
+		value.length > 64 ||
+		RESERVED_ENTRY_IDS.has(value)
+	)
+		diagnostic(
+			"MPC112",
+			"entry id must be a conservative lowercase ASCII slug",
+		);
+	return value;
+}
 function strings(value: unknown, field: string): string[] {
 	if (value === undefined) return [];
 	if (!Array.isArray(value) || value.some((x) => typeof x !== "string"))
@@ -73,9 +88,10 @@ export async function loadPlugin(input: string): Promise<LoadedPlugin> {
 			!["project.page", "entity.side_panel"].includes(item.kind)
 		)
 			diagnostic("MPC107", `invalid client contribution at index ${index}`);
-		if (seen.has(item.id))
-			diagnostic("MPC108", `duplicate entry id ${item.id}`);
-		seen.add(item.id);
+		const canonicalId = entryId(item.id).toLowerCase();
+		if (seen.has(canonicalId))
+			diagnostic("MPC108", `canonical entry id collision ${item.id}`);
+		seen.add(canonicalId);
 		const entityTypes =
 			item.kind === "entity.side_panel"
 				? strings((item as EntitySidePanel).entityTypes, "entityTypes")
@@ -106,9 +122,10 @@ export async function loadPlugin(input: string): Promise<LoadedPlugin> {
 			typeof item.handle !== "function"
 		)
 			diagnostic("MPC110", `invalid best-effort handler at index ${index}`);
-		if (seen.has(item.id))
-			diagnostic("MPC108", `duplicate entry id ${item.id}`);
-		seen.add(item.id);
+		const canonicalId = entryId(item.id).toLowerCase();
+		if (seen.has(canonicalId))
+			diagnostic("MPC108", `canonical entry id collision ${item.id}`);
+		seen.add(canonicalId);
 		entries.push({
 			id: item.id,
 			target: "server",
@@ -127,10 +144,4 @@ export async function loadPlugin(input: string): Promise<LoadedPlugin> {
 	if (!entries.length)
 		diagnostic("MPC111", "plugin must declare an entrypoint");
 	return { definition: value, path: file, entries };
-}
-export function virtualEntry(plugin: LoadedPlugin, entry: LoadedEntry): string {
-	const spec = JSON.stringify(pathToFileURL(plugin.path).href);
-	return entry.target === "client"
-		? `import plugin from ${spec};import {render as __solidRender} from "@solidjs/web";const __selected=plugin.contributions[${entry.index}].render;export function mount(root,context){return __solidRender(()=>__selected(context),root)}`
-		: `import plugin from ${spec};const __selected=plugin.handlers[${entry.index}].handle;export default __selected;export {__selected as handle}`;
 }

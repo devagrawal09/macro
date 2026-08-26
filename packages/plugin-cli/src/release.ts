@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import type { LoadedPlugin } from "./config";
 import type { SolidProvenance } from "./solid";
 import { buildEntry } from "./build";
+import { resolveOutputPath } from "./paths";
 const CLI_VERSION = "0.0.1",
 	SDK_VERSION = "0.0.1";
 function canonical(value: unknown): string {
@@ -28,17 +29,23 @@ export async function buildRelease(
 	solid: SolidProvenance,
 	repoRoot: string,
 ): Promise<void> {
-	await rm(outDir, { recursive: true, force: true });
-	await mkdir(outDir, { recursive: true });
-	const entrypoints: Record<string, unknown> = {},
+	const outputRoot = path.resolve(outDir);
+	if (outputRoot === path.parse(outputRoot).root)
+		throw new Error(
+			"MPC600 refusing to use the filesystem root as an output directory",
+		);
+	await rm(outputRoot, { recursive: true, force: true });
+	await mkdir(outputRoot, { recursive: true });
+	const entrypoints: Record<string, unknown> = Object.create(null),
 		slots: unknown[] = [],
 		events: unknown[] = [];
 	for (const entry of [...plugin.entries].sort((a, b) =>
 		a.id.localeCompare(b.id),
 	)) {
 		const rel = `${entry.target}/${entry.id}/index.js`;
-		await buildEntry(entry, plugin, path.join(outDir, rel), solidRoot);
-		const bytes = await readFile(path.join(outDir, rel));
+		const entryPath = resolveOutputPath(outputRoot, rel);
+		await buildEntry(entry, plugin, entryPath, solidRoot, outputRoot);
+		const bytes = await readFile(entryPath);
 		entrypoints[entry.id] = {
 			target: entry.target,
 			file: rel,
@@ -72,7 +79,10 @@ export async function buildRelease(
 		slots,
 		events,
 	};
-	await writeFile(path.join(outDir, "manifest.json"), canonical(manifest));
+	await writeFile(
+		resolveOutputPath(outputRoot, "manifest.json"),
+		canonical(manifest),
+	);
 	const lock = await readFile(path.join(repoRoot, "bun.lock"));
 	const source = await readFile(plugin.path);
 	const provenance = {
@@ -100,14 +110,18 @@ export async function buildRelease(
 			],
 		},
 	};
-	await writeFile(path.join(outDir, "provenance.json"), canonical(provenance));
-	const files: Record<string, { bytes: number; digest: string }> = {};
-	for (const rel of await filesUnder(outDir)) {
-		const bytes = await readFile(path.join(outDir, rel));
+	await writeFile(
+		resolveOutputPath(outputRoot, "provenance.json"),
+		canonical(provenance),
+	);
+	const files: Record<string, { bytes: number; digest: string }> =
+		Object.create(null);
+	for (const rel of await filesUnder(outputRoot)) {
+		const bytes = await readFile(resolveOutputPath(outputRoot, rel));
 		files[rel] = { bytes: bytes.byteLength, digest: `sha256-${sha(bytes)}` };
 	}
 	await writeFile(
-		path.join(outDir, "integrity.json"),
+		resolveOutputPath(outputRoot, "integrity.json"),
 		canonical({ schemaVersion: 1, algorithm: "sha256", files }),
 	);
 }

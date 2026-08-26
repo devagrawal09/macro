@@ -34,6 +34,9 @@ test("builds exact full-stack manifest with standalone target isolation", async 
 		const manifest = JSON.parse(
 			await readFile(path.join(root, "manifest.json"), "utf8"),
 		);
+		const integrity = JSON.parse(
+			await readFile(path.join(root, "integrity.json"), "utf8"),
+		);
 		expect(manifest).toEqual({
 			apiVersion: "1",
 			plugin: {
@@ -78,6 +81,23 @@ test("builds exact full-stack manifest with standalone target isolation", async 
 				},
 			],
 		});
+		const releaseFiles = [
+			...Object.values(manifest.entrypoints).map(
+				(entry) => (entry as { file: string }).file,
+			),
+			"manifest.json",
+			"provenance.json",
+		].sort();
+		expect(Object.keys(integrity.files).sort()).toEqual(releaseFiles);
+		for (const entry of Object.values(manifest.entrypoints) as Array<{
+			file: string;
+			integrity: string;
+		}>) {
+			const bytes = await readFile(path.join(root, entry.file));
+			expect(`sha256-${createHash("sha256").update(bytes).digest("hex")}`).toBe(
+				entry.integrity,
+			);
+		}
 		const client = await readFile(
 				path.join(root, "client/tasks/index.js"),
 				"utf8",
