@@ -209,7 +209,7 @@ pub struct ServerPluginInvocation {
 /// Bounded failure detail from one server-plugin invocation.
 ///
 /// Mirrors the executor's `InvocationError`; never carries event payloads or logs.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginInvocationError {
     /// Machine-readable failure code (`handler_error`, `timeout`, ...).
@@ -221,7 +221,7 @@ pub struct PluginInvocationError {
 /// Terminal outcome of one server-plugin invocation attempt.
 ///
 /// Mirrors the plugin-runtime executor's `InvocationOutcome`.
-#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
