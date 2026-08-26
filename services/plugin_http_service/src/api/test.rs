@@ -25,7 +25,6 @@ fn valid_manifest() -> Value {
                 "integrity": "sha256-client"
             }
         },
-        "customEvents": [{ "name": "task.approved", "direction": "both" }],
     })
 }
 
@@ -135,7 +134,7 @@ async fn admit_returns_the_admitted_manifest() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["pluginId"], "com.macro.task-inbox");
     assert_eq!(body["version"], "1.0.0");
-    assert_eq!(body["events"]["task.approved"]["direction"], "both");
+    assert!(body["entrypoints"]["inbox"].is_object());
 }
 
 #[tokio::test]
