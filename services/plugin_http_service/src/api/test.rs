@@ -129,7 +129,8 @@ async fn invoke_returns_the_structured_outcome() {
         post_json(test_router(completed_outcome()), "/plugins/invoke", request).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "completed");
-    assert_eq!(body["run_id"], "run-1");
+    // Outcome fields serialize camelCase to mirror the executor's report.
+    assert_eq!(body["runId"], "run-1");
 }
 
 #[tokio::test]
