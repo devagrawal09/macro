@@ -277,6 +277,105 @@ pub struct ContributionRecord {
     pub entity_types: Vec<String>,
 }
 
+/// Counterparts allowed to emit and observe a plugin-declared custom event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventDirection {
+    /// Only client surfaces may emit and observe the event.
+    Client,
+    /// Only the server counterpart may emit and observe the event.
+    Server,
+    /// Both counterparts may emit and observe the event.
+    Both,
+}
+
+impl fmt::Display for EventDirection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Client => "client",
+            Self::Server => "server",
+            Self::Both => "both",
+        })
+    }
+}
+
+/// One validated custom event admitted from a plugin compiler manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginEvent {
+    /// Validated event name.
+    name: String,
+    /// Counterparts allowed to emit and observe this event.
+    direction: EventDirection,
+}
+
+impl PluginEvent {
+    /// Validate and admit one declared event name with its flow direction.
+    pub fn parse(
+        name: impl Into<String>,
+        direction: EventDirection,
+    ) -> Result<Self, PluginPlatformError> {
+        let name = name.into();
+        let valid_edge = |b: char| b.is_ascii_lowercase() || b.is_ascii_digit();
+        let valid = !name.is_empty()
+            && name.len() <= 128
+            && name.starts_with(valid_edge)
+            && name.ends_with(valid_edge)
+            && name.bytes().all(|b| {
+                b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+            });
+        if !valid {
+            return Err(PluginPlatformError::InvalidArtifact(format!(
+                "event name {name:?} must be 1-128 lowercase letters, digits, '.', '_', or '-' with alphanumeric edges"
+            )));
+        }
+        Ok(Self { name, direction })
+    }
+
+    /// Return the validated event name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Return the allowed flow direction.
+    pub const fn direction(&self) -> EventDirection {
+        self.direction
+    }
+}
+
+impl<'de> Deserialize<'de> for PluginEvent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RawEvent {
+            name: String,
+            #[serde(default = "default_event_direction")]
+            direction: EventDirection,
+        }
+        let raw = RawEvent::deserialize(deserializer)?;
+        Self::parse(raw.name, raw.direction).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Admit compiler-declared custom events as validated domain events keyed by name.
+///
+/// Rejects invalid names and duplicate declarations. Admission performs only
+/// domain consistency checks; the compiler owns source graph validation.
+pub fn admit_custom_events(
+    events: impl IntoIterator<Item = (String, EventDirection)>,
+) -> Result<BTreeMap<String, PluginEvent>, PluginPlatformError> {
+    let mut admitted = BTreeMap::new();
+    for (name, direction) in events {
+        let event = PluginEvent::parse(name.clone(), direction)?;
+        if admitted.insert(event.name().to_owned(), event).is_some() {
+            return Err(PluginPlatformError::InvalidArtifact(format!(
+                "duplicate custom event declaration {:?}",
+                name
+            )));
+        }
+    }
+    Ok(admitted)
+}
+
 /// The small typed projection of a canonical compiler manifest needed by the core.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,6 +393,8 @@ pub struct PluginManifest {
     pub entrypoints: BTreeMap<String, EntrypointRecord>,
     /// Static client contribution records.
     pub contributions: Vec<ContributionRecord>,
+    /// Admitted custom events keyed by validated event name.
+    pub events: BTreeMap<String, PluginEvent>,
 }
 
 #[derive(Deserialize)]
@@ -304,6 +405,8 @@ struct CompilerManifest {
     entrypoints: BTreeMap<String, CompilerEntrypoint>,
     #[serde(default)]
     slots: Vec<CompilerSlot>,
+    #[serde(default, rename = "customEvents")]
+    custom_events: Vec<CompilerCustomEvent>,
 }
 #[derive(Deserialize)]
 struct CompilerPlugin {
@@ -326,6 +429,21 @@ struct CompilerSlot {
     slot: ClientSlot,
     #[serde(default)]
     entity_types: Vec<String>,
+}
+/// One plugin-declared custom event in the raw compiler manifest shape.
+///
+/// Distinct from the top-level `events` subscription records the compiler
+/// emits for server entrypoints.
+#[derive(Deserialize)]
+struct CompilerCustomEvent {
+    name: String,
+    #[serde(default = "default_event_direction")]
+    direction: EventDirection,
+}
+
+/// Default flow direction when a declared event omits one.
+fn default_event_direction() -> EventDirection {
+    EventDirection::Both
 }
 
 impl PluginManifest {
@@ -389,6 +507,12 @@ impl PluginManifest {
                 entity_types: slot.entity_types,
             });
         }
+        let events = admit_custom_events(
+            compiler
+                .custom_events
+                .into_iter()
+                .map(|event| (event.name, event.direction)),
+        )?;
         Ok(Self {
             raw,
             api_version: compiler.api_version,
@@ -397,6 +521,7 @@ impl PluginManifest {
             version,
             entrypoints,
             contributions,
+            events,
         })
     }
 
@@ -628,3 +753,6 @@ pub struct InstallationContributions {
     /// Static client contributions from that release.
     pub contributions: Vec<ContributionRecord>,
 }
+
+#[cfg(test)]
+mod test;
