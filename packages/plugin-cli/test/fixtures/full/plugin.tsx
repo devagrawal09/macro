@@ -39,5 +39,4 @@ export default definePlugin({
 			},
 		}),
 	],
-	customEvents: [{ name: "task.flagged", direction: "client" }],
 });

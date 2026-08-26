@@ -158,129 +158,6 @@ export function onBestEffortEvent<
 	return { kind: "best_effort_event", ...value };
 }
 
-/** Counterparts allowed to emit and observe a plugin-declared custom event. */
-export type PluginCustomEventDirection = "client" | "server" | "both";
-
-/** One plugin-declared custom event admitted through the compiler manifest. */
-export interface PluginCustomEvent {
-	readonly name: string;
-	/**
-	 * Counterparts allowed to emit and observe this event.
-	 *
-	 * Defaults to `"both"` when omitted, matching the platform admission default.
-	 */
-	readonly direction?: PluginCustomEventDirection;
-}
-
-/** Protocol version carried by plugin custom-event port messages. */
-export const PLUGIN_CUSTOM_EVENT_VERSION = 1;
-
-/** Plugin <-> host port message type delivering one declared custom event emission. */
-export const PLUGIN_CUSTOM_EVENT_TYPE = "macro.plugin.custom-event.v1";
-
-/** One plugin-declared custom event routed over the standard MessagePort channel. */
-export interface PluginCustomEventMessage<P = unknown> {
-	readonly version: typeof PLUGIN_CUSTOM_EVENT_VERSION;
-	readonly type: typeof PLUGIN_CUSTOM_EVENT_TYPE;
-	readonly name: string;
-	readonly payload: P;
-}
-
-const CUSTOM_EVENT_NAME = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
-
-function assertCustomEventName(name: string): string {
-	if (
-		typeof name !== "string" ||
-		name.length > 128 ||
-		!CUSTOM_EVENT_NAME.test(name)
-	)
-		throw new TypeError(
-			`invalid custom event name ${String(name)}: expected 1-128 lowercase letters, digits, '.', '_', or '-' with alphanumeric edges`,
-		);
-	return name;
-}
-
-/** Build one host-routed custom-event port message without sending it. */
-export function createCustomEventMessage<P>(
-	name: string,
-	payload: P,
-): PluginCustomEventMessage<P> {
-	return {
-		version: PLUGIN_CUSTOM_EVENT_VERSION,
-		type: PLUGIN_CUSTOM_EVENT_TYPE,
-		name: assertCustomEventName(name),
-		payload,
-	};
-}
-
-/** Narrow an unknown port message to a declared custom-event emission. */
-export function isCustomEventMessage<P = unknown>(
-	value: unknown,
-): value is PluginCustomEventMessage<P> {
-	if (typeof value !== "object" || value === null) return false;
-	const record = value as Record<string, unknown>;
-	return (
-		record.version === PLUGIN_CUSTOM_EVENT_VERSION &&
-		record.type === PLUGIN_CUSTOM_EVENT_TYPE &&
-		typeof record.name === "string" &&
-		"payload" in record
-	);
-}
-
-/** Minimal send surface used by {@link emitCustomEvent}; satisfied by MessagePort and test doubles. */
-export interface CustomEventSink {
-	readonly postMessage: (message: unknown) => void;
-}
-
-/** Emit one declared custom event toward the host over the standard port channel. */
-export function emitCustomEvent<P>(
-	sink: CustomEventSink,
-	name: string,
-	payload: P,
-): void {
-	sink.postMessage(createCustomEventMessage(name, payload));
-}
-
-/** Listener invoked with one observed custom event payload. */
-export type CustomEventListener<P> = (payload: P) => void;
-
-/** Minimal receive surface used by {@link onCustomEvent}; satisfied by MessagePort and test doubles. */
-export interface CustomEventSource {
-	addEventListener: (
-		type: string,
-		listener: (event: { readonly data?: unknown }) => void,
-	) => void;
-	removeEventListener: (
-		type: string,
-		listener: (event: { readonly data?: unknown }) => void,
-	) => void;
-}
-
-/**
- * Observe one declared custom event by name on a port-style source.
- * Host-side routing is future wiring; this only defines the message contract.
- * Returns an idempotent unsubscribe function.
- */
-export function onCustomEvent<P>(
-	source: CustomEventSource,
-	name: string,
-	listener: CustomEventListener<P>,
-): () => void {
-	assertCustomEventName(name);
-	const handler = (event: { readonly data?: unknown }) => {
-		const message = event.data;
-		if (isCustomEventMessage<P>(message) && message.name === name)
-			listener(message.payload);
-	};
-	source.addEventListener(PLUGIN_CUSTOM_EVENT_TYPE, handler);
-	let unsubscribed = false;
-	return () => {
-		if (unsubscribed) return;
-		unsubscribed = true;
-		source.removeEventListener(PLUGIN_CUSTOM_EVENT_TYPE, handler);
-	};
-}
-
 /** Static definition owned by one default-exported definePlugin call. */
 export interface PluginDefinition {
 	readonly apiVersion: "1";
@@ -290,7 +167,6 @@ export interface PluginDefinition {
 	readonly capabilities?: PluginCapabilities;
 	readonly contributions?: readonly (ProjectPage<any> | EntitySidePanel<any>)[];
 	readonly handlers?: readonly BestEffortEvent<any, any>[];
-	readonly customEvents?: readonly PluginCustomEvent[];
 }
 
 /** Define a Macro Plugin. Local check/build executes the trusted definition to enumerate descriptors, but does not invoke entry callbacks. */

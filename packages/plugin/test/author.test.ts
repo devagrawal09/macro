@@ -40,18 +40,3 @@ test("authoring helpers preserve plugin declarations", () => {
 	expect(plugin.handlers?.[0]?.kind).toBe("best_effort_event");
 });
 
-test("definePlugin preserves custom event declarations", () => {
-	const plugin = definePlugin({
-		apiVersion: "1",
-		id: "com.macro.events",
-		version: "0.1.0",
-		customEvents: [
-			{ name: "task.flagged" },
-			{ name: "task.reviewed", direction: "server" },
-		],
-	});
-	expect(plugin.customEvents).toEqual([
-		{ name: "task.flagged" },
-		{ name: "task.reviewed", direction: "server" },
-	]);
-});
