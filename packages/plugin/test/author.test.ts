@@ -8,7 +8,7 @@ import {
 } from "../src";
 
 test("authoring helpers preserve plugin declarations", () => {
-	const caps = capabilities("tasks.read", "tasks.write");
+	const caps = capabilities("tasks.read", "tasks.create");
 	const plugin = definePlugin({
 		apiVersion: "1",
 		id: "com.macro.test",

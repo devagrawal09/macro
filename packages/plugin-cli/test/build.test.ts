@@ -44,13 +44,13 @@ test("builds exact full-stack manifest with standalone target isolation", async 
 				name: "Task Tools",
 				version: "0.1.0",
 			},
-			capabilities: ["tasks.read", "tasks.write"],
+			capabilities: ["tasks.create", "tasks.read", "tasks.rename"],
 			entrypoints: {
 				"task-created": {
 					target: "server",
 					file: "server/task-created/index.js",
 					integrity: expect.stringMatching(/^sha256-[a-f0-9]{64}$/),
-					capabilities: ["tasks.read", "tasks.write"],
+					capabilities: ["tasks.read", "tasks.rename"],
 				},
 				"task-details": {
 					target: "client",
@@ -62,7 +62,7 @@ test("builds exact full-stack manifest with standalone target isolation", async 
 					target: "client",
 					file: "client/tasks/index.js",
 					integrity: expect.stringMatching(/^sha256-[a-f0-9]{64}$/),
-					capabilities: ["tasks.read", "tasks.write"],
+					capabilities: ["tasks.create", "tasks.read"],
 				},
 			},
 			slots: [

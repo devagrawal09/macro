@@ -4,7 +4,7 @@ import {
 	onBestEffortEvent,
 	projectPage,
 } from "@macro/plugin";
-const caps = capabilities("tasks.read", "tasks.write");
+const caps = capabilities("tasks.read", "tasks.create");
 const plugin = definePlugin({
 	apiVersion: "1",
 	id: "com.macro.types",
@@ -15,7 +15,7 @@ const plugin = definePlugin({
 			id: "page",
 			capabilities: caps,
 			render: (context) => {
-				const exact: readonly ["tasks.read", "tasks.write"] =
+				const exact: readonly ["tasks.read", "tasks.create"] =
 					context.capabilities;
 				return exact;
 			},

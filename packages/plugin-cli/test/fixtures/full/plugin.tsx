@@ -18,7 +18,7 @@ export default definePlugin({
 	contributions: [
 		projectPage({
 			id: "tasks",
-			capabilities: capabilities("tasks.write"),
+			capabilities: capabilities("tasks.create"),
 			render: (context) => (
 				<TaskPage projectId={`${heading}:${context.projectId}`} />
 			),
@@ -33,7 +33,7 @@ export default definePlugin({
 		onBestEffortEvent<{ id: string }>({
 			id: "task-created",
 			event: "task.created",
-			capabilities: capabilities("tasks.write"),
+			capabilities: capabilities("tasks.rename"),
 			handle: async (event, context) => {
 				await processTask(event.id, context.projectId);
 			},
