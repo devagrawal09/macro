@@ -1,0 +1,9 @@
+{
+	"name": "@macro/example-plugin-task-inbox",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"check": "tsc --noEmit",
+		"test": "bun test tests"
+	}
+}

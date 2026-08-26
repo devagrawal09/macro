@@ -1,6 +1,9 @@
 /** Typed authoring primitives for one Macro Plugin definition. */
 
-/** A Macro capability requested by a plugin entrypoint. */
+/** A Macro capability requested by a plugin entrypoint.
+ *
+ * Capability names describe intended access. Runtime enforcement is future host work.
+ */
 export type PluginCapability = string;
 /** An immutable list of requested Macro capabilities. */
 export type PluginCapabilities = readonly PluginCapability[];
@@ -12,11 +15,73 @@ export function capabilities<const C extends readonly PluginCapability[]>(
 	return values;
 }
 
+/** A project supplied by the Macro host. */
+export interface PluginProjectContext {
+	readonly id: string;
+	readonly name?: string;
+}
+
+/** Canonical task data returned by the host facade. */
+export interface PluginTask {
+	readonly id: string;
+	readonly projectId: string;
+	readonly name: string;
+}
+
+/** A live, best-effort task event supplied by the host facade. */
+export interface PluginTaskEvent {
+	readonly type: string;
+	readonly taskId?: string;
+	readonly projectId?: string;
+}
+
+/** Runtime-neutral task operations supplied by the Macro host. */
+export interface PluginTaskOperations {
+	list(input: {
+		readonly projectId: string;
+		readonly signal?: AbortSignal;
+	}): Promise<readonly PluginTask[]>;
+	read(
+		taskId: string,
+		input?: { readonly signal?: AbortSignal },
+	): Promise<PluginTask>;
+	create(input: {
+		readonly projectId: string;
+		readonly name: string;
+		readonly shareWithTeam: boolean;
+		readonly signal?: AbortSignal;
+	}): Promise<PluginTask>;
+	rename(
+		taskId: string,
+		name: string,
+		input?: { readonly signal?: AbortSignal },
+	): Promise<PluginTask>;
+	subscribe(input: {
+		readonly projectId: string;
+		readonly signal?: AbortSignal;
+	}): AsyncIterable<PluginTaskEvent>;
+}
+
+/** Runtime-neutral Macro operations supplied to plugin entrypoints. */
+export interface PluginMacroFacade {
+	readonly tasks: PluginTaskOperations;
+}
+
+/** Structured logger supplied to server reactions. */
+export interface PluginLogger {
+	info(message: string, fields?: Readonly<Record<string, unknown>>): void;
+	error(message: string, fields?: Readonly<Record<string, unknown>>): void;
+}
+
 /** Context supplied when Macro mounts a client contribution. */
 export interface PluginClientContext<
 	C extends PluginCapabilities = PluginCapabilities,
 > {
+	/** @deprecated Prefer `project.id`; kept during the host contract transition. */
 	readonly projectId: string;
+	readonly project: PluginProjectContext;
+	readonly macro: PluginMacroFacade;
+	readonly signal: AbortSignal;
 	readonly entity?: { readonly type: string; readonly id: string };
 	readonly capabilities: C;
 }
@@ -25,8 +90,13 @@ export interface PluginClientContext<
 export interface PluginServerContext<
 	C extends PluginCapabilities = PluginCapabilities,
 > {
+	/** @deprecated Prefer `project.id`; kept during the host contract transition. */
 	readonly projectId: string;
+	readonly project: PluginProjectContext;
 	readonly installationId: string;
+	readonly macro: PluginMacroFacade;
+	readonly signal: AbortSignal;
+	readonly log: PluginLogger;
 	readonly capabilities: C;
 }
 

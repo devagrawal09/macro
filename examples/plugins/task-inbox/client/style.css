@@ -1,0 +1,67 @@
+.task-inbox {
+	box-sizing: border-box;
+	max-width: 46rem;
+	margin: 0 auto;
+	padding: 1.5rem;
+	color: #202124;
+	font:
+		0.95rem / 1.5 system-ui,
+		sans-serif;
+}
+.task-inbox h1 {
+	margin: 0;
+	font-size: 1.6rem;
+}
+.task-inbox header p {
+	margin-top: 0.25rem;
+	color: #5f6368;
+}
+.task-inbox__create {
+	margin: 1.5rem 0;
+}
+.task-inbox__create label {
+	display: block;
+	margin-bottom: 0.35rem;
+	font-weight: 600;
+}
+.task-inbox__create div {
+	display: flex;
+	gap: 0.5rem;
+}
+.task-inbox input {
+	min-width: 0;
+	flex: 1;
+	padding: 0.6rem;
+	border: 1px solid #9aa0a6;
+	border-radius: 0.35rem;
+	font: inherit;
+}
+.task-inbox button {
+	padding: 0.6rem 1rem;
+	border: 1px solid #1a73e8;
+	border-radius: 0.35rem;
+	color: white;
+	background: #1a73e8;
+	font: inherit;
+}
+.task-inbox button:disabled {
+	opacity: 0.6;
+}
+.task-inbox [role="alert"] {
+	color: #b3261e;
+}
+.task-inbox ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.task-inbox li {
+	padding: 0.7rem 0;
+	border-bottom: 1px solid #e8eaed;
+}
+.task-inbox__empty {
+	padding: 1rem;
+	text-align: center;
+	color: #5f6368;
+	background: #f8f9fa;
+}
