@@ -222,7 +222,11 @@ pub struct PluginInvocationError {
 ///
 /// Mirrors the plugin-runtime executor's `InvocationOutcome`.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerPluginOutcome {
     /// The handler ran to completion inside the platform deadline.
     Completed {

@@ -65,6 +65,19 @@ fn write_bundle(dir: &std::path::Path, name: &str, source: &str) -> PathBuf {
     path
 }
 
+/// Resolves the CLI path for real-CLI tests. `cargo test` runs from the crate
+/// directory, so the repo-root default must be anchored to the manifest;
+/// an explicit `PLUGIN_RUNTIME_CLI_PATH` override always wins.
+fn test_cli_path() -> PathBuf {
+    super::PluginRuntimeCliPath::new()
+        .and_then(|value| value.value().map(std::path::PathBuf::from))
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../")
+                .join(DEFAULT_CLI_PATH)
+        })
+}
+
 async fn real_runner() -> Option<BunServerPluginRuntime> {
     match tokio::process::Command::new(DEFAULT_BUN_BIN)
         .arg("--version")
@@ -77,13 +90,16 @@ async fn real_runner() -> Option<BunServerPluginRuntime> {
             return None;
         }
     }
-    match BunServerPluginRuntime::from_env() {
-        Ok(runner) => Some(runner),
-        Err(error) => {
-            eprintln!("skipping: {error}");
-            None
-        }
-    }
+    let cli_path = test_cli_path();
+    assert!(
+        cli_path.is_file(),
+        "plugin-runtime CLI not found at {:?}; real-CLI coverage must not silently skip",
+        cli_path.display()
+    );
+    let bun_binary = super::PluginRuntimeBunBin::new()
+        .and_then(|value| value.value().map(str::to_string))
+        .unwrap_or_else(|| DEFAULT_BUN_BIN.to_string());
+    Some(BunServerPluginRuntime::new(bun_binary, cli_path))
 }
 
 #[tokio::test]
