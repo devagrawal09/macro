@@ -106,6 +106,7 @@ import {
   createEffect,
   createSignal,
   type JSX,
+  lazy,
   on,
   onCleanup,
   onMount,
@@ -115,6 +116,11 @@ import {
 } from 'solid-js';
 import { BasePathComponent } from './BasePath';
 import { TaskRoute } from './TaskRoute';
+
+/** Dev-only plugin frame demo. The component fails closed outside local/dev. */
+const PluginFrameDemoRoute = lazy(
+  () => import('@app/features/plugins/demo/PluginFrameDemo'),
+);
 
 /** Syncs login cookie with auth state. Only updates on successful query (not errors/loading). */
 function useSyncLoginCookie() {
@@ -354,6 +360,12 @@ const ROUTES: RouteDefinition[] = [
     // Preserve the query (?next deep links) when forwarding to /onboarding.
     path: '/setup',
     component: SetupRoute,
+  },
+  {
+    // Dev-only PluginFrame demo. The component itself fails closed outside
+    // local/dev; this checkpoint has no production plugin routes.
+    path: '/dev/plugin-frame',
+    component: PluginFrameDemoRoute,
   },
   {
     path: '/team-invite',
