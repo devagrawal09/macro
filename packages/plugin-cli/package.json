@@ -15,7 +15,6 @@
 		"@dom-expressions/compiler": "0.50.0-next.43",
 		"@dom-expressions/runtime": "0.50.0-next.43",
 		"@macro/plugin": "workspace:*",
-		"esbuild": "0.28.1",
 		"typescript": "5.9.3",
 		"vite": "7.3.1"
 	},

@@ -99,7 +99,7 @@ export interface PluginDefinition {
 	readonly handlers?: readonly BestEffortEvent<any, any>[];
 }
 
-/** Define a Macro Plugin. The CLI parses this call statically and never executes it. */
+/** Define a Macro Plugin. Local check/build executes the trusted definition to enumerate descriptors, but does not invoke entry callbacks. */
 export function definePlugin<const P extends PluginDefinition>(
 	definition: P,
 ): P {
