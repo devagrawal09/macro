@@ -158,6 +158,20 @@ export function onBestEffortEvent<
 	return { kind: "best_effort_event", ...value };
 }
 
+/** Counterparts allowed to emit and observe a plugin-declared custom event. */
+export type PluginCustomEventDirection = "client" | "server" | "both";
+
+/** One plugin-declared custom event admitted through the compiler manifest. */
+export interface PluginCustomEvent {
+	readonly name: string;
+	/**
+	 * Counterparts allowed to emit and observe this event.
+	 *
+	 * Defaults to `"both"` when omitted, matching the platform admission default.
+	 */
+	readonly direction?: PluginCustomEventDirection;
+}
+
 /** Static definition owned by one default-exported definePlugin call. */
 export interface PluginDefinition {
 	readonly apiVersion: "1";
@@ -167,6 +181,7 @@ export interface PluginDefinition {
 	readonly capabilities?: PluginCapabilities;
 	readonly contributions?: readonly (ProjectPage<any> | EntitySidePanel<any>)[];
 	readonly handlers?: readonly BestEffortEvent<any, any>[];
+	readonly customEvents?: readonly PluginCustomEvent[];
 }
 
 /** Define a Macro Plugin. Local check/build executes the trusted definition to enumerate descriptors, but does not invoke entry callbacks. */

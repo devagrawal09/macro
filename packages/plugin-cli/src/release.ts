@@ -38,7 +38,13 @@ export async function buildRelease(
 	await mkdir(outputRoot, { recursive: true });
 	const entrypoints: Record<string, unknown> = Object.create(null),
 		slots: unknown[] = [],
-		events: unknown[] = [];
+		events: unknown[] = [],
+		customEvents: unknown[] = [...(plugin.definition.customEvents ?? [])]
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.map((event) => ({
+				name: event.name,
+				direction: event.direction ?? "both",
+			}));
 	for (const entry of [...plugin.entries].sort((a, b) =>
 		a.id.localeCompare(b.id),
 	)) {
@@ -78,6 +84,7 @@ export async function buildRelease(
 		entrypoints,
 		slots,
 		events,
+		customEvents,
 	};
 	await writeFile(
 		resolveOutputPath(outputRoot, "manifest.json"),

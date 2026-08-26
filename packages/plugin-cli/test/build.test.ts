@@ -80,6 +80,7 @@ test("builds exact full-stack manifest with standalone target isolation", async 
 					delivery: "best-effort",
 				},
 			],
+			customEvents: [{ name: "task.flagged", direction: "client" }],
 		});
 		const releaseFiles = [
 			...Object.values(manifest.entrypoints).map(
@@ -134,6 +135,10 @@ test("clean rebuilds are byte deterministic", async () => {
 		await buildRelease(plugin, a, solid.root, solid.provenance, repo);
 		await buildRelease(plugin, b, solid.root, solid.provenance, repo);
 		expect(await tree(a)).toEqual(await tree(b));
+		expect(
+			JSON.parse(await readFile(path.join(a, "manifest.json"), "utf8"))
+				.customEvents,
+		).toEqual([]);
 	} finally {
 		await rm(a, { recursive: true, force: true });
 		await rm(b, { recursive: true, force: true });
