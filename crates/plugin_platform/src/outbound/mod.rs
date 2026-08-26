@@ -1,5 +1,6 @@
 //! Replaceable outbound adapters for the Plugin Platform core.
 
+pub mod bun_runtime;
 pub mod in_memory;
 
 #[cfg(feature = "postgres")]

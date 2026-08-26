@@ -186,3 +186,90 @@ pub trait PluginPlatformUseCases: Send + Sync {
         required: Capability,
     ) -> Result<(), PluginPlatformError>;
 }
+
+/// One admitted server-plugin invocation handed to the runtime port.
+///
+/// This is a plain hand-off record: the runtime decides nothing about policy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerPluginInvocation {
+    /// Path to the compiled server entry bundle (`.js`/`.cjs`/`.mjs`).
+    pub bundle_path: std::path::PathBuf,
+    /// Declared event name being delivered.
+    pub event_type: String,
+    /// Event payload passed verbatim to the handler.
+    pub event: serde_json::Value,
+    /// Project scope of the installation that owns this invocation.
+    pub project_id: String,
+    /// Installation whose release is running.
+    pub installation_id: String,
+    /// Capabilities granted to this server entrypoint for this invocation.
+    pub capabilities: Vec<String>,
+}
+
+/// Bounded failure detail from one server-plugin invocation.
+///
+/// Mirrors the executor's `InvocationError`; never carries event payloads or logs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInvocationError {
+    /// Machine-readable failure code (`handler_error`, `timeout`, ...).
+    pub code: String,
+    /// Bounded human-readable failure message.
+    pub message: String,
+}
+
+/// Terminal outcome of one server-plugin invocation attempt.
+///
+/// Mirrors the plugin-runtime executor's `InvocationOutcome`.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ServerPluginOutcome {
+    /// The handler ran to completion inside the platform deadline.
+    Completed {
+        /// Executor-assigned run identifier.
+        run_id: String,
+        /// Wall-clock duration of the invocation in milliseconds.
+        duration_ms: u64,
+    },
+    /// The handler raised or failed to load within an admitted run.
+    Failed {
+        /// Executor-assigned run identifier.
+        run_id: String,
+        /// Wall-clock duration of the invocation in milliseconds.
+        duration_ms: u64,
+        /// Bounded failure detail.
+        error: PluginInvocationError,
+    },
+    /// The handler exceeded the platform-fixed deadline.
+    Timeout {
+        /// Executor-assigned run identifier.
+        run_id: String,
+        /// Wall-clock duration of the invocation in milliseconds.
+        duration_ms: u64,
+        /// Bounded failure detail.
+        error: PluginInvocationError,
+    },
+    /// The invocation was not admitted (e.g. declared-event mismatch).
+    Skipped {
+        /// Machine-readable skip reason.
+        reason: String,
+    },
+    /// The invocation was dropped before starting (e.g. concurrency limit).
+    Dropped {
+        /// Machine-readable drop reason.
+        reason: String,
+    },
+}
+
+/// Driven port that runs exactly one admitted server-plugin invocation.
+///
+/// Implementations own process/runtime mechanics only; use-case policy stays
+/// in the domain service.
+#[async_trait]
+pub trait ServerPluginRuntime: Send + Sync {
+    /// Run one handler invocation and report its structured terminal outcome.
+    async fn invoke(
+        &self,
+        invocation: ServerPluginInvocation,
+    ) -> Result<ServerPluginOutcome, PortError>;
+}
