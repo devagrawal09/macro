@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::Path;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -28,16 +29,23 @@ use rootcause::Report;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::settings::PluginSettingsStore;
+use crate::settings::SettingsSnapshot;
+
 /// Shared inbound state for the plugin HTTP surface.
 pub struct PluginHttpState<R> {
     /// Runtime that executes admitted server-plugin invocations.
     pub runtime: Arc<R>,
+    /// In-memory settings state backing the `/plugins/settings*` endpoints.
+    /// `None` keeps those endpoints unavailable (e.g. in focused tests).
+    pub settings: Option<Arc<PluginSettingsStore>>,
 }
 
 impl<R> Clone for PluginHttpState<R> {
     fn clone(&self) -> Self {
         Self {
             runtime: self.runtime.clone(),
+            settings: self.settings.clone(),
         }
     }
 }
@@ -48,6 +56,12 @@ pub fn plugin_router<R: ServerPluginRuntime + 'static>(state: PluginHttpState<R>
         .route("/health", get(health_handler))
         .route("/plugins/admit", post(admit_handler))
         .route("/plugins/invoke", post(invoke_handler::<R>))
+        .route("/plugins/settings", get(settings_handler::<R>))
+        .route("/plugins/settings/enabled", post(set_enabled_handler::<R>))
+        .route(
+            "/plugins/settings/handlers/{handler_id}/paused",
+            post(set_handler_paused_handler::<R>),
+        )
         .with_state(state)
 }
 
@@ -85,6 +99,22 @@ impl ApiError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
             code: "invalid_manifest",
             message,
+        }
+    }
+
+    fn settings_unavailable() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "settings_unavailable",
+            message: "settings state is not configured".into(),
+        }
+    }
+
+    fn handler_not_found(handler_id: &str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: "handler_not_found",
+            message: format!("no handler with id `{handler_id}`"),
         }
     }
 
@@ -144,7 +174,7 @@ async fn invoke_handler<R: ServerPluginRuntime>(
 ) -> Result<Json<ServerPluginOutcome>, ApiError> {
     let invocation = ServerPluginInvocation {
         bundle_path: request.bundle_path,
-        event_type: request.event_type,
+        event_type: request.event_type.clone(),
         event: request.event,
         project_id: request.project_id,
         installation_id: request.installation_id,
@@ -155,5 +185,73 @@ async fn invoke_handler<R: ServerPluginRuntime>(
         .invoke(invocation)
         .await
         .map_err(ApiError::dependency)?;
+    // Started invocations land in the dev run history when settings state is
+    // wired in; skipped events never start a run and are ignored there.
+    if let Some(settings) = &state.settings {
+        settings.record_run(&outcome, &request.event_type);
+    }
     Ok(Json(outcome))
+}
+
+/// GET /plugins/settings handler.
+///
+/// Returns the current installation snapshot plus newest-first run history.
+#[tracing::instrument(skip_all, err)]
+async fn settings_handler<R>(
+    State(state): State<PluginHttpState<R>>,
+) -> Result<Json<SettingsSnapshot>, ApiError> {
+    let settings = state
+        .settings
+        .as_ref()
+        .ok_or_else(ApiError::settings_unavailable)?;
+    Ok(Json(settings.snapshot()))
+}
+
+/// Body of POST /plugins/settings/enabled.
+#[derive(Debug, Deserialize)]
+struct SetEnabledRequest {
+    /// New value for the installation's master enable switch.
+    enabled: bool,
+}
+
+/// POST /plugins/settings/enabled handler.
+///
+/// Toggles the master enable switch and returns the updated snapshot.
+#[tracing::instrument(skip_all, err)]
+async fn set_enabled_handler<R>(
+    State(state): State<PluginHttpState<R>>,
+    Json(request): Json<SetEnabledRequest>,
+) -> Result<Json<SettingsSnapshot>, ApiError> {
+    let settings = state
+        .settings
+        .as_ref()
+        .ok_or_else(ApiError::settings_unavailable)?;
+    settings.set_enabled(request.enabled);
+    Ok(Json(settings.snapshot()))
+}
+
+/// Body of POST /plugins/settings/handlers/{handlerId}/paused.
+#[derive(Debug, Deserialize)]
+struct SetHandlerPausedRequest {
+    /// Whether deliveries to the handler are paused.
+    paused: bool,
+}
+
+/// POST /plugins/settings/handlers/{handlerId}/paused handler.
+///
+/// Pauses or resumes one handler and returns the updated snapshot.
+#[tracing::instrument(skip_all, err)]
+async fn set_handler_paused_handler<R>(
+    State(state): State<PluginHttpState<R>>,
+    Path(handler_id): Path<String>,
+    Json(request): Json<SetHandlerPausedRequest>,
+) -> Result<Json<SettingsSnapshot>, ApiError> {
+    let settings = state
+        .settings
+        .as_ref()
+        .ok_or_else(ApiError::settings_unavailable)?;
+    if !settings.set_handler_paused(&handler_id, request.paused) {
+        return Err(ApiError::handler_not_found(&handler_id));
+    }
+    Ok(Json(settings.snapshot()))
 }

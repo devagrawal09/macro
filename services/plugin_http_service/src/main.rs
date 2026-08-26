@@ -5,6 +5,7 @@
 //! unauthenticated and must not be exposed beyond local development.
 
 mod api;
+mod settings;
 
 use std::sync::Arc;
 
@@ -36,6 +37,7 @@ async fn main() -> Result<(), Report> {
 
     let app = api::plugin_router(api::PluginHttpState {
         runtime: Arc::new(runtime),
+        settings: Some(Arc::new(settings::PluginSettingsStore::seeded())),
     });
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
