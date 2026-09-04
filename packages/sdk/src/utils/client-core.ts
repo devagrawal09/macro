@@ -19,6 +19,8 @@ import {
 } from '../config';
 import { BotsNamespace } from '../entities/bots/namespace';
 import { User } from '../entities/users/user';
+import { MacroEvents } from '../events/receiver';
+import type { LocalPortmap } from '../local-portmap';
 
 export class MacroClientCore {
   readonly agentHarness: AgentHarnessSdk;
@@ -32,18 +34,40 @@ export class MacroClientCore {
   readonly storage: StorageSdk;
   readonly webAppUrl: string;
   readonly wsVerify?: string;
+  readonly events: MacroEvents;
   /** Resolved authentication config (distinct from `auth`, the auth-service SDK). */
   readonly authConfig: MacroAuth;
-  /** Resolved service base urls: fixed environment defaults, then explicit overrides. */
+  /** Resolved service base urls: env defaults, then the local-stack portmap,
+   * then `opts.hosts` overrides. */
   readonly hosts: Record<ServiceName, string>;
+  /** The local stack's generated port map; only set when env is `local`. */
+  readonly localPortmap?: LocalPortmap;
   private readonly requestedAs?: string;
   private selfBotRecord?: Promise<Bot>;
   private selfPrincipal?: Promise<string>;
 
-  constructor(opts: MacroOpts, env: Env, authConfig: MacroAuth) {
-    const hosts = { ...HOSTS[env], ...opts.hosts };
+  constructor(
+    opts: MacroOpts,
+    env: Env,
+    authConfig: MacroAuth,
+    runtime: {
+      localPortmap?: LocalPortmap;
+      webAppUrl?: string;
+      webhookSecret?: string;
+    } = {},
+  ) {
+    const hosts = {
+      ...HOSTS[env],
+      ...runtime.localPortmap?.hosts,
+      ...opts.hosts,
+    };
     this.hosts = hosts;
-    this.webAppUrl = opts.webAppUrl ?? WEB_APP_URLS[env];
+    this.localPortmap = runtime.localPortmap;
+    this.webAppUrl =
+      opts.webAppUrl ??
+      runtime.webAppUrl ??
+      runtime.localPortmap?.webAppUrl ??
+      WEB_APP_URLS[env];
     this.authConfig = authConfig;
     this.requestedAs = opts.requestedAs;
     if (this.requestedAs && this.authConfig.type !== 'bot') {
@@ -72,6 +96,11 @@ export class MacroClientCore {
     });
     this.search = new SearchSdk({ client: this.makeClient(hosts.search) });
     this.storage = new StorageSdk({ client: this.makeClient(hosts.storage) });
+
+    this.events = new MacroEvents(
+      this,
+      opts.webhookSecret ?? runtime.webhookSecret,
+    );
   }
 
   /** Whether requests have a user identity accepted by acting-user endpoints. */
@@ -143,3 +172,5 @@ export class MacroClientCore {
     return c;
   }
 }
+
+export type { ServiceName };

@@ -9135,14 +9135,28 @@ export type Webhook = {
 };
 
 /**
- * Any entity event deliverable to a webhook endpoint.
+ * Public broker envelope delivered through webhooks and live event streams.
  *
- * Serialized bodies carry an `event_type` tag naming the event (for example
- * `document.created` or `channel.message_posted`) and a `metadata` object
- * with the event payload. Endpoint validation additionally sends a
- * `WebhookValidationTestEvent`, which is not part of this union.
+ * The topic event is flattened so serialized bodies carry `event_id`,
+ * `schema_version`, `event_type`, and `metadata` at the top level. Endpoint
+ * validation additionally sends a `WebhookValidationTestEvent`, which is not
+ * part of this model.
  */
-export type WebhookEvent = DocumentTopicEvent | ChannelTopicEvent;
+export type WebhookEvent = WebhookEventData & {
+    /**
+     * Stable idempotency key for this event.
+     */
+    event_id: string;
+    /**
+     * Version of the event payload schema.
+     */
+    schema_version: number;
+};
+
+/**
+ * Event name and metadata carried by a [`WebhookEvent`].
+ */
+export type WebhookEventData = DocumentTopicEvent | ChannelTopicEvent;
 
 /**
  * Event and optional entity-id constraints used to match webhook deliveries.
@@ -14333,7 +14347,7 @@ export type StreamEventsResponses = {
     /**
      * Server-Sent Events stream of matching broker events
      */
-    200: string;
+    200: WebhookEvent;
 };
 
 export type StreamEventsResponse = StreamEventsResponses[keyof StreamEventsResponses];

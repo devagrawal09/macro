@@ -3,6 +3,7 @@ import {
   EntityPropertiesSection,
   EntityTagsSection,
 } from '@app/features/property/side-panel/properties';
+import { EntitySidebarExtensionSlot } from '@components/app/client-extension/EntitySidebarExtensionSlot';
 import { useGlobalNotificationSource } from '@components/app/GlobalAppState';
 import {
   GithubPullRequestDetailsRows,
@@ -128,6 +129,13 @@ export function MarkdownSidePanelSections(
         <SidePanel.Section id="history" title="History" order={35}>
           <HistorySectionContent />
         </SidePanel.Section>
+      </Show>
+      <Show when={!isTask()}>
+        <EntitySidebarExtensionSlot
+          entityId={blockId}
+          entityType="document"
+          order={37}
+        />
       </Show>
       <EntityActivitySectionConditional
         entityId={blockId}

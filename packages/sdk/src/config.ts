@@ -109,7 +109,7 @@ export interface MacroOpts {
   /**
    * Signing secret for verifying incoming persisted-webhook deliveries.
    * Required only for `macro.events.webhook()` / `macro.events.handle()`.
-   * SSE via `macro.events.listen()` uses the API token and does not need
+   * SSE via `macro.events.connect()` uses the API token and does not need
    * this. Falls back to MACRO_WEBHOOK_SECRET.
    */
   webhookSecret?: string;

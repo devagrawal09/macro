@@ -7,7 +7,7 @@ import type { WebhookEvent } from '../../generated/storage/types.gen';
 import type { hydrateChannelEvent } from './hydrate/channel';
 import type { hydrateDocumentEvent } from './hydrate/document';
 
-/** A webhook delivery body, exactly as Macro serializes it. */
+/** A transport-neutral broker event envelope exactly as Macro serializes it. */
 export type MacroEvent = WebhookEvent;
 
 /** Every entity event name Macro can deliver. */

@@ -1,4 +1,4 @@
-export { MacroClient } from './client';
+export type { MacroClient } from './client';
 export { Lazy } from './lazy';
 export { type Page, paginate } from './pagination';
 export {

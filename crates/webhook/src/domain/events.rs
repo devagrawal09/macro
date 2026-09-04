@@ -183,17 +183,31 @@ impl MacroEvent for WebhookMacroEvent {
     }
 }
 
-/// Any entity event deliverable to a webhook endpoint.
+/// Public broker envelope delivered through webhooks and live event streams.
 ///
-/// Serialized bodies carry an `event_type` tag naming the event (for example
-/// `document.created` or `channel.message_posted`) and a `metadata` object
-/// with the event payload. Endpoint validation additionally sends a
-/// `WebhookValidationTestEvent`, which is not part of this union.
+/// The topic event is flattened so serialized bodies carry `event_id`,
+/// `schema_version`, `event_type`, and `metadata` at the top level. Endpoint
+/// validation additionally sends a `WebhookValidationTestEvent`, which is not
+/// part of this model.
+#[cfg(any(feature = "ingestion", feature = "inbound"))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "inbound", derive(utoipa::ToSchema))]
+pub struct WebhookEvent {
+    /// Stable idempotency key for this event.
+    pub event_id: String,
+    /// Version of the event payload schema.
+    pub schema_version: u8,
+    /// Topic-specific event name and metadata.
+    #[serde(flatten)]
+    pub event: WebhookEventData,
+}
+
+/// Event name and metadata carried by a [`WebhookEvent`].
 #[cfg(any(feature = "ingestion", feature = "inbound"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "inbound", derive(utoipa::ToSchema))]
 #[serde(untagged)]
-pub enum WebhookEvent {
+pub enum WebhookEventData {
     /// Document lifecycle events from the `macro.documents` topic.
     Document(documents::domain::events::DocumentTopicEvent),
     /// Channel and message events from the `macro.channels` topic.

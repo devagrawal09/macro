@@ -7,6 +7,7 @@
 //! envelope persisted webhooks deliver. Delivery is best-effort: disconnected
 //! or slow clients can miss events and must resync out of band when needed.
 
+use crate::domain::events::WebhookEvent;
 use crate::domain::models::{WebhookFilters, WebhookScope};
 use crate::domain::stream::{WebhookEventStreamService, WebhookStreamError};
 use axum::{
@@ -104,7 +105,7 @@ fn parse_filters(filters: Option<String>) -> Result<WebhookFilters, WebhookStrea
     path = "/webhook/events/stream",
     params(StreamEventsQuery),
     responses(
-        (status = 200, description = "Server-Sent Events stream of matching broker events", content_type = "text/event-stream", body = String),
+        (status = 200, description = "Server-Sent Events stream of matching broker events", content_type = "text/event-stream", body = WebhookEvent),
         (status = 400, description = "Bad request", body = ErrorResponse),
         (status = 403, description = "Forbidden", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse),

@@ -1,20 +1,21 @@
 import type { Env, MacroAuth, MacroOpts } from '../config';
 import { HOSTS } from '../config';
-import { MacroEvents } from '../events/receiver';
+import { resolveLocalPortmap } from '../local-portmap';
 import { MacroClientCore } from './client-core';
 
-/** Root SDK client with Bun/Node environment-variable fallbacks. */
+/** Root SDK client with Bun/Node environment and local-stack fallbacks. */
 export class MacroClient extends MacroClientCore {
-  readonly events?: MacroEvents;
-
   constructor(opts: MacroOpts) {
-    super(opts, resolveEnv(opts), resolveAuth(opts));
-    const envWebhookSecret =
-      typeof process !== 'undefined'
-        ? process.env.MACRO_WEBHOOK_SECRET
-        : undefined;
-    const webhookSecret = opts.webhookSecret ?? envWebhookSecret;
-    if (webhookSecret) this.events = new MacroEvents(this, webhookSecret);
+    const env = resolveEnv(opts);
+    super(opts, env, resolveAuth(opts), {
+      localPortmap: env === 'local' ? resolveLocalPortmap() : undefined,
+      webAppUrl:
+        typeof process !== 'undefined' ? process.env.MACRO_WEB_URL : undefined,
+      webhookSecret:
+        typeof process !== 'undefined'
+          ? process.env.MACRO_WEBHOOK_SECRET
+          : undefined,
+    });
   }
 }
 
@@ -25,7 +26,7 @@ function resolveEnv(opts: MacroOpts): Env {
   if (!fromEnv) return 'dev';
   if (!(fromEnv in HOSTS)) {
     throw new Error(
-      `invalid MACRO_ENV "${fromEnv}" — expected local, dev, or prod`,
+      `invalid MACRO_ENV "${fromEnv}" - expected local, dev, or prod`,
     );
   }
   return fromEnv as Env;
@@ -40,7 +41,7 @@ function resolveAuth(opts: MacroOpts): MacroAuth {
     typeof process !== 'undefined' ? process.env.MACRO_BOT_TOKEN : undefined;
   if (envApiKey && envBotToken) {
     throw new Error(
-      'both MACRO_API_KEY and MACRO_BOT_TOKEN are set — pass auth to new Macro() to pick one',
+      'both MACRO_API_KEY and MACRO_BOT_TOKEN are set - pass auth to new Macro() to pick one',
     );
   }
   if (envBotToken) return { type: 'bot', token: envBotToken };
@@ -50,7 +51,7 @@ function resolveAuth(opts: MacroOpts): MacroAuth {
       envApiKey ??
       (() => {
         throw new Error(
-          'no Macro API token — set MACRO_API_KEY / MACRO_BOT_TOKEN or pass token/auth to new Macro()',
+          'no Macro API token - set MACRO_API_KEY / MACRO_BOT_TOKEN or pass token/auth to new Macro()',
         );
       }),
   };

@@ -15,7 +15,7 @@ export function hydrateDocumentEvent(
   client: MacroClient,
   event: DocumentEvent,
 ) {
-  return match(event)
+  const hydrated = match(event)
     .with({ event_type: 'document.created' }, ({ metadata }) => ({
       event_type: 'document.created' as const,
       metadata,
@@ -83,4 +83,10 @@ export function hydrateDocumentEvent(
       document: Document.byId(client, metadata.document_id),
     }))
     .exhaustive();
+
+  return {
+    ...hydrated,
+    event_id: event.event_id,
+    schema_version: event.schema_version,
+  };
 }

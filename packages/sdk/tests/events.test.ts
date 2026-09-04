@@ -9,6 +9,8 @@ afterEach(() => {
 });
 
 const created = {
+  event_id: '01990f1d-a222-7000-8000-000000000001',
+  schema_version: 1,
   event_type: 'document.created' as const,
   metadata: {
     document_id: 'doc_1',
@@ -39,10 +41,134 @@ async function sign(
     key,
     enc.encode(`${timestamp}.${rawBody}`),
   );
-  return `v1=${new Uint8Array(digest).toHex()}`;
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return `v1=${hex}`;
 }
 
 describe('MacroEvents', () => {
+  test('connect() shares equal subscriptions until the last handle closes', async () => {
+    let fetchCalls = 0;
+    const seen = Promise.withResolvers<Request>();
+    globalThis.fetch = (async (input) => {
+      fetchCalls += 1;
+      const request = input instanceof Request ? input : new Request(input);
+      seen.resolve(request);
+      return new Response(new ReadableStream(), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const macro = new Macro({
+      token: 'user-token',
+      hosts: { storage: 'https://storage.example.test' },
+    });
+    const first = macro.events.connect({
+      filters: [{ events: ['document.created'], ids: ['doc_1'] }],
+    });
+    const second = macro.events.connect({
+      filters: [{ ids: ['doc_1'], events: ['document.created'] }],
+    });
+    const request = await seen.promise;
+
+    expect(fetchCalls).toBe(1);
+    first.close();
+    first.close();
+    await first.closed;
+    expect(request.signal.aborted).toBe(false);
+
+    second.close();
+    await second.closed;
+    expect(request.signal.aborted).toBe(true);
+  });
+
+  test('connect() reconnects with refreshed authentication and fixed filters', async () => {
+    const authorization: Array<string | null> = [];
+    const requestedFilters: Array<string | null> = [];
+    const streamError = Promise.withResolvers<unknown>();
+    const delivered = Promise.withResolvers<void>();
+    const filters = [{ events: ['document.created'] as const, ids: ['doc_1'] }];
+    let fetchCalls = 0;
+    globalThis.fetch = (async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      authorization.push(request.headers.get('authorization'));
+      requestedFilters.push(new URL(request.url).searchParams.get('filters'));
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        filters[0].ids[0] = 'doc_2';
+        throw new Error('connection dropped');
+      }
+      return new Response(sseBody(created), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    let tokenVersion = 0;
+    const macro = new Macro({
+      auth: {
+        type: 'user',
+        token: () => `token-${++tokenVersion}`,
+      },
+      hosts: { storage: 'https://storage.example.test' },
+    });
+    macro.events.on('document.created', () => delivered.resolve());
+    const connection = macro.events.connect({
+      filters,
+      reconnectDelayMs: 0,
+      onError: (error) => streamError.resolve(error),
+    });
+
+    await streamError.promise;
+    await delivered.promise;
+    connection.close();
+    await connection.closed;
+
+    expect(authorization.slice(0, 2)).toEqual([
+      'Bearer token-1',
+      'Bearer token-2',
+    ]);
+    expect(requestedFilters.slice(0, 2)).toEqual([
+      JSON.stringify([{ events: ['document.created'], ids: ['doc_1'] }]),
+      JSON.stringify([{ events: ['document.created'], ids: ['doc_1'] }]),
+    ]);
+  });
+
+  test('connect() reports malformed events and handler rejections', async () => {
+    const errors: unknown[] = [];
+    const reported = Promise.withResolvers<void>();
+    globalThis.fetch = (async (_input: RequestInfo | URL) =>
+      new Response(`data: not-json\n\n${sseBody(created)}`, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })) as typeof fetch;
+
+    const macro = new Macro({
+      token: 'user-token',
+      hosts: { storage: 'https://storage.example.test' },
+    });
+    macro.events.on('document.created', () => {
+      throw new Error('handler failed');
+    });
+    const connection = macro.events.connect({
+      reconnectDelayMs: 10_000,
+      onError: (error) => {
+        errors.push(error);
+        if (errors.length === 2) reported.resolve();
+      },
+    });
+
+    await reported.promise;
+    connection.close();
+    await connection.closed;
+
+    expect(errors).toHaveLength(2);
+    expect(String(errors[0])).toContain('JSON');
+    expect(String(errors[1])).toContain('handler failed');
+  });
+
   test('is always available and defaults listen() filters from .on()', async () => {
     let request: Request | undefined;
     const delivered = Promise.withResolvers<typeof created>();
@@ -62,6 +188,8 @@ describe('MacroEvents', () => {
 
     macro.events.on('document.created', (event) => {
       delivered.resolve({
+        event_id: event.event_id,
+        schema_version: event.schema_version,
         event_type: event.event_type,
         metadata: event.metadata,
       });

@@ -40,6 +40,25 @@ the default whenever `requestedAs` is used) or `team` (the owning team's
 access, for team-owned bots — the default otherwise). Pass
 `auth: { type: 'bot', token, scope: ... }` to override.
 
+### Browser entrypoint
+
+Browser applications and extensions should import `@macro/sdk/browser`. This
+entrypoint never reads Node environment variables or the local-stack port map,
+so authentication must be supplied explicitly. A token function may refresh
+short-lived credentials before each request.
+
+```ts
+import { Macro } from '@macro/sdk/browser';
+
+const macro = new Macro({
+  auth: { type: 'user', token: getFreshToken },
+});
+```
+
+The browser entrypoint exposes the same namespaces and `macro.events.on()` /
+`macro.events.connect()` API. Bundle it into the browser application or
+extension; do not expose credentials to page globals.
+
 ### Accessing our API
 
 Our SDK acts lets you easily access any Macro "resource":
@@ -147,18 +166,22 @@ macro.events.on('channel.message_posted', async ({ metadata, message }) => {
   await message.reply('hi!');
 });
 
-const stop = await macro.events.listen();
-// later: stop();
+const connection = macro.events.connect({
+  onError: (error) => console.error('event stream error', error),
+});
+await connection.closed;
 ```
 
-`listen()` opens `GET /webhook/events/stream` with the same `WebhookFilters`
-model as persisted webhooks. If you omit `filters`, it derives one filter from
-the event names already registered with `.on()`. Pass `scope: 'team'` for a
-team workspace (defaults to `'user'`). Delivery is best-effort: there is no
-replay if you disconnect.
+`connect()` opens `GET /webhook/events/stream` with the same filter model as
+persisted webhooks. If you omit `filters`, it derives one filter from the event
+names already registered with `.on()`. Pass `scope: 'team'` for a team
+workspace (defaults to `'user'`). Equal subscriptions on one Macro instance
+share a request. Delivery is best-effort: reconnects refresh authentication,
+but events missed while disconnected are not replayed.
 
 Handlers receive the same hydrated payloads as webhook deliveries — ORM
-handles for every entity the event names.
+handles for every entity the event names, plus the broker `event_id` and
+`schema_version`. Use `event_id` as the idempotency key when needed.
 
 ### Persisted webhooks
 
@@ -204,15 +227,4 @@ functions (endpoints).
 Event names and payloads are **generated from the backend**: the Rust webhook
 crate exposes a `WebhookEvent` union in the storage OpenAPI spec, and
 `src/events/types.ts` derives `EventName` / `EventPayload` from it. SSE
-(`listen()`) and persisted webhooks (`webhook()`) dispatch the same union.
-
-## Local host resolution
-
-The root `@macro/sdk` package uses the fixed `HOSTS.local` and `WEB_APP_URLS.local` defaults. It no longer reads the local stack portmap automatically. Pass `hosts` and `webAppUrl` explicitly when your local stack uses different addresses. The Node-only webhook helper still supports portmap discovery.
-
-### Browser entrypoint
-
-Browser bundles should import `Macro` from `@macro/sdk/browser` and pass an
-explicit `token` or `auth` option. This entrypoint never reads process
-environment variables or includes the inbound webhook receiver. The root
-entrypoint keeps Bun/Node environment fallbacks for server applications.
+(`connect()`) and persisted webhooks (`webhook()`) dispatch the same union.

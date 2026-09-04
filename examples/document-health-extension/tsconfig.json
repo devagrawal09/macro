@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@macro/sdk/browser": ["../../packages/sdk/src/macro.browser.ts"]
+    },
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun", "chrome"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+}

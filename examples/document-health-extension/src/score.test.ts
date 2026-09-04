@@ -1,0 +1,24 @@
+import { describe, expect, test } from "bun:test";
+import { analyzeDocument } from "./score";
+
+describe("analyzeDocument", () => {
+	test("penalizes long sentences and open work", () => {
+		const health = analyzeDocument(
+			"Overview\n\n" +
+				"This sentence contains far more than twenty four separate words so the readability signal can identify prose that should probably be broken into smaller ideas for teammates.\n\n" +
+				"TODO: confirm the launch date\n- [ ] Add customer evidence",
+		);
+
+		expect(health.score).toBe(80);
+		expect(health.longSentences).toBe(1);
+		expect(health.openTodos).toEqual([
+			"confirm the launch date",
+			"Add customer evidence",
+		]);
+		expect(health.readingMinutes).toBe(1);
+	});
+
+	test("returns a perfect score for concise completed prose", () => {
+		expect(analyzeDocument("A short, finished document.").score).toBe(100);
+	});
+});

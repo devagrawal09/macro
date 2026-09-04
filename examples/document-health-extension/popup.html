@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document Health setup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        background: #151713;
+        color: #f4f0e4;
+      }
+      body {
+        box-sizing: border-box;
+        width: 320px;
+        margin: 0;
+        padding: 20px;
+      }
+      h1 { margin: 0; font: 650 18px/1.2 Georgia, serif; }
+      p { color: #aaa99f; font-size: 12px; line-height: 1.55; }
+      label { display: block; margin: 18px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      input { box-sizing: border-box; width: 100%; border: 1px solid #45483e; border-radius: 7px; background: #20231d; color: #fff; padding: 9px 10px; }
+      .actions { display: flex; gap: 8px; margin-top: 10px; }
+      button { border: 1px solid #525649; border-radius: 999px; background: #e1ff72; color: #171a11; cursor: pointer; padding: 7px 13px; font-weight: 700; }
+      button.secondary { background: transparent; color: #d7d4ca; }
+      #status { min-height: 18px; }
+      .warning { border-left: 2px solid #ffbd5b; padding-left: 10px; color: #d4c09e; }
+    </style>
+  </head>
+  <body>
+    <h1>Document Health</h1>
+    <p>Analyze the open Macro document from a locally bundled extension.</p>
+    <p class="warning">Development only. Production extensions require delegated OAuth, consent, scopes, and revocation.</p>
+    <form>
+      <label for="token">Short-lived dev token</label>
+      <input id="token" type="password" autocomplete="off" required />
+      <div class="actions">
+        <button type="submit">Use this session</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+    </form>
+    <p id="status">Checking session...</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

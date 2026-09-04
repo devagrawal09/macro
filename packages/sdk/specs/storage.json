@@ -12161,7 +12161,7 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/WebhookEvent"
                 }
               }
             }
@@ -26961,6 +26961,31 @@
         }
       },
       "WebhookEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEventData",
+            "description": "Topic-specific event name and metadata."
+          },
+          {
+            "type": "object",
+            "required": ["event_id", "schema_version"],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "description": "Stable idempotency key for this event."
+              },
+              "schema_version": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Version of the event payload schema.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Public broker envelope delivered through webhooks and live event streams.\n\nThe topic event is flattened so serialized bodies carry `event_id`,\n`schema_version`, `event_type`, and `metadata` at the top level. Endpoint\nvalidation additionally sends a `WebhookValidationTestEvent`, which is not\npart of this model."
+      },
+      "WebhookEventData": {
         "oneOf": [
           {
             "$ref": "#/components/schemas/DocumentTopicEvent",
@@ -26971,7 +26996,7 @@
             "description": "Channel and message events from the `macro.channels` topic."
           }
         ],
-        "description": "Any entity event deliverable to a webhook endpoint.\n\nSerialized bodies carry an `event_type` tag naming the event (for example\n`document.created` or `channel.message_posted`) and a `metadata` object\nwith the event payload. Endpoint validation additionally sends a\n`WebhookValidationTestEvent`, which is not part of this union."
+        "description": "Event name and metadata carried by a [`WebhookEvent`]."
       },
       "WebhookFilter": {
         "type": "object",

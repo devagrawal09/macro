@@ -1,6 +1,6 @@
+import { rm } from 'node:fs/promises';
 import { Glob } from 'bun';
 import { build } from 'esbuild';
-import { rm } from 'node:fs/promises';
 
 const generatedEntries = [...new Glob('generated/*/index.ts').scanSync('.')];
 
@@ -14,6 +14,7 @@ await build({
   outbase: '.',
   platform: 'neutral',
   target: 'node18',
+  external: ['node:*'],
 });
 await build({
   entryPoints: ['src/macro.browser.ts'],
@@ -24,28 +25,16 @@ await build({
   target: 'es2022',
 });
 
-const browserGraph = new Map<string, string>();
-async function collectBrowserGraph(path: string): Promise<void> {
-  const outputPath = new URL(path, `file://${process.cwd()}/`).pathname;
-  if (browserGraph.has(outputPath)) return;
-  const output = await Bun.file(outputPath).text();
-  browserGraph.set(outputPath, output);
-  const imports = output.matchAll(
-    /(?:from\s*|import\s*)["'](\.[^"']+\.js)["']/g,
-  );
-  for (const match of imports) {
-    await collectBrowserGraph(
-      new URL(match[1], `file://${outputPath}`).pathname,
+const browserOutput = await Bun.file('dist/src/macro.browser.js').text();
+for (const forbidden of [
+  'MACRO_API_KEY',
+  'MACRO_BOT_TOKEN',
+  'process.env',
+  'node:',
+]) {
+  if (browserOutput.includes(forbidden)) {
+    throw new Error(
+      `browser SDK output contains forbidden value: ${forbidden}`,
     );
-  }
-}
-await collectBrowserGraph('dist/src/macro.browser.js');
-for (const [path, output] of browserGraph) {
-  for (const forbidden of ['MACRO_API_KEY', 'process.env', 'node:']) {
-    if (output.includes(forbidden)) {
-      throw new Error(
-        `browser SDK output ${path} contains forbidden value: ${forbidden}`,
-      );
-    }
   }
 }

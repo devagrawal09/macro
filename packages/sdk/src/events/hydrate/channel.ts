@@ -28,7 +28,7 @@ export function userFromPrincipal(client: MacroClient, principalId: string) {
 
 /** Attach SDK entity handles to a channel webhook event. */
 export function hydrateChannelEvent(client: MacroClient, event: ChannelEvent) {
-  return match(event)
+  const hydrated = match(event)
     .with({ event_type: 'channel.created' }, ({ metadata }) => ({
       event_type: 'channel.created' as const,
       metadata,
@@ -159,4 +159,10 @@ export function hydrateChannelEvent(client: MacroClient, event: ChannelEvent) {
       ),
     }))
     .exhaustive();
+
+  return {
+    ...hydrated,
+    event_id: event.event_id,
+    schema_version: event.schema_version,
+  };
 }

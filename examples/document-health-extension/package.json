@@ -1,0 +1,21 @@
+{
+  "name": "@macro-examples/document-health-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build:extension",
+    "build:extension": "bun scripts/build.ts",
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@macro/sdk": "file:../../packages/sdk"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "@types/chrome": "^0.1.32",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.2"
+  }
+}

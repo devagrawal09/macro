@@ -12,6 +12,10 @@
       "types": "./dist/src/macro.d.ts",
       "import": "./dist/src/macro.js"
     },
+    "./browser": {
+      "types": "./dist/src/macro.browser.d.ts",
+      "import": "./dist/src/macro.browser.js"
+    },
     "./generated/*": {
       "types": "./dist/generated/*/index.d.ts",
       "import": "./dist/generated/*/index.js"

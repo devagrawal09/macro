@@ -1284,6 +1284,7 @@ export * from './viewPatchName';
 export * from './viewsResponse';
 export * from './webhook';
 export * from './webhookDeletedAt';
+export * from './webhookEventData';
 export * from './webhookFilter';
 export * from './webhookFilterIds';
 export * from './webhookScope';

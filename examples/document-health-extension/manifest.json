@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Macro Document Health",
+  "version": "0.1.0",
+  "description": "A locally bundled Macro client extension example.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://macro.com/*",
+    "https://dev.macro.com/*",
+    "https://gateway.macro.com/*",
+    "https://dev-gateway.macro.com/*",
+    "https://*.amazonaws.com/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Document Health setup"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://macro.com/*",
+        "https://dev.macro.com/*",
+        "http://localhost/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.html", "panel.js"],
+      "matches": [
+        "https://macro.com/*",
+        "https://dev.macro.com/*",
+        "http://localhost/*"
+      ]
+    }
+  ]
+}
