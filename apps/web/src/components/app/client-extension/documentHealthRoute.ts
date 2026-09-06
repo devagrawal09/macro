@@ -9,7 +9,7 @@ export const DOCUMENT_HEALTH_COMPONENT = 'document-health';
 
 /** Document created by the checked-in local Document Health demo. */
 export const DOCUMENT_HEALTH_DEMO_DOCUMENT_ID =
-  '01a076dc-e67c-7a56-91b2-39720d057c6c';
+  '01a0780b-e51a-7c93-918d-335077bffb9a';
 
 const DOCUMENT_HEALTH_COMPONENT_PREFIX = `${DOCUMENT_HEALTH_COMPONENT}~`;
 

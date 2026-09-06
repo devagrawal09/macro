@@ -8,7 +8,7 @@ import {
 describe('documentHealthRoute', () => {
   it('targets the checked-in local demo document', () => {
     expect(documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID)).toBe(
-      'document-health~01a076dc-e67c-7a56-91b2-39720d057c6c'
+      'document-health~01a0780b-e51a-7c93-918d-335077bffb9a'
     );
   });
 
