@@ -91,8 +91,8 @@ macro.events.on('channel.message_posted', async ({ message }) => {
 app.post('/webhook', macro.events.webhook());
 
 // Browser, local process, or long-running worker
-const stop = await macro.events.listen();
-// Call stop() during shutdown.
+const connection = macro.events.connect();
+await connection.closed;
 ~~~
 
 The on(...) call and hydrated payload stay identical. Only startup and delivery semantics differ.
@@ -175,7 +175,7 @@ macro.events.on('channel.message_posted', async ({ message }) => {
   await macro.tasks.create({ name: await message.content() });
 });
 
-const stop = await macro.events.listen({
+await macro.events.connect({
   filters: [{ events: ['channel.message_posted'] }],
 });
 ~~~
@@ -296,15 +296,15 @@ const macro = new Macro({
 });
 
 const off = macro.events.on('document.updated', async (event) => {
-  console.log(event.event_type, await event.document.name());
+  console.log(event.event_id, await event.document.name());
 });
 
-const stop = await macro.events.listen({
+const connection = macro.events.connect({
   filters: [{ events: ['document.updated'], ids: [documentId] }],
   signal: abortController.signal,
 });
 
-stop();
+await connection.closed;
 off();
 ~~~
 
@@ -317,14 +317,16 @@ macro.events.on('document.updated', handler);
 app.post('/webhook', macro.events.webhook());
 ~~~
 
-The exact common API is events.on(name, handler), EventName, and the hydrated handler payload. webhook() and listen() are transport adapters and are expected to differ.
+The exact common API is events.on(name, handler), EventName, and the hydrated handler payload. webhook() and connect() are transport adapters and are expected to differ.
 
 ### Public types
 
 1. Make macro.events available in both Node and browser clients, not conditionally undefined when webhookSecret is absent.
-2. Keep event_type, metadata, and hydrated entity handles identical for webhook and SSE dispatch.
-3. Export EventName, EventMap, EventHandler, and ListenOptions from both entrypoints.
-4. Keep onSelfMention() as a convenience layered on on(). It should work unchanged over both transports.
+2. Correct MacroEvent to include event_id and schema_version from the actual broker envelope.
+3. Keep event_type, metadata, event_id, schema_version, and hydrated entity handles identical for webhook and SSE dispatch.
+4. Export EventName, EventMap, EventHandler, EventFilter, EventConnection, and connection error/status types from both entrypoints.
+5. Type filter event names as EventName rather than string.
+6. Keep onSelfMention() as a convenience layered on on(). It should work unchanged over both transports.
 
 ### Internal refactor
 
@@ -355,20 +357,24 @@ Reuse or extract that implementation rather than adding an EventSource dependenc
 
 ### Connection lifecycle
 
-Use the upstream SDK lifecycle:
+Recommended shape:
 
 ~~~ts
-interface ListenOptions {
-  filters?: WebhookFilter[];
-  signal?: AbortSignal;
+interface EventConnection {
+  readonly closed: Promise<void>;
+  close(): void;
 }
 
-const stop = await macro.events.listen(options);
+interface ConnectEventsOptions {
+  filters: readonly EventFilter[];
+  signal?: AbortSignal;
+  onError?: (error: unknown) => void;
+}
 ~~~
 
-listen() opens the stream and returns an idempotent stop function. The generated SSE client owns parsing and reconnection.
+connect() should begin connecting immediately. close() and AbortSignal must be idempotent. Token sources should be called again for each reconnect so refreshed credentials are used.
 
-For Solid views, listen on mount and call stop on cleanup. Register all handlers before listen so one stream can derive the complete filter set.
+For Solid views, connect on mount and abort on cleanup. For a server process, await connection.closed. Multiple handlers should share one underlying stream per Macro instance; do not open one SSE request per handler.
 
 ### Dispatch and failure semantics
 
@@ -376,7 +382,7 @@ For Solid views, listen on mount and call stop on cleanup. Register all handlers
 - Decide explicitly whether handlers run concurrently. Current webhook dispatch uses Promise.all.
 - Handler failures over webhooks reject the HTTP request and cause the whole delivery to retry, so other handlers can run more than once.
 - SSE has no per-event HTTP acknowledgement. For the first version, document it as best-effort and surface handler errors without pretending they trigger server retries.
-- Preserve the upstream event payload contract rather than maintaining a custom envelope.
+- Expose event_id so applications can implement idempotency.
 - On reconnect after a gap, client UIs should refetch canonical state before consuming more deltas.
 - Do not promise exactly-once delivery.
 
@@ -457,26 +463,6 @@ Recommended staged contract:
 Webhooks remain the recommended durable server integration until V2 exists.
 
 ## Browser Extension Host Contract
-
-### Shipped local placements
-
-The Macro web client now publishes two versioned placements through the DOM
-slot contract in packages/sdk/src/extensions.ts, both LOCAL_ONLY:
-
-- **entity-sidebar**: a section in an open document's right sidebar. The
-  Document Health card renders here and offers an "Open full page" action.
-- **full-page**: a directly navigable page dedicated to one document. Split
-  layout pages are addressed as `component/<id>` URL pairs, and per-instance
-  component ids embed their entity id (the `reminder-view~<id>` convention),
-  so the Document Health page lives at
-  `/app/component/document-health~<documentId>`. Outside local mode the
-  component id resolves but redirects to the inbox.
-
-Both placements consume events through the upstream SDK transport only:
-register handlers with `macro.events.on('document.updated', ...)`, open the
-stream with `await macro.events.listen({ filters: [{ events:
-['document.updated'], ids: [documentId] }] })`, and call the returned stop
-function on unmount. There is no separate client SSE implementation.
 
 ### Minimum supported contract
 
@@ -630,11 +616,13 @@ The Solid helper can implement mount() by rendering a component and returning So
 
 ### Phase 1: transport-neutral SDK events
 
-1. Use upstream macro.events.listen() for SSE delivery.
-2. Instantiate macro.events in both root and browser Macro classes.
-3. Preserve webhook() in the server entrypoint.
-4. Reuse the generated fetch SSE parser and request interceptors.
-5. Add unit tests for browser authentication and hydrated SSE payloads.
+1. Fix the generated public event envelope to include event_id and schema_version.
+2. Extract dispatch and hydration from webhook verification.
+3. Instantiate macro.events in both root and browser Macro classes.
+4. Preserve webhook() in the server entrypoint.
+5. Add connect() and EventConnection to both entrypoints.
+6. Reuse the generated fetch SSE parser and request interceptors.
+7. Add unit tests showing webhook and SSE bytes produce the same typed hydrated payload.
 
 ### Phase 2: best-effort generic SSE backend
 
@@ -680,7 +668,7 @@ This phase is a small developer-platform/auth control plane. Browser extensions 
 
 - The same events.on() handler compiles in @macro/sdk and @macro/sdk/browser.
 - A webhook and SSE copy of one broker envelope hydrate to the same event object shape.
-- Browser handlers receive the same upstream hydrated payload as Node handlers.
+- event_id and schema_version are visible to handlers.
 - One Macro instance opens at most one shared SSE connection for a given subscription set.
 - Abort, close, reconnect, malformed input, token refresh, and handler rejection are tested.
 - Browser output contains no environment-variable fallback or Node-only dependency.
