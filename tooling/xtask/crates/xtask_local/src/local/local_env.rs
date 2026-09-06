@@ -73,7 +73,7 @@ impl LocalEnv {
             agent_harness: AgentHarnessEnv::local(instance.project_name(), egress_public_url),
             service_auth: ServiceAuthEnv::for_instance(name),
             fusionauth: FusionAuthEnv::for_instance(instance),
-            boot_stubs: BootStubEnv,
+            boot_stubs: BootStubEnv::for_instance(instance),
         }
     }
 
@@ -487,9 +487,21 @@ impl FusionAuthEnv {
 /// Doppler access keeps every real integration value. A key here must never
 /// also appear in [`LocalEnv::to_env`] — that would make precedence ambiguous
 /// (a test enforces this).
-struct BootStubEnv;
+struct BootStubEnv {
+    document_storage_distribution_url: String,
+}
 
 impl BootStubEnv {
+    fn for_instance(instance: &Instance) -> Self {
+        Self {
+            document_storage_distribution_url: format!(
+                "http://localhost:{}/{}",
+                instance.port(Port::LocalStack),
+                resources::DOC_STORAGE_BUCKET,
+            ),
+        }
+    }
+
     fn write(&self, env: &mut BTreeMap<String, String>) {
         // connection_gateway config reads `REDIS_HOST` (a Redis URL, not a
         // hostname — see `redis::Client::open`).
@@ -508,7 +520,7 @@ impl BootStubEnv {
         // well-formed base URL is needed.
         env.insert(
             "DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_DISTRIBUTION_URL".into(),
-            "http://localhost:8100".into(),
+            self.document_storage_distribution_url.clone(),
         );
         env.insert(
             "DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_SIGNER_PUBLIC_KEY_ID".into(),

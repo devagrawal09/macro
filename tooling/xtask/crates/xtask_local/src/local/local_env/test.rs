@@ -101,6 +101,21 @@ fn emits_required_keys() {
     }
 }
 
+#[test]
+fn document_download_url_uses_the_instance_localstack_port() {
+    let instance =
+        Instance::derive(Some("document-health-demo"), None).expect("named instance derives");
+    let local = LocalEnv::for_instance(Mode::Local, &instance, false, None);
+
+    assert_eq!(
+        local
+            .boot_stub_env()
+            .get("DOCUMENT_STORAGE_SERVICE_CLOUDFRONT_DISTRIBUTION_URL")
+            .map(String::as_str),
+        Some("http://localhost:31106/doc-storage"),
+    );
+}
+
 /// Boot stubs are a fallback layer BELOW Doppler; `to_env` is authoritative
 /// ABOVE Doppler. A key present in both would make its precedence ambiguous —
 /// whichever map wrote last would silently win.
