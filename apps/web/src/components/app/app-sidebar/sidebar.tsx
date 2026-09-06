@@ -37,6 +37,10 @@ import {
   SidebarPromoCard,
   SidebarPromoHint,
 } from '@components/app/app-sidebar/sidebar-promo';
+import {
+  DOCUMENT_HEALTH_DEMO_DOCUMENT_ID,
+  documentHealthComponentId,
+} from '@components/app/client-extension/documentHealthRoute';
 import { useSplitLayout } from '@components/app/split-layout/layout';
 import type {
   ReferredFrom,
@@ -54,6 +58,7 @@ import {
   enableCrm,
   enableNewPricing,
   isFeatureEnabled,
+  LOCAL_ONLY,
 } from '@core/constant/featureFlags';
 import {
   type SettingsTab,
@@ -270,6 +275,15 @@ const SIDEBAR_LINKS = [
     hotkeyToken: TOKENS.sidebar.goTo.channels,
   },
 ] satisfies SidebarItem[];
+
+const DOCUMENT_HEALTH_LINK = {
+  id: documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID),
+  label: 'Document Health',
+  href: `/component/${documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID)}`,
+  icon: AnimatedTaskIcon,
+  hotkey: 'h',
+  hotkeyToken: TOKENS.sidebar.goTo.documentHealth,
+} satisfies SidebarItem;
 
 export type SidebarState = 'hidden' | 'expanded' | 'slim';
 
@@ -1088,6 +1102,7 @@ const buildSidebarLinks = (
   let links: SidebarItem[] = [
     DASHBOARD_LINK,
     ...(showGettingStarted ? [GETTING_STARTED_LINK] : []),
+    ...(LOCAL_ONLY ? [DOCUMENT_HEALTH_LINK] : []),
     ...SIDEBAR_LINKS.filter((link) => showCalendar || link.id !== 'calendar'),
   ];
 

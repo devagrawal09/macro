@@ -7,6 +7,10 @@
  */
 export const DOCUMENT_HEALTH_COMPONENT = 'document-health';
 
+/** Document created by the checked-in local Document Health demo. */
+export const DOCUMENT_HEALTH_DEMO_DOCUMENT_ID =
+  '01a076dc-e67c-7a56-91b2-39720d057c6c';
+
 const DOCUMENT_HEALTH_COMPONENT_PREFIX = `${DOCUMENT_HEALTH_COMPONENT}~`;
 
 /** The split-layout component id for one document's health page. */

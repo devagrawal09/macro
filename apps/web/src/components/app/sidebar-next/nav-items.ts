@@ -1,5 +1,10 @@
 import { LIST_VIEW_PATHS } from '@app/constants/list-views';
 import type { SidebarItem } from '@components/app/app-sidebar/sidebar';
+import {
+  DOCUMENT_HEALTH_DEMO_DOCUMENT_ID,
+  documentHealthComponentId,
+} from '@components/app/client-extension/documentHealthRoute';
+import { LOCAL_ONLY } from '@core/constant/featureFlags';
 import { TOKENS } from '@core/hotkey/tokens';
 import BellIcon from '@phosphor/bell.svg';
 import BuildingsIcon from '@phosphor/buildings.svg';
@@ -44,6 +49,19 @@ export type SidebarNextNavItem = SidebarItem & {
  * so the shortcuts work unchanged; these tokens only label the tooltips.
  */
 const SIDEBAR_NEXT_NAV_ITEMS = [
+  ...(LOCAL_ONLY
+    ? [
+        {
+          id: documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID),
+          label: 'Document Health',
+          href: `/component/${documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID)}`,
+          icon: ListChecksIcon,
+          iconActive: ListChecksFillIcon,
+          hotkey: 'h',
+          hotkeyToken: TOKENS.sidebar.goTo.documentHealth,
+        },
+      ]
+    : []),
   {
     id: 'inbox',
     label: 'Activity',

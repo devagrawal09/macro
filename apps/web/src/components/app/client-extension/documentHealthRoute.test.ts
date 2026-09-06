@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DOCUMENT_HEALTH_DEMO_DOCUMENT_ID,
   documentHealthComponentId,
   documentIdFromDocumentHealthComponentId,
 } from './documentHealthRoute';
 
 describe('documentHealthRoute', () => {
+  it('targets the checked-in local demo document', () => {
+    expect(documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID)).toBe(
+      'document-health~01a076dc-e67c-7a56-91b2-39720d057c6c'
+    );
+  });
+
   it('round-trips a document id through the component id', () => {
     const componentId = documentHealthComponentId('doc_123');
     expect(componentId).toBe('document-health~doc_123');
