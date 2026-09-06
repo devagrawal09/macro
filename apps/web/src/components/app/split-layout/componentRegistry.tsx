@@ -1,4 +1,8 @@
 import { openEntityInSplit } from '@app/features/activity/open-entity-in-split';
+import {
+  DOCUMENT_HEALTH_COMPONENT,
+  documentIdFromDocumentHealthComponentId,
+} from '@components/app/client-extension/documentHealthRoute';
 import { useActivityFeedFlag } from '@app/features/activity/use-activity-feed-flag';
 import type { EventEditorInitialValues } from '@app/features/calendar/components/composer/event-form-model';
 import type { CalendarEvent } from '@app/features/calendar/types';
@@ -195,6 +199,21 @@ export function resolveComponent(
         };
       }
     }
+    const documentHealthDocumentId =
+      documentIdFromDocumentHealthComponentId(name);
+    if (documentHealthDocumentId) {
+      const base = REGISTRY.get(DOCUMENT_HEALTH_COMPONENT);
+      if (base) {
+        return {
+          element: () =>
+            base.factory({
+              ...(params ?? {}),
+              documentId: documentHealthDocumentId,
+            }),
+          initialMeta: base.initialMeta,
+        };
+      }
+    }
     throw new Error(`Component '${name}' not registered`);
   }
   return {
@@ -291,6 +310,10 @@ function RecentViewWrapper() {
     </Show>
   );
 }
+
+const LocalDocumentHealthFullPage = lazy(
+  () => import('@components/app/client-extension/LocalDocumentHealthFullPage')
+);
 
 const MyActivityView = lazy(() =>
   import('@app/features/activity/views/my-activity-view').then((module) => ({
@@ -706,6 +729,21 @@ registerComponent('reminder-view', (params) => {
   usePageViewTracking('reminder-view');
   return <ReminderEditorSplit reminderId={params.reminderId as string} />;
 });
+// Local-only demo surface reached as `component/document-health~<documentId>`
+// (see documentHealthRoute.ts). Registered unconditionally so a bookmarked
+// URL outside local mode recovers to the inbox instead of throwing in
+// resolveComponent.
+registerComponent(
+  DOCUMENT_HEALTH_COMPONENT,
+  withAuth((params: { documentId?: unknown }) => {
+    const documentId =
+      typeof params.documentId === 'string' ? params.documentId : undefined;
+    if (!LOCAL_ONLY || !documentId) {
+      return <RedirectSplit to={{ type: 'component', id: 'inbox' }} />;
+    }
+    return <LocalDocumentHealthFullPage documentId={documentId} />;
+  })
+);
 registerComponent(
   'import-linear',
   lazy(() => import('@app/features/integrations/import-linear/ImportLinear'))

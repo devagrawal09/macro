@@ -44,6 +44,9 @@
       "@types/facebook-pixel"
     ],
     "paths": {
+      "@macro/sdk/browser": [
+        "../../packages/sdk/src/macro.browser.ts"
+      ],
       "@sandbox-sizes": [
         "../../crates/agent_harness/sandbox_sizes.json"
       ],
