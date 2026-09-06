@@ -21,19 +21,14 @@ type AnyHandler = (event: unknown) => void | Promise<void>;
 /** Sent by Macro when validating a newly registered endpoint; acked, never dispatched. */
 const VALIDATION_EVENT = 'webhook.validation.test';
 
-/** Event/entity filter accepted by both SSE and persisted webhooks. */
-export type EventFilter = Omit<WebhookFilter, 'events'> & {
-  events: readonly EventName[];
-};
-
-/** Options for {@link MacroEvents.connect}. */
-export interface ConnectEventsOptions {
+/** Options for {@link MacroEvents.listen}. */
+export interface ListenOptions {
   /**
    * Event/entity-id filters, identical to persisted webhook `filters`.
    * Defaults to one filter covering every event currently registered with
    * {@link MacroEvents.on}.
    */
-  filters?: readonly EventFilter[];
+  filters?: WebhookFilter[];
   /**
    * Personal or team workspace whose webhook lifecycle events are delivered.
    * Defaults to `'user'`.
@@ -41,43 +36,6 @@ export interface ConnectEventsOptions {
   scope?: WebhookScope;
   /** Abort the stream. */
   signal?: AbortSignal;
-  /** Called for connection, parsing, and event-handler errors. */
-  onError?: (error: unknown) => void;
-  /** Delay before reconnecting after a closed stream. Defaults to 1 second. */
-  reconnectDelayMs?: number;
-}
-
-/** Options accepted by the backwards-compatible {@link MacroEvents.listen}. */
-export type ListenOptions = ConnectEventsOptions;
-
-/** A live, best-effort event stream owned by one Macro client. */
-export interface EventConnection {
-  /** Resolves when this connection handle closes. */
-  readonly closed: Promise<void>;
-  /** Release this handle. The underlying stream closes after its last handle. */
-  close(): void;
-}
-
-interface SharedEventConnection {
-  readonly controller: AbortController;
-  readonly errorHandlers: Set<(error: unknown) => void>;
-  closed: Promise<void>;
-  references: number;
-}
-
-const DEFAULT_RECONNECT_DELAY_MS = 1_000;
-
-function serializeFilters(filters: readonly EventFilter[]): string {
-  return JSON.stringify(filters, (_key, value: unknown) => {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      return value;
-    }
-    return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) =>
-        left.localeCompare(right),
-      ),
-    );
-  });
 }
 
 /** Attach the entity handles defined for each webhook event. */
@@ -97,14 +55,13 @@ function hydrate(
 
 /**
  * Per-instance event receiver. Subscribe with {@link MacroEvents.on}, then
- * either {@link MacroEvents.connect} (SSE, the default) or mount
+ * either {@link MacroEvents.listen} (SSE, the default) or mount
  * {@link MacroEvents.webhook} at a persisted webhook URL.
  *
  * Obtain via `macro.events` — do not construct directly.
  */
 export class MacroEvents {
   private readonly handlers = new Map<EventName, Set<AnyHandler>>();
-  private readonly connections = new Map<string, SharedEventConnection>();
 
   constructor(
     private readonly client: MacroClient,
@@ -134,7 +91,7 @@ export class MacroEvents {
    * client-side. The caller's identity is resolved lazily (once) on the first
    * delivery.
    *
-   * For SSE, register this handler before {@link connect} so the derived
+   * For SSE, register this handler before {@link listen} so the derived
    * filters include `channel.mentioned`. For persisted webhooks, register the
    * webhook separately, e.g. `macro.webhooks.create({ filters: [{ events:
    * ['channel.mentioned'] }], … })`.
@@ -153,100 +110,67 @@ export class MacroEvents {
   }
 
   /**
-   * Open a live Server-Sent Events stream of matching broker events. No public
-   * URL or signing secret is required. Delivery is best-effort: events sent
-   * before connection, while disconnected, or after overflow are not replayed.
+   * Open a live Server-Sent Events stream of matching broker events. This is
+   * the default way to receive events — no public URL or signing secret
+   * required. Delivery is best-effort: events published before the
+   * connection, while disconnected, or dropped for a slow subscriber are
+   * missed; there is no replay.
    *
-   * Equal subscriptions on one Macro instance share an underlying request.
-   * Filters are fixed for the connection lifetime and default to event names
-   * already registered with {@link on}.
+   * Filters default to the event names currently registered with {@link on}.
+   * The stream uses those filters for its lifetime; later `.on` / unsubscribe
+   * calls do not change what the server sends.
+   *
+   * @returns A function that closes the stream.
    */
-  connect(opts: ConnectEventsOptions = {}): EventConnection {
+  async listen(opts: ListenOptions = {}): Promise<() => void> {
     const filters = opts.filters ?? this.filtersFromHandlers();
     if (
       filters.length === 0 ||
       filters.every((filter) => filter.events.length === 0)
     ) {
       throw new MacroError(
-        'connect() needs filters - pass filters or register handlers with .on() first',
+        'listen() needs filters — pass filters or register handlers with .on() first',
       );
     }
 
-    const reconnectDelayMs =
-      opts.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
-    if (!Number.isFinite(reconnectDelayMs) || reconnectDelayMs < 0) {
-      throw new MacroError('reconnectDelayMs must be a non-negative number');
+    const controller = new AbortController();
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        controller.abort();
+      } else {
+        opts.signal.addEventListener('abort', () => controller.abort(), {
+          once: true,
+        });
+      }
     }
 
-    if (opts.signal?.aborted) {
-      return { closed: Promise.resolve(), close() {} };
-    }
-
-    const scope = opts.scope ?? 'user';
-    const serializedFilters = serializeFilters(filters);
-    const key = JSON.stringify({
-      filters: serializedFilters,
-      reconnectDelayMs,
-      scope,
+    const { stream } = await this.client.storage.streamEvents({
+      query: {
+        scope: opts.scope ?? 'user',
+        filters: JSON.stringify(filters),
+      },
+      signal: controller.signal,
     });
-    let shared = this.connections.get(key);
-    if (!shared || shared.controller.signal.aborted) {
-      const controller = new AbortController();
-      shared = {
-        controller,
-        errorHandlers: new Set(),
-        references: 0,
-        closed: Promise.resolve(),
-      };
-      const current = shared;
-      shared.closed = this.consumeConnection(
-        scope,
-        serializedFilters,
-        reconnectDelayMs,
-        shared,
-      ).finally(() => {
-        if (this.connections.get(key) === current) {
-          this.connections.delete(key);
+
+    const consume = (async () => {
+      try {
+        for await (const data of stream) {
+          await this.dispatchEvent(data);
         }
-        current.errorHandlers.clear();
-      });
-      this.connections.set(key, shared);
-    }
-
-    shared.references += 1;
-    const errorHandler = opts.onError
-      ? (error: unknown) => opts.onError?.(error)
-      : undefined;
-    if (errorHandler) shared.errorHandlers.add(errorHandler);
-
-    let isClosed = false;
-    let resolveClosed: () => void = () => {};
-    const closed = new Promise<void>((resolve) => {
-      resolveClosed = resolve;
+      } catch {
+        if (controller.signal.aborted) return;
+        throw new MacroError('event stream failed');
+      }
+    })();
+    consume.catch(() => {
+      // Connection errors are retried by the generated SSE client. A terminal
+      // failure after listen() has returned must not become an unhandled
+      // rejection; the caller already has `stop`.
     });
-    const connection = shared;
-    const close = () => {
-      if (isClosed) return;
-      isClosed = true;
-      opts.signal?.removeEventListener('abort', close);
-      if (errorHandler) connection.errorHandlers.delete(errorHandler);
-      connection.references -= 1;
-      if (connection.references === 0) connection.controller.abort();
-      resolveClosed();
+
+    return () => {
+      controller.abort();
     };
-    opts.signal?.addEventListener('abort', close, { once: true });
-    void connection.closed.then(close);
-
-    return { closed, close };
-  }
-
-  /**
-   * Open an event stream and return its close function.
-   *
-   * @deprecated Use {@link connect} to observe closure and connection errors.
-   */
-  async listen(opts: ListenOptions = {}): Promise<() => void> {
-    return this.connect(opts).close;
   }
 
   /**
@@ -300,58 +224,7 @@ export class MacroEvents {
     };
   }
 
-  private async consumeConnection(
-    scope: WebhookScope,
-    filters: string,
-    reconnectDelayMs: number,
-    connection: SharedEventConnection,
-  ): Promise<void> {
-    const { signal } = connection.controller;
-    while (!signal.aborted) {
-      try {
-        const { stream } = await this.client.storage.streamEvents({
-          query: { scope, filters },
-          signal,
-          sseMaxRetryAttempts: 1,
-          onSseError: (error) => this.reportError(connection, error),
-        });
-        for await (const data of stream) {
-          try {
-            await this.dispatchEvent(data);
-          } catch (error) {
-            this.reportError(connection, error);
-          }
-        }
-      } catch (error) {
-        if (!signal.aborted) this.reportError(connection, error);
-      }
-
-      if (!signal.aborted) {
-        await new Promise<void>((resolve) => {
-          const finish = () => {
-            clearTimeout(timeout);
-            signal.removeEventListener('abort', finish);
-            resolve();
-          };
-          const timeout = setTimeout(finish, reconnectDelayMs);
-          signal.addEventListener('abort', finish, { once: true });
-          if (signal.aborted) finish();
-        });
-      }
-    }
-  }
-
-  private reportError(connection: SharedEventConnection, error: unknown): void {
-    for (const handler of connection.errorHandlers) {
-      try {
-        handler(error);
-      } catch {
-        // Error observers must not terminate the shared stream.
-      }
-    }
-  }
-
-  private filtersFromHandlers(): EventFilter[] {
+  private filtersFromHandlers(): WebhookFilter[] {
     const events = [...this.handlers.entries()]
       .filter(([, set]) => set.size > 0)
       .map(([name]) => name);
@@ -364,19 +237,10 @@ export class MacroEvents {
     if (
       event === null ||
       typeof event !== 'object' ||
-      !('event_type' in event) ||
-      typeof event.event_type !== 'string' ||
-      !('event_id' in event) ||
-      typeof event.event_id !== 'string' ||
-      event.event_id.length === 0 ||
-      !('schema_version' in event) ||
-      typeof event.schema_version !== 'number' ||
-      !Number.isInteger(event.schema_version) ||
-      !('metadata' in event) ||
-      event.metadata === null ||
-      typeof event.metadata !== 'object'
-    )
-      throw new MacroError('invalid event payload');
+      !('event_type' in event)
+    ) {
+      return;
+    }
     const typed = event as MacroEvent;
     const handlers = this.handlers.get(typed.event_type);
     if (!handlers || handlers.size === 0) return;

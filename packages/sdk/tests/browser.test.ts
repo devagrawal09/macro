@@ -17,10 +17,7 @@ describe('browser SDK', () => {
   test('dispatches the same hydrated events over authenticated SSE', async () => {
     let request: Request | undefined;
     let tokenCalls = 0;
-    const delivered = Promise.withResolvers<{
-      eventId: string;
-      documentId: string;
-    }>();
+    const delivered = Promise.withResolvers<{ documentId: string }>();
     const event = {
       event_id: '01990f1d-a222-7000-8000-000000000002',
       schema_version: 1,
@@ -55,18 +52,15 @@ describe('browser SDK', () => {
     });
     macro.events.on('document.updated', (received) => {
       delivered.resolve({
-        eventId: received.event_id,
         documentId: received.document.id,
       });
     });
 
-    const connection = macro.events.connect();
+    const stop = await macro.events.listen();
     await expect(delivered.promise).resolves.toEqual({
-      eventId: event.event_id,
       documentId: event.metadata.document_id,
     });
-    connection.close();
-    await connection.closed;
+    stop();
 
     expect(tokenCalls).toBe(1);
     expect(request?.headers.get('authorization')).toBe('Bearer browser-token');

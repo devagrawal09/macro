@@ -40,25 +40,6 @@ the default whenever `requestedAs` is used) or `team` (the owning team's
 access, for team-owned bots — the default otherwise). Pass
 `auth: { type: 'bot', token, scope: ... }` to override.
 
-### Browser entrypoint
-
-Browser applications and extensions should import `@macro/sdk/browser`. This
-entrypoint never reads Node environment variables or the local-stack port map,
-so authentication must be supplied explicitly. A token function may refresh
-short-lived credentials before each request.
-
-```ts
-import { Macro } from '@macro/sdk/browser';
-
-const macro = new Macro({
-  auth: { type: 'user', token: getFreshToken },
-});
-```
-
-The browser entrypoint exposes the same namespaces and `macro.events.on()` /
-`macro.events.connect()` API. Bundle it into the browser application or
-extension; do not expose credentials to page globals.
-
 ### Accessing our API
 
 Our SDK acts lets you easily access any Macro "resource":
@@ -166,22 +147,18 @@ macro.events.on('channel.message_posted', async ({ metadata, message }) => {
   await message.reply('hi!');
 });
 
-const connection = macro.events.connect({
-  onError: (error) => console.error('event stream error', error),
-});
-await connection.closed;
+const stop = await macro.events.listen();
+// later: stop();
 ```
 
-`connect()` opens `GET /webhook/events/stream` with the same filter model as
-persisted webhooks. If you omit `filters`, it derives one filter from the event
-names already registered with `.on()`. Pass `scope: 'team'` for a team
-workspace (defaults to `'user'`). Equal subscriptions on one Macro instance
-share a request. Delivery is best-effort: reconnects refresh authentication,
-but events missed while disconnected are not replayed.
+`listen()` opens `GET /webhook/events/stream` with the same `WebhookFilters`
+model as persisted webhooks. If you omit `filters`, it derives one filter from
+the event names already registered with `.on()`. Pass `scope: 'team'` for a
+team workspace (defaults to `'user'`). Delivery is best-effort: there is no
+replay if you disconnect.
 
 Handlers receive the same hydrated payloads as webhook deliveries — ORM
-handles for every entity the event names, plus the broker `event_id` and
-`schema_version`. Use `event_id` as the idempotency key when needed.
+handles for every entity the event names.
 
 ### Persisted webhooks
 
@@ -227,4 +204,4 @@ functions (endpoints).
 Event names and payloads are **generated from the backend**: the Rust webhook
 crate exposes a `WebhookEvent` union in the storage OpenAPI spec, and
 `src/events/types.ts` derives `EventName` / `EventPayload` from it. SSE
-(`connect()`) and persisted webhooks (`webhook()`) dispatch the same union.
+(`listen()`) and persisted webhooks (`webhook()`) dispatch the same union.

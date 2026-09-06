@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use documents::domain::events::DocumentTopicEvent;
 use macro_event_broker::{Event, MacroEvent};
 use macro_user_id::user_id::MacroUserIdStr;
 use serde_json::json;
@@ -32,30 +31,6 @@ fn filters() -> WebhookFilters {
             ids: None,
         },
     ]
-}
-
-#[test]
-fn public_event_envelope_round_trips_flattened_document_event() {
-    let expected = json!({
-        "event_id": "01998a30-0a1b-7c2d-8e3f-4a5b6c7d8e9f",
-        "schema_version": 1,
-        "event_type": "document.purged",
-        "metadata": {
-            "document_id": "doc_123",
-        },
-    });
-
-    let event: WebhookEvent =
-        serde_json::from_value(expected.clone()).expect("valid public event envelope");
-    assert!(matches!(
-        &event.event,
-        WebhookEventData::Document(DocumentTopicEvent::Purged(metadata))
-            if metadata.document_id == "doc_123"
-    ));
-    assert_eq!(
-        serde_json::to_value(event).expect("serializable public event envelope"),
-        expected
-    );
 }
 
 #[test]

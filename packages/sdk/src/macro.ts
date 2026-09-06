@@ -4,9 +4,6 @@ import { MacroClient } from './utils/client';
 
 export type { MacroOpts } from './config';
 export type {
-  ConnectEventsOptions,
-  EventConnection,
-  EventFilter,
   ListenOptions,
   MacroEvents,
 } from './events/receiver';

@@ -26,9 +26,7 @@ export async function verifySignature(opts: {
     enc.encode(`${opts.timestamp}.${opts.rawBody}`),
   );
 
-  const hexDigest = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, '0'),
-  ).join('');
+  const hexDigest = new Uint8Array(digest).toHex();
 
   return `v1=${hexDigest}` === opts.signature;
 }

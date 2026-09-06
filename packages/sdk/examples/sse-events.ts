@@ -48,14 +48,12 @@ macro.events.on('channel.message_posted', async (e) => {
   console.log(`  -> ${from} posted in ${await e.channel.name()}`);
 });
 
-const connection = macro.events.connect({
-  onError: (error) => console.error('event stream error', error),
-});
+const stop = await macro.events.listen();
 console.log('listening for events over SSE; Ctrl+C to stop');
 
 const shutdown = () => {
-  connection.close();
+  stop();
+  process.exit(0);
 };
-void connection.closed.then(() => process.exit(0));
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
