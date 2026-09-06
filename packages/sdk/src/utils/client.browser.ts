@@ -12,7 +12,7 @@ function resolveBrowserAuth(opts: MacroOpts): MacroAuth {
   if (opts.auth) return opts.auth;
   if (opts.token) return { type: 'user', token: opts.token };
   throw new Error(
-    'no Macro API token - browser clients must pass token or auth to new Macro()',
+    'browser Macro requires an explicit token or auth option; browser clients must pass token or auth',
   );
 }
 

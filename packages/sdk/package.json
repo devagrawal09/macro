@@ -19,10 +19,6 @@
     "./generated/*": {
       "types": "./dist/generated/*/index.d.ts",
       "import": "./dist/generated/*/index.js"
-    },
-    "./browser": {
-      "types": "./dist/src/macro.browser.d.ts",
-      "import": "./dist/src/macro.browser.js"
     }
   },
   "files": [
@@ -42,6 +38,7 @@
     "build": "bun run build:js && bun run build:types",
     "prepublishOnly": "bun run build",
     "check": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome check",
     "format": "biome format --write",
     "generate:storage": "SDK_GENERATE_SERVICE=storage openapi-ts"

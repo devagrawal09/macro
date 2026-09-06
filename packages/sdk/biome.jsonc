@@ -3,9 +3,11 @@
   "files": {
     "includes": [
       "**/*.ts",
-      // orval output and copied specs are build artifacts, not style-checked.
+      // orval output, copied specs, and built output are build artifacts,
+      // not style-checked.
       "!generated",
       "!specs",
+      "!dist",
       "!node_modules"
     ]
   },

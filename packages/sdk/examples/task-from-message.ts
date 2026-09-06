@@ -32,17 +32,18 @@ macro.events.on('channel.message_posted', async (event) => {
   }
 });
 
-const connection = macro.events.connect({
+const stop = await macro.events.listen({
   filters: [
     {
       events: ['channel.message_posted'],
       ids: channelId ? [channelId] : undefined,
     },
   ],
-  onError: (error) => console.error('automation event error', error),
 });
 
-const shutdown = () => connection.close();
+const shutdown = () => {
+  stop();
+  process.exit(0);
+};
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-await connection.closed;

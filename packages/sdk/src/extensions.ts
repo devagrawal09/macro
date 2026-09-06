@@ -6,8 +6,13 @@ export const MACRO_EXTENSION_SLOT_ATTRIBUTE = 'data-macro-extension-slot';
 /** DOM attribute containing the versioned JSON context for a mount point. */
 export const MACRO_EXTENSION_CONTEXT_ATTRIBUTE = 'data-macro-extension-context';
 
-/** A placement currently exposed by the Macro web client. */
-export type MacroExtensionPlacement = 'entity-sidebar';
+/**
+ * A placement currently exposed by the Macro web client.
+ *
+ * - `entity-sidebar`: a section in an open entity's right sidebar.
+ * - `full-page`: a directly navigable page dedicated to one entity.
+ */
+export type MacroExtensionPlacement = 'entity-sidebar' | 'full-page';
 
 /** Entity context supplied to an entity-scoped extension placement. */
 export interface MacroExtensionEntity {

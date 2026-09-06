@@ -84,6 +84,65 @@ describe('observeMacroExtensionSlots', () => {
     expect(disconnects).toBe(1);
   });
 
+  test('mounts full-page context and rejects placement mismatches', () => {
+    class FakeMutationObserver {
+      observe() {}
+      disconnect() {}
+      takeRecords(): MutationRecord[] {
+        return [];
+      }
+    }
+    globalThis.MutationObserver =
+      FakeMutationObserver as unknown as typeof MutationObserver;
+
+    let contextValue = JSON.stringify({
+      apiVersion: 1,
+      environment: 'local',
+      placement: 'full-page',
+      entity: { id: 'doc_9', type: 'document' },
+    });
+    const host = {
+      isConnected: true,
+      getAttribute: (name: string) =>
+        name === MACRO_EXTENSION_CONTEXT_ATTRIBUTE ? contextValue : null,
+      matches: () => true,
+    } as unknown as HTMLElement;
+    const root = {
+      querySelectorAll: () => [host],
+    } as unknown as ParentNode;
+    const mounted: string[] = [];
+    const errors: unknown[] = [];
+
+    contextValue = contextValue.replace('full-page', 'entity-sidebar');
+    const stopMismatched = observeMacroExtensionSlots({
+      placement: 'full-page',
+      root,
+      onError: (error) => errors.push(error),
+      mount: (_host, context) => {
+        mounted.push(context.entity.id);
+        return undefined;
+      },
+    });
+    stopMismatched();
+    // A slot publishing another placement's context must not mount.
+    expect(mounted).toEqual([]);
+    expect(errors).toHaveLength(1);
+
+    contextValue = contextValue.replace('entity-sidebar', 'full-page');
+    const stop = observeMacroExtensionSlots({
+      placement: 'full-page',
+      root,
+      onError: (error) => errors.push(error),
+      mount: (_host, context) => {
+        mounted.push(`${context.placement}:${context.entity.id}`);
+        return undefined;
+      },
+    });
+    stop();
+    expect(mounted).toEqual(['full-page:doc_9']);
+    expect(errors).toHaveLength(1);
+  });
+
   test('does not observe an already-aborted signal', () => {
     let observers = 0;
     class FakeMutationObserver {
