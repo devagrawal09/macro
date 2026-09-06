@@ -68,6 +68,7 @@
 			"packages/collaboration",
 			"packages/loro-mirror",
 			"packages/lexical-core",
+			"packages/ui",
 			"services/ai-editing-worker",
 			"services/bots/anthropic-status-bot",
 			"services/bots/stripe-payment-bot",

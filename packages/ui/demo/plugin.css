@@ -1,0 +1,9 @@
+:root { color-scheme: light; background: #efede7; }
+:root[data-macro-ui-theme="dark"] { color-scheme: dark; background: #171714; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 14px; background: transparent; }
+#plugin { width: 100%; }
+.health-todos { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: health-todo; }
+.health-todos li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 7px; color: var(--macro-ui-muted, #6c6961); font: 12px/1.45 Inter, ui-sans-serif, sans-serif; counter-increment: health-todo; }
+.health-todos li::before { color: var(--macro-ui-subtle, #969188); font: 10px/1.75 ui-monospace, monospace; content: counter(health-todo, decimal-leading-zero); }
+:root[data-macro-ui-theme="dark"] .health-todos li { color: var(--macro-ui-muted, #c2beb3); }

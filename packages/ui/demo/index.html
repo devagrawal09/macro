@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Macro UI Document Health demo</title>
+    <link rel="stylesheet" href="./host.css" />
+  </head>
+  <body>
+    <main class="demo-shell">
+      <header class="demo-header">
+        <div>
+          <p class="demo-kicker">MACRO PLUGIN LAB</p>
+          <h1>Document Health</h1>
+          <p class="demo-copy">An isolated sidebar plugin using the first six <code>@macro/ui</code> components.</p>
+        </div>
+        <div class="demo-controls" aria-label="Demo controls">
+          <button id="theme" type="button">Use dark theme</button>
+          <button id="update" type="button">Simulate document update</button>
+        </div>
+      </header>
+      <section class="workspace" aria-label="Plugin host preview">
+        <article class="document">
+          <div class="document-topline"><span>Launch plan</span><span id="revision">Revision 12</span></div>
+          <h2>September launch readiness</h2>
+          <p>Finalize the release narrative, owner matrix, and customer communication before launch review.</p>
+          <div class="document-rule"></div>
+          <p class="document-label">OPEN ITEMS</p>
+          <p id="document-status">Confirm analytics owner. Add rollback criteria. Review support handoff.</p>
+        </article>
+        <aside class="plugin-rail">
+          <div class="plugin-label"><span>PLUGIN</span><span>entity.side_panel</span></div>
+          <iframe id="plugin-frame" title="Document Health plugin" src="./plugin.html"></iframe>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="./host.ts"></script>
+  </body>
+</html>

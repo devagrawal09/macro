@@ -1,0 +1,37 @@
+{
+  "name": "@macro/ui",
+  "version": "0.0.1",
+  "description": "Standalone SolidJS 2 components for Macro plugins",
+  "type": "module",
+  "sideEffects": ["./dist/styles.css"],
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "rm -rf dist && node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "demo": "vite --config vite.demo.config.ts",
+    "build:demo": "rm -rf dist-demo && vite build --config vite.demo.config.ts"
+  },
+  "peerDependencies": {
+    "solid-js": "2.0.0-rc.1",
+    "@solidjs/web": "2.0.0-rc.1"
+  },
+  "devDependencies": {
+    "@dom-expressions/compiler": "0.50.0-next.43",
+    "@solidjs/web": "2.0.0-rc.1",
+    "@testing-library/dom": "^10.4.0",
+    "jsdom": "^26.1.0",
+    "solid-js": "2.0.0-rc.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.1",
+    "vitest": "^3.2.4"
+  }
+}
