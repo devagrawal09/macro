@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@macro/sdk": ["../../packages/sdk/src/macro.ts"],
       "@macro/sdk/browser": ["../../packages/sdk/src/macro.browser.ts"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

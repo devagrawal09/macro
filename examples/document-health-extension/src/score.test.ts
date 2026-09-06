@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { analyzeDocument } from "./score";
+import {
+	analyzeDocument,
+	describeHealthScore,
+	parseDocumentHealth,
+} from "./score";
 
 describe("analyzeDocument", () => {
 	test("penalizes long sentences and open work", () => {
@@ -20,5 +24,19 @@ describe("analyzeDocument", () => {
 
 	test("returns a perfect score for concise completed prose", () => {
 		expect(analyzeDocument("A short, finished document.").score).toBe(100);
+	});
+
+	test("describes score bands", () => {
+		expect(describeHealthScore(100)).toBe("Healthy");
+		expect(describeHealthScore(90)).toBe("Healthy");
+		expect(describeHealthScore(89)).toBe("Needs attention");
+		expect(describeHealthScore(70)).toBe("Needs attention");
+		expect(describeHealthScore(69)).toBe("At risk");
+	});
+
+	test("parses a stored health snapshot", () => {
+		const health = analyzeDocument("TODO: ship it");
+		expect(parseDocumentHealth(JSON.stringify(health))).toEqual(health);
+		expect(parseDocumentHealth("not json")).toBeUndefined();
 	});
 });
