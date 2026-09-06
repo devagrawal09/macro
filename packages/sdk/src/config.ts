@@ -82,7 +82,8 @@ export type BotScope = 'user' | 'team';
 
 /** How the SDK authenticates with Macro.
  *
- * - `user`: a human's Macro API token, sent as `Authorization: Bearer`.
+ * - `user`: a human's Macro API token. `mak_` user API keys use
+ *   `x-macro-user-api-key`; other tokens use `Authorization: Bearer`.
  * - `bot`: an `mbot_` API key, sent as `x-macro-bot-token` together with
  *   `x-macro-bot-scope`. When `scope` is omitted it defaults to `user` when
  *   `requestedAs` is set (user scope requires an acting user) and `team`

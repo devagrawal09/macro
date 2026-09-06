@@ -165,7 +165,11 @@ export class MacroClientCore {
             "bot API key passed as a user token — use auth: { type: 'bot', token }",
           );
         }
-        request.headers.set('Authorization', `Bearer ${tok}`);
+        if (tok.startsWith('mak_')) {
+          request.headers.set('x-macro-user-api-key', tok);
+        } else {
+          request.headers.set('Authorization', `Bearer ${tok}`);
+        }
       }
       return request;
     });

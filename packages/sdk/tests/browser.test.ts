@@ -65,4 +65,21 @@ describe('browser SDK', () => {
     expect(tokenCalls).toBe(1);
     expect(request?.headers.get('authorization')).toBe('Bearer browser-token');
   });
+
+  test('sends mak_ credentials as user API keys', async () => {
+    let request: Request | undefined;
+    globalThis.fetch = (async (input) => {
+      request = input instanceof Request ? input : new Request(input);
+      return Response.json([]);
+    }) as typeof fetch;
+
+    const macro = new Macro({
+      token: 'mak_test',
+      hosts: { properties: 'https://properties.example.test' },
+    });
+    await macro.properties.list();
+
+    expect(request?.headers.get('x-macro-user-api-key')).toBe('mak_test');
+    expect(request?.headers.get('authorization')).toBeNull();
+  });
 });
