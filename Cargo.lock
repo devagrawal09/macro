@@ -9775,8 +9775,6 @@ name = "macro_cors"
 version = "0.1.0"
 dependencies = [
  "axum",
- "tokio",
- "tower 0.5.3",
  "tower-http",
  "workspace-hack",
 ]
@@ -12473,43 +12471,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "plugin_http_service"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "http-body-util",
- "macro_entrypoint",
- "macro_env_var",
- "plugin_platform",
- "rootcause",
- "serde",
- "serde_json",
- "tokio",
- "tower 0.5.3",
- "tracing",
- "workspace-hack",
-]
-
-[[package]]
-name = "plugin_platform"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "macro_env_var",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
- "workspace-hack",
-]
 
 [[package]]
 name = "png"

@@ -1,8 +1,4 @@
 import { openEntityInSplit } from '@app/features/activity/open-entity-in-split';
-import {
-  DOCUMENT_HEALTH_COMPONENT,
-  documentIdFromDocumentHealthComponentId,
-} from '@components/app/client-extension/documentHealthRoute';
 import { useActivityFeedFlag } from '@app/features/activity/use-activity-feed-flag';
 import type { EventEditorInitialValues } from '@app/features/calendar/components/composer/event-form-model';
 import type { CalendarEvent } from '@app/features/calendar/types';
@@ -34,6 +30,10 @@ import {
   type CrmViewConfig,
   decodeCrmViewParam,
 } from '@companies/crm/saved-views';
+import {
+  DOCUMENT_HEALTH_COMPONENT,
+  documentIdFromDocumentHealthComponentId,
+} from '@components/app/client-extension/documentHealthRoute';
 import { useIsAuthenticated } from '@core/auth';
 import { LoadingBlock } from '@core/component/LoadingBlock';
 import {
@@ -874,23 +874,6 @@ if (DEV_MODE_ENV) {
     )
   );
 
-  registerComponent(
-    'plugin-settings-fixture',
-    withAuth(
-      lazy(
-        () =>
-          import(
-            '@app/features/devtools/debug/plugin-settings-fixture/PluginSettingsFixture'
-          )
-      )
-    )
-  );
-
-  // NOTE (seamus) : putting pixel icons on dev/staging for aidan
-  registerComponent(
-    'pixel-icon',
-    lazy(() => import('@core/internal/PixelArtIconDemo'))
-  );
   registerComponent(
     'md-parse',
     lazy(
