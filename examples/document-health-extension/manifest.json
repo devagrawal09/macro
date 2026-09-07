@@ -29,7 +29,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["panel.html", "panel.js"],
+      "resources": ["panel.html", "assets/*"],
       "matches": [
         "https://macro.com/*",
         "https://dev.macro.com/*",

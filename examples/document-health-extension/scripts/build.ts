@@ -1,38 +1,72 @@
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { build } from "esbuild";
+import { copyFile, readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { build, type InlineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
-const outdir = "dist";
-const sdkBrowserEntry = join(
-	import.meta.dirname,
-	"../../../packages/sdk/src/macro.browser.ts",
-);
-await rm(outdir, { recursive: true, force: true });
-await mkdir(outdir, { recursive: true });
+const root = resolve(import.meta.dirname, "..");
+const outDir = join(root, "dist");
+const target = "chrome120";
 
-await build({
-	alias: { "@macro/sdk/browser": sdkBrowserEntry },
-	entryPoints: {
-		content: "src/content.ts",
-		panel: "src/panel.ts",
-		popup: "src/popup.ts",
+// Source aliases so neither workspace package needs a `dist` build first.
+const shared: InlineConfig = {
+	root,
+	configFile: false,
+	logLevel: "warn",
+	plugins: [solid()],
+	resolve: {
+		alias: {
+			"@macro/sdk/browser": resolve(root, "../../packages/sdk/src/macro.browser.ts"),
+			"@macro/ui": resolve(root, "../../packages/ui/src/index.ts"),
+		},
+		dedupe: ["solid-js"],
 	},
-	bundle: true,
-	format: "iife",
-	outdir,
-	platform: "browser",
-	target: "chrome120",
+};
+
+// Extension pages: module scripts referenced from panel.html and popup.html.
+await build({
+	...shared,
+	build: {
+		outDir,
+		emptyOutDir: true,
+		target,
+		assetsInlineLimit: 0,
+		rollupOptions: {
+			input: {
+				panel: join(root, "panel.html"),
+				popup: join(root, "popup.html"),
+			},
+		},
+	},
 });
 
-await Promise.all(
-	["manifest.json", "panel.html", "popup.html"].map((file) =>
-		copyFile(file, join(outdir, file)),
-	),
-);
+// Content script: one classic IIFE bundle, as Manifest V3 requires.
+await build({
+	...shared,
+	build: {
+		outDir,
+		emptyOutDir: false,
+		target,
+		lib: {
+			entry: join(root, "src/content.ts"),
+			formats: ["iife"],
+			name: "macroDocumentHealthContent",
+			fileName: () => "content.js",
+		},
+	},
+});
 
-for (const file of await readdir(outdir)) {
-	if (!file.endsWith(".js")) continue;
-	const source = await Bun.file(join(outdir, file)).text();
+await copyFile(join(root, "manifest.json"), join(outDir, "manifest.json"));
+
+async function* scripts(dir: string): AsyncGenerator<string> {
+	for (const entry of await readdir(dir, { withFileTypes: true })) {
+		const path = join(dir, entry.name);
+		if (entry.isDirectory()) yield* scripts(path);
+		else if (entry.name.endsWith(".js")) yield path;
+	}
+}
+
+for await (const file of scripts(outDir)) {
+	const source = await readFile(file, "utf8");
 	for (const forbidden of [
 		"eval(",
 		"new Function(",

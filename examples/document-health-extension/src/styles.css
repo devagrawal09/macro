@@ -1,0 +1,28 @@
+/* Layout only. Colors, type, and controls come from @macro/ui. */
+.dh-card {
+	min-width: 0;
+}
+.dh-page {
+	box-sizing: border-box;
+	height: 100%;
+	overflow-y: auto;
+	padding: 24px 16px;
+}
+.dh-page > .macro-ui-card {
+	max-width: 48rem;
+	margin: 0 auto;
+}
+.dh-metrics {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.dh-metric {
+	min-width: 0;
+}
+.dh-todos {
+	display: grid;
+	gap: 6px;
+	margin: 0;
+	padding: 0 0 0 18px;
+}

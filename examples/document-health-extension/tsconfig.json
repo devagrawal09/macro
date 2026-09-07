@@ -6,13 +6,16 @@
     "baseUrl": ".",
     "paths": {
       "@macro/sdk": ["../../packages/sdk/src/macro.ts"],
-      "@macro/sdk/browser": ["../../packages/sdk/src/macro.browser.ts"]
+      "@macro/sdk/browser": ["../../packages/sdk/src/macro.browser.ts"],
+      "@macro/ui": ["../../packages/ui/src/index.ts"]
     },
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["bun", "chrome"],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+  "include": ["scripts/**/*.ts", "src/**/*.ts", "src/**/*.tsx"]
 }

@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun run build:extension",
-    "build:extension": "bun scripts/build.ts",
+    "build": "bun scripts/build.ts",
     "demo": "bun src/demo.ts",
     "server": "bun src/server.ts",
     "check": "tsc --noEmit",
@@ -13,12 +12,14 @@
   },
   "dependencies": {
     "@macro/sdk": "file:../../packages/sdk",
+    "@macro/ui": "file:../../packages/ui",
     "solid-js": "^1.9.7"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
     "@types/chrome": "^0.1.32",
-    "esbuild": "^0.28.1",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vite": "^6.3.5",
+    "vite-plugin-solid": "^2.11.8"
   }
 }
