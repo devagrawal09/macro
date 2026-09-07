@@ -11,7 +11,6 @@ pub mod get_project;
 pub mod get_projects;
 pub mod project_permission;
 pub mod revert_delete_project;
-pub mod task_events;
 pub mod upload_folder;
 
 use std::sync::Arc;

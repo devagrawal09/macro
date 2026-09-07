@@ -46,26 +46,11 @@ fn get_allowed_origins() -> Vec<Cow<'static, str>> {
 }
 
 /// Generates the Cors layer which can be used in the `ServiceBuilder::layer` method.
-///
-/// Opaque origins (`Origin: null`) are always rejected by this default layer,
-/// even if they appear in `ALLOWED_ORIGINS`.
 pub fn cors_layer() -> CorsLayer {
     cors_layer_with_headers(vec![])
 }
 
-/// Generates a CORS layer that explicitly permits opaque origins.
-///
-/// This must only be selected by a non-production composition root. Ordinary
-/// origins retain the same allow-list behavior as [`cors_layer`].
-pub fn cors_layer_allow_opaque_origin() -> CorsLayer {
-    cors_layer_with_headers_and_opaque_origin(vec![], true)
-}
-
-fn is_allowed_origin(origin: &str, allow_opaque_origin: bool) -> bool {
-    if origin == "null" {
-        return allow_opaque_origin;
-    }
-
+fn is_allowed_origin(origin: &str) -> bool {
     let allowed_origins = get_allowed_origins();
     // Check static origins first
     if allowed_origins.contains(&Cow::Borrowed(origin)) {
@@ -92,13 +77,6 @@ fn is_allowed_origin(origin: &str, allow_opaque_origin: bool) -> bool {
 
 /// Generates the Cors layer with additional headers which can be used in the `ServiceBuilder::layer` method.
 pub fn cors_layer_with_headers(additional_headers: Vec<HeaderName>) -> CorsLayer {
-    cors_layer_with_headers_and_opaque_origin(additional_headers, false)
-}
-
-fn cors_layer_with_headers_and_opaque_origin(
-    additional_headers: Vec<HeaderName>,
-    allow_opaque_origin: bool,
-) -> CorsLayer {
     let mut headers = vec![AUTHORIZATION, CONTENT_TYPE];
     headers.extend(additional_headers);
     headers.extend(
@@ -119,11 +97,8 @@ fn cors_layer_with_headers_and_opaque_origin(
             Method::OPTIONS,
         ])
         .allow_origin(AllowOrigin::predicate(
-            move |origin: &HeaderValue, _request_parts| {
-                origin
-                    .to_str()
-                    .map(|origin| is_allowed_origin(origin, allow_opaque_origin))
-                    .unwrap_or(false)
+            |origin: &HeaderValue, _request_parts| {
+                origin.to_str().map(is_allowed_origin).unwrap_or(false)
             },
         ))
 }

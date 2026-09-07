@@ -1,8 +1,4 @@
-#[cfg(test)]
-mod test;
-
 use crate::api::context::{ApiContext, PropertiesHandlerState};
-use crate::config::Environment;
 use anyhow::Context;
 use axum::Router;
 use axum::extract::FromRef;
@@ -51,13 +47,6 @@ mod threads;
 // auth based constants
 pub const MACRO_INTERNAL_USER_ID: &str = "macro|INTERNAL@macro.com";
 
-fn cors_layer_for_environment(environment: Environment) -> tower_http::cors::CorsLayer {
-    match environment {
-        Environment::Local | Environment::Develop => macro_cors::cors_layer_allow_opaque_origin(),
-        Environment::Production => macro_cors::cors_layer(),
-    }
-}
-
 pub async fn setup_and_serve(state: ApiContext) -> anyhow::Result<()> {
     let app = api_router(state.clone())
         .layer(
@@ -69,7 +58,7 @@ pub async fn setup_and_serve(state: ApiContext) -> anyhow::Result<()> {
                     },
                     validate_api_version,
                 ))
-                .layer(cors_layer_for_environment(state.config.environment))
+                .layer(macro_cors::cors_layer())
                 .layer(CompressionLayer::new().gzip(true)),
         )
         // The health router is attached here so we don't attach the logging middleware to it
@@ -170,11 +159,6 @@ fn api_router(state: ApiContext) -> Router {
         .nest(
             "/projects",
             projects_hex::inbound::axum_router::projects_router(state.projects_state.clone())
-                .merge(
-                    projects_hex::inbound::axum_router::task_events::task_events_router(
-                        state.task_events_state.clone(),
-                    ),
-                )
                 .layer(ServiceBuilder::new().layer(axum::middleware::from_fn(
                     |req: Request, next: Next| async move {
                         match req.method() {

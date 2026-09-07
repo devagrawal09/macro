@@ -5,9 +5,6 @@
 //! call sites should choose the lifecycle they need (`create_markdown_text` or
 //! `create_text_file`).
 
-#[cfg(test)]
-mod test;
-
 use activity::Attribution;
 use anyhow::Context;
 use base64::Engine;
@@ -631,13 +628,6 @@ where
 
         response.document_response.document_metadata.content =
             DocumentContent::ready(DocumentContentLocation::SyncService);
-
-        if matches!(subtype, MarkdownSubtype::Task { .. })
-            && let Some(project_id) = project_id
-        {
-            self.document_service
-                .publish_task_created(&document_id, &project_id.to_string());
-        }
 
         Ok(CreatedDocument::new_markdown(response, initial_snapshot))
     }

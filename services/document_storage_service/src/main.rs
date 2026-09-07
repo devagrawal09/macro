@@ -64,11 +64,9 @@ use connection::{
 use connection_gateway_client::client::ConnectionGatewayClient;
 use documents_hex::domain::models::CloudFrontConfig;
 use documents_hex::domain::service::DocumentServiceImpl;
-use documents_hex::domain::task_events::ReceiptFilteredTaskEventSubscription;
 use documents_hex::inbound::axum_router::DocumentRouterState;
 use documents_hex::outbound::pg_document_repo::PgDocumentRepo;
 use documents_hex::outbound::s3_upload_url::S3UploadUrlAdapter;
-use documents_hex::outbound::task_event_bus::InMemoryTaskEventBus;
 use dynamodb_client::DynamodbClient;
 use email::{
     domain::{ports::ReadonlyEmailPreviewAdapter, service::EmailServiceImpl},
@@ -111,7 +109,7 @@ use notification::outbound::{notification_consumer::NotificationTopicConsumer, q
 use opensearch_client::OpensearchClient;
 use projects_hex::{
     domain::service::ProjectServiceImpl,
-    inbound::axum_router::{ProjectRouterState, task_events::TaskEventsRouterState},
+    inbound::axum_router::ProjectRouterState,
     outbound::{
         DynamoBulkUploadAdapter, PgProjectRepo, S3ProjectUploadAdapter, ShaCountAdapter,
         SqsProjectSearchIndexer,
@@ -523,29 +521,21 @@ async fn run() -> anyhow::Result<()> {
         macro_event_broker.clone(),
     ));
 
-    let task_event_bus = Arc::new(InMemoryTaskEventBus::new(256));
-    let task_event_subscription_service = Arc::new(ReceiptFilteredTaskEventSubscription::new(
-        task_event_bus.clone(),
+    let document_service = Arc::new(DocumentServiceImpl::new(
+        document_repo,
+        cloudfront_config,
+        sync_service_client.as_ref().clone(),
+        s3_upload_adapter,
+        TaskPropertiesAdapter {
+            system_properties: system_properties_service.clone(),
+            properties: properties_service.clone(),
+            entity_access_service: entity_access_service.clone(),
+        },
+        connection_service,
+        entity_access_management_service.clone(),
+        ForeignEntityServiceImpl::new(PgForeignEntityRepo::new(db.clone())),
+        macro_event_broker.clone(),
     ));
-
-    let document_service = Arc::new(
-        DocumentServiceImpl::new(
-            document_repo,
-            cloudfront_config,
-            sync_service_client.as_ref().clone(),
-            s3_upload_adapter,
-            TaskPropertiesAdapter {
-                system_properties: system_properties_service.clone(),
-                properties: properties_service.clone(),
-                entity_access_service: entity_access_service.clone(),
-            },
-            connection_service,
-            entity_access_management_service.clone(),
-            ForeignEntityServiceImpl::new(PgForeignEntityRepo::new(db.clone())),
-            macro_event_broker.clone(),
-        )
-        .with_task_event_publisher(task_event_bus),
-    );
 
     let foreign_entity_service = Arc::new(ForeignEntityServiceImpl::new(PgForeignEntityRepo::new(
         db.clone(),
@@ -1399,12 +1389,6 @@ async fn run() -> anyhow::Result<()> {
         channel_list_state,
         entity_access_service: entity_access_service.clone(),
         calendar_state,
-        task_events_state: TaskEventsRouterState {
-            project_service: project_service.clone(),
-            subscription_service: task_event_subscription_service,
-            access_service: entity_access_service.clone(),
-            authorization_state: authorization_state.clone(),
-        },
         projects_state: ProjectRouterState {
             service: project_service,
             access_service: entity_access_service.clone(),

@@ -17,9 +17,6 @@ axum = [
   "dep:macro_authorization",
   "dep:model-error-response",
   "dep:utoipa",
-  "dep:documents",
-  "documents/ports",
-  "documents/schema",
   "entity_access/axum",
 ]
 default = ["axum", "inbound", "outbound", "ports", "service"]

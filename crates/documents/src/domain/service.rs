@@ -12,7 +12,6 @@ use models_properties::EntityReference;
 use models_properties::api::SetPropertyValue;
 use std::borrow::Cow;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -69,7 +68,6 @@ use super::response::{
     CreateDocumentResponseData, DocumentMetadataWithContent, DocumentResponse,
     DocumentResponseMetadataWithContent, GetDocumentResponseData, LocationResponseV3,
 };
-use super::task_events::{TaskEvent, TaskEventPublisher, TaskEventType};
 
 /// The concrete document service implementation.
 pub struct DocumentServiceImpl<
@@ -99,8 +97,6 @@ pub struct DocumentServiceImpl<
     pub foreign_entity_service: F,
     /// Macro event broker for publishing document lifecycle events
     pub macro_event_broker: B,
-    /// Optional process-local task event publisher. Only DSS wires this port.
-    pub task_event_publisher: Option<Arc<dyn TaskEventPublisher>>,
 }
 
 fn ready_content_for_file_type(file_type: Option<FileType>) -> DocumentContent {
@@ -315,21 +311,6 @@ impl<
             entity_access_management_service,
             foreign_entity_service,
             macro_event_broker,
-            task_event_publisher: None,
-        }
-    }
-
-    /// Attach a task event publisher at the composition root.
-    pub fn with_task_event_publisher(mut self, publisher: Arc<dyn TaskEventPublisher>) -> Self {
-        self.task_event_publisher = Some(publisher);
-        self
-    }
-
-    fn publish_task_event(&self, event: TaskEvent) {
-        if let Some(publisher) = &self.task_event_publisher {
-            let _ = publisher.publish(event).inspect_err(|error| {
-                tracing::error!(error=?error, "failed to publish task event");
-            });
         }
     }
 
@@ -820,14 +801,6 @@ impl<
             .set_document_content(document_id, content)
             .await
             .map_err(|e| DocumentError::Internal(e.into()))
-    }
-
-    fn publish_task_created(&self, document_id: &str, project_id: &str) {
-        self.publish_task_event(TaskEvent::new(
-            TaskEventType::TaskCreated,
-            document_id,
-            project_id,
-        ));
     }
 
     #[tracing::instrument(skip(self))]
@@ -1434,19 +1407,6 @@ impl<
         let document_name = args
             .document_name
             .map(|s| FileType::clean_document_name(&s).unwrap_or(s));
-        let task_update_project_id =
-            if matches!(document_context.sub_type, Some(DocumentSubType::Task))
-                && document_name.is_some()
-                && args.project_id.is_none()
-            {
-                document_context
-                    .project_id
-                    .as_ref()
-                    .filter(|project_id| !project_id.is_empty())
-                    .cloned()
-            } else {
-                None
-            };
 
         let share_permission_updated = args.share_permission.is_some();
         let revoke_non_owner_user_access =
@@ -1531,14 +1491,6 @@ impl<
                 share_permission_updated,
             },
         ));
-
-        if let Some(project_id) = task_update_project_id {
-            self.publish_task_event(TaskEvent::new(
-                TaskEventType::TaskUpdated,
-                entity_access_receipt.entity().entity_id.clone(),
-                project_id,
-            ));
-        }
 
         Ok(())
     }
