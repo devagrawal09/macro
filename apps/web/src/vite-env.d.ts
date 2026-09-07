@@ -1,5 +1,4 @@
 interface ImportMetaEnv {
-  readonly VITE_TASK_INBOX_DOCUMENT_ID?: string;
   readonly __APP_VERSION__: string;
   readonly __LOCAL_JWT__: string;
   readonly __GIT_BRANCH__: string;

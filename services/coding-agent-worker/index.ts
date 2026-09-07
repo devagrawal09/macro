@@ -1,9 +1,7 @@
 import { msg } from '@macro/sdk';
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import { env } from './src/env';
 import { macro } from './src/macro';
-import { resolveWorkerServerPort } from './src/server-config';
 import { startSession } from './src/session';
 
 // "start_agent_session <repo-url> [prompt...]" in any channel the bot can see.
@@ -57,5 +55,5 @@ app.post('/macro-events', (c) => receiver(c.req.raw));
 // reverse tunnel, which delivers to this host port; 8787 otherwise.
 export default {
   fetch: app.fetch,
-  port: resolveWorkerServerPort(env),
+  port: macro._client.localPortmap?.sdkWebhookHostReceiverPort ?? 8787,
 };

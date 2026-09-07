@@ -1205,8 +1205,6 @@ export * from './surfaceState';
 export * from './syncServiceVersionID';
 export * from './systemSkillSummary';
 export * from './tagFilterMode';
-export * from './taskEvent';
-export * from './taskEventType';
 export * from './taskFilters';
 export * from './taskFiltersIncludeCbmAtmNc';
 export * from './teamOutOfOfficeItem';

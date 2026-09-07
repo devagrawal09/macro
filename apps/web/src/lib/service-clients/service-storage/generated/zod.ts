@@ -27227,13 +27227,6 @@ export const revertDeleteProjectResponse = zod.object({
 });
 
 /**
- * @summary Stream live task events for one authorized project.
- */
-export const taskEventsHandlerParams = zod.object({
-  id: zod.string().describe('ID of the project'),
-});
-
-/**
  * @summary Gets the users recently deleted items.
  */
 export const recentlyDeletedResponse = zod.object({

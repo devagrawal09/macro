@@ -8580,33 +8580,6 @@ export type SystemSkillSummary = {
 export type TagFilterMode = 'any' | 'all';
 
 /**
- * A task lifecycle event delivered to authorized project subscribers.
- */
-export type TaskEvent = {
-    /**
-     * Task document identifier.
-     */
-    document_id: string;
-    /**
-     * Unique UUID v4 generated for this emission.
-     */
-    event_id: string;
-    /**
-     * Closed task event kind.
-     */
-    event_type: TaskEventType;
-    /**
-     * Project containing the task.
-     */
-    project_id: string;
-};
-
-/**
- * Supported task lifecycle event kinds.
- */
-export type TaskEventType = 'task.created' | 'task.updated';
-
-/**
  * Task-only filters nested under document filters.
  */
 export type TaskFilters = {
@@ -13723,31 +13696,6 @@ export type RevertDeleteProjectResponses = {
 };
 
 export type RevertDeleteProjectResponse = RevertDeleteProjectResponses[keyof RevertDeleteProjectResponses];
-
-export type TaskEventsHandlerData = {
-    body?: never;
-    path: {
-        /**
-         * ID of the project
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/projects/{id}/task_events';
-};
-
-export type TaskEventsHandlerErrors = {
-    401: GenericErrorResponse;
-    500: GenericErrorResponse;
-};
-
-export type TaskEventsHandlerError = TaskEventsHandlerErrors[keyof TaskEventsHandlerErrors];
-
-export type TaskEventsHandlerResponses = {
-    200: TaskEvent;
-};
-
-export type TaskEventsHandlerResponse = TaskEventsHandlerResponses[keyof TaskEventsHandlerResponses];
 
 export type RecentlyDeletedData = {
     body?: never;
