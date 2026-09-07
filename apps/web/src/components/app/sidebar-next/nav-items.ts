@@ -50,7 +50,7 @@ export type SidebarNextNavItem = SidebarItem & {
  */
 const SIDEBAR_NEXT_NAV_ITEMS = [
   ...(LOCAL_ONLY
-    ? [
+    ? ([
         {
           id: documentHealthComponentId(DOCUMENT_HEALTH_DEMO_DOCUMENT_ID),
           label: 'Document Health',
@@ -60,7 +60,7 @@ const SIDEBAR_NEXT_NAV_ITEMS = [
           hotkey: 'h',
           hotkeyToken: TOKENS.sidebar.goTo.documentHealth,
         },
-      ]
+      ] satisfies SidebarNextNavItem[])
     : []),
   {
     id: 'inbox',
