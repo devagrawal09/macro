@@ -1,10 +1,10 @@
 # @macro/ui
 
-A small SolidJS 2 component library for interfaces rendered inside Macro plugin iframes.
+A small SolidJS component library for Macro client extensions. It targets the
+same Solid 1.9 line as the Macro web app, so one component tree can render
+inside the app, inside a browser-extension iframe, or in a standalone page.
 
 ## Components
-
-The first slice matches the Document Health example in `macro-customization-blog.md`:
 
 - `Badge`
 - `Button`
@@ -13,7 +13,10 @@ The first slice matches the Document Health example in `macro-customization-blog
 - `Stack`
 - `Text`
 
-Styles are included by the package entry point. Components use scoped `macro-ui-*` classes and readable standalone defaults. A plugin can override semantic values such as `--macro-ui-accent`, or set `data-macro-ui-theme="light|dark"` on an ancestor.
+Styles are included by the package entry point. Components use scoped
+`macro-ui-*` classes and readable standalone defaults. A consumer can override
+semantic values such as `--macro-ui-accent`, or set
+`data-macro-ui-theme="light|dark"` on an ancestor.
 
 ## Usage
 
@@ -30,16 +33,22 @@ import { Badge, Button, Card, Progress, Stack, Text } from "@macro/ui";
 </Card>
 ```
 
+`examples/document-health-extension` renders its sidebar card, full page, and
+extension panel from these components.
+
 ## Development
 
-The Solid 2 RC toolchain is currently tested against source checkouts. Defaults are `/Users/devagr/solid` and `/Users/devagr/dom-expressions`; override them with `MACRO_SOLID_CHECKOUT` and `MACRO_DOM_EXPRESSIONS_CHECKOUT`.
+The package builds with Vite and `vite-plugin-solid`; tests run under Vitest
+with jsdom. Dependencies come from the repository root `bun install`.
 
 ```sh
 bun run check
 bun run test
 bun run build
-bun run build:demo
 bun run demo
 ```
 
-The demo is a small host shell and an isolated Document Health iframe. Host buttons send document updates and light/dark theme changes across `postMessage`, modeling the browser SDK boundary without coupling this package to the Macro app runtime.
+The demo is a small host shell and an isolated Document Health iframe. Host
+buttons send document updates and light/dark theme changes across
+`postMessage`, modeling the browser SDK boundary without coupling this package
+to the Macro app runtime.

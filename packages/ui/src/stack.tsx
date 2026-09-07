@@ -1,5 +1,5 @@
 import type { ParentProps } from "solid-js";
-import type { JSX } from "@solidjs/web";
+import type { JSX } from "solid-js";
 import { joinClass } from "./internal/utils";
 
 export type StackGap = "xs" | "sm" | "md" | "lg" | "xl";

@@ -1,6 +1,6 @@
 import type { ParentProps } from "solid-js";
-import { Dynamic } from "@solidjs/web";
-import type { JSX } from "@solidjs/web";
+import { Dynamic } from "solid-js/web";
+import type { JSX } from "solid-js";
 import { joinClass } from "./internal/utils";
 
 export type TextAs = "span" | "p" | "div" | "label" | "h1" | "h2" | "h3";

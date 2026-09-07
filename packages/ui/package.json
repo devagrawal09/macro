@@ -1,9 +1,9 @@
 {
   "name": "@macro/ui",
   "version": "0.0.1",
-  "description": "Standalone SolidJS 2 components for Macro plugins",
+  "description": "SolidJS components for Macro client extensions",
   "type": "module",
-  "sideEffects": ["./dist/styles.css"],
+  "sideEffects": ["./dist/styles.css", "./src/styles.css"],
   "license": "MIT",
   "exports": {
     ".": {
@@ -14,24 +14,23 @@
   },
   "files": ["dist", "README.md"],
   "scripts": {
-    "build": "rm -rf dist && node scripts/build.mjs && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "demo": "vite --config vite.demo.config.ts",
     "build:demo": "rm -rf dist-demo && vite build --config vite.demo.config.ts"
   },
   "peerDependencies": {
-    "solid-js": "2.0.0-rc.1",
-    "@solidjs/web": "2.0.0-rc.1"
+    "solid-js": "^1.9.0"
   },
   "devDependencies": {
-    "@dom-expressions/compiler": "0.50.0-next.43",
-    "@solidjs/web": "2.0.0-rc.1",
+    "@solidjs/testing-library": "^0.8.10",
     "@testing-library/dom": "^10.4.0",
     "jsdom": "^26.1.0",
-    "solid-js": "2.0.0-rc.1",
+    "solid-js": "^1.9.7",
     "typescript": "^5.9.2",
-    "vite": "^7.3.1",
+    "vite": "^6.3.5",
+    "vite-plugin-solid": "^2.11.8",
     "vitest": "^3.2.4"
   }
 }

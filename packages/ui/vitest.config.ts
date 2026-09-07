@@ -1,24 +1,11 @@
-import path from "node:path";
 import { defineConfig } from "vitest/config";
-import solidPlugin from "./scripts/vite-solid-plugin.mjs";
-
-const SOLID_ROOT = process.env.MACRO_SOLID_CHECKOUT ?? "/Users/devagr/solid";
-const DOM_EXPRESSIONS_ROOT = process.env.MACRO_DOM_EXPRESSIONS_CHECKOUT ?? "/Users/devagr/dom-expressions";
+import solid from "vite-plugin-solid";
 
 export default defineConfig({
-  define: { __DEV__: "false", _SOLID_DEV_: "false", _DEV_: "false" },
-  resolve: {
-    alias: {
-      "solid-js": path.join(SOLID_ROOT, "packages/solid/src/index.ts"),
-      "@solidjs/web": path.join(SOLID_ROOT, "packages/solid-web/src/index.ts"),
-      "@solidjs/signals": path.join(SOLID_ROOT, "packages/solid-signals/src/index.ts"),
-      "@dom-expressions/runtime": path.join(DOM_EXPRESSIONS_ROOT, "packages/runtime"),
-      rxcore: path.join(SOLID_ROOT, "packages/solid-web/src/core.ts")
-    }
-  },
-  plugins: [solidPlugin()],
+  plugins: [solid()],
+  resolve: { dedupe: ["solid-js"] },
   test: {
     environment: "jsdom",
-    include: ["test/**/*.test.ts", "test/**/*.test.tsx"]
-  }
+    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+  },
 });

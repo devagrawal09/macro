@@ -1,6 +1,6 @@
 import type { ParentProps } from "solid-js";
-import { Show } from "@solidjs/web";
-import type { JSX } from "@solidjs/web";
+import { Show } from "solid-js";
+import type { JSX } from "solid-js";
 import { joinClass } from "./internal/utils";
 
 export interface CardProps extends ParentProps<{

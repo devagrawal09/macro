@@ -1,5 +1,5 @@
 import { createSignal, onCleanup } from "solid-js";
-import { insert } from "@solidjs/web";
+import { render } from "solid-js/web";
 import { Badge, Button, Card, Progress, Stack, Text } from "../src";
 
 type HealthState = {
@@ -76,4 +76,4 @@ function DocumentHealthPlugin() {
 
 const root = document.querySelector<HTMLElement>("#plugin");
 if (!root) throw new Error("Document Health plugin root is missing");
-insert(root, <DocumentHealthPlugin />);
+render(() => <DocumentHealthPlugin />, root);
