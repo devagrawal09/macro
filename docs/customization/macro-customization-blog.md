@@ -1,6 +1,6 @@
 Macro is the unified workspace that gives your team and your agents the context they need. But every team works differently. What if Macro could adapt to your workflows and your style of working?
 
-This post shows how automations, external integrations, agents, and plugins make Macro fit the way your team already works.
+This post shows how automations, external integrations, agents, and client extensions make Macro fit the way your team already works.
 
 ## One SDK for Your Workspace
 
@@ -136,34 +136,55 @@ Macro becomes both a source of context for other systems and the place where the
 
 ## Bringing Custom Workflows into the Interface
 
-Automations are only one part of the opportunity. Macro is also extensible at the interface layer through plugins: small applications that live next to, or directly inside, the workspace.
+Automations are only one part of the opportunity. Macro is also extensible at the interface layer through client extensions: small pieces of UI that live next to, or directly inside, the workspace, shipped as ordinary browser code.
 
-Macro supports two plugin shapes. Page plugins render as full applications with their own place in Macro's navigation. Sidebar plugins appear in the context of an entity such as a document, task, or project.
-
-_[Show the page-plugin experience]_
+Macro publishes versioned extension slots in its web client. An `entity-sidebar` slot appears in the context of an open document. A `full-page` slot is a directly navigable page dedicated to one document. Both carry a small JSON context (API version, environment, placement, entity) on the host element, so an extension never has to scrape Macro's DOM.
 
 _[Show the Document Health sidebar extension]_
 
-A plugin is a SolidJS component registered with `createPlugin`. The component receives its placement context and a browser-safe Macro SDK client, so its UI can query the workspace and react to live events:
+_[Show the Document Health full page]_
+
+The browser SDK exposes `observeMacroExtensionSlots`, which watches for matching slots and mounts your UI into each one. The extension owns its credentials and its rendering; here it renders a SolidJS component into a Shadow DOM root:
 
 ```tsx
-import { createPlugin, type MacroPluginProps } from "@macro/sdk/browser";
-import { createMemo, createResource, onCleanup } from "solid-js";
+import { Macro, observeMacroExtensionSlots } from "@macro/sdk/browser";
+import { render } from "solid-js/web";
 
-function DocumentHealthPanel(props: MacroPluginProps) {
-  const document = createMemo(() =>
-    props.macro.documents.byId(props.context.entity.id),
-  );
-  const [health, { refetch }] = createResource(document, async (current) =>
-    analyzeDocument(await current.content()),
+observeMacroExtensionSlots({
+  placement: "entity-sidebar",
+  mount(host, context) {
+    const macro = new Macro({
+      env: context.environment,
+      auth: { type: "user", token: getToken },
+    });
+    const root = host.attachShadow({ mode: "open" });
+    return render(
+      () => <DocumentHealthCard macro={macro} documentId={context.entity.id} />,
+      root,
+    );
+  },
+});
+```
+
+The component itself is plain Solid. It reads the workspace through the browser SDK and follows live events over the same `macro.events` API the server workflow uses:
+
+```tsx
+function DocumentHealthCard(props: { macro: Macro; documentId: string }) {
+  const [health, { refetch }] = createResource(
+    () => props.documentId,
+    (id) => fetchDocumentHealthSnapshot(props.macro, id),
   );
 
-  const unsubscribe = props.macro.events.subscribe({
-    event: "document.updated",
-    ids: [document().id],
-    handler: () => void refetch(),
+  const off = props.macro.events.on("document.updated", ({ document }) => {
+    if (document.id === props.documentId) void refetch();
   });
-  onCleanup(unsubscribe);
+  const listening = props.macro.events.listen({
+    filters: [{ events: ["document.updated"], ids: [props.documentId] }],
+  });
+  onCleanup(() => {
+    off();
+    void listening.then((stop) => stop());
+  });
 
   return (
     <section>
@@ -174,18 +195,13 @@ function DocumentHealthPanel(props: MacroPluginProps) {
     </section>
   );
 }
-
-export default createPlugin({
-  name: "Document Health",
-  sidebar: DocumentHealthPanel,
-});
 ```
 
 _[Show the score and open TODO list updating as the document changes]_
 
-## Making Plugins Feel Native
+## Making Extensions Feel Native
 
-The plugin above deliberately uses plain HTML. Plugins can bring any visual style, but they can also use Macro's optional component library: a set of SolidJS components for building interfaces that feel native to the workspace. The same view can be rendered with Macro components without changing its data logic:
+The component above deliberately uses plain HTML. Extensions can bring any visual style, but they can also use Macro's optional component library: a set of SolidJS components for building interfaces that feel native to the workspace. The same view can be rendered with Macro components without changing its data logic:
 
 ```tsx
 import { Badge, Button, Card, Progress, Stack, Text } from "@macro/ui";
@@ -208,7 +224,7 @@ function DocumentHealthView(props: {
 }
 ```
 
-The shared components handle familiar layout, typography, controls, and states while leaving plugins free to develop their own visual identity. Developers and agents can focus on the business logic instead of recreating frontend details, and the result still feels like it belongs inside Macro.
+The shared components handle familiar layout, typography, controls, and states while leaving extensions free to develop their own visual identity. Developers and agents can focus on the business logic instead of recreating frontend details, and the result still feels like it belongs inside Macro.
 
 ## Putting It All Together
 
@@ -218,7 +234,7 @@ Imagine a customer meeting follow-up workflow:
 
 1. Granola sends the meeting transcript to an integration endpoint.
 2. The integration creates a Macro document and asks an agent to extract decisions and follow-up tasks.
-3. A sidebar plugin shows those follow-ups next to the meeting notes as the team completes them.
+3. A sidebar extension shows those follow-ups next to the meeting notes as the team completes them.
 4. Macro sends the final summary and task status to the customer record in the CRM.
 
 _[Show the end-to-end experience]_
@@ -227,9 +243,9 @@ The workflow moves information into Macro, gives an agent the open-ended analysi
 
 ## Letting Agents Build the Customization
 
-The final piece is a Macro Skill that gives agents concise instructions for building workflows and plugins. It explains how to use the SDK, connect external systems, subscribe to events, build contextual interfaces, and package the result for a workspace.
+The final piece is a Macro Skill that gives agents concise instructions for building workflows and client extensions. It explains how to use the SDK, connect external systems, subscribe to events, build contextual interfaces, and package the result for a workspace.
 
-_[Show the short Skill file alongside the workflow and plugin it generates]_
+_[Show the short Skill file alongside the workflow and extension it generates]_
 
 With that skill available, someone could describe the behavior they want in natural language:
 
@@ -237,6 +253,6 @@ With that skill available, someone could describe the behavior they want in natu
 
 An agent can turn that request into the workflow and interface described above.
 
-The SDK lets developers turn workspace context into custom workflows. External integrations connect those workflows to the rest of the organization's systems. Agents take on open-ended work, plugins make the process visible inside an adaptable Macro interface, and the Macro Skill gives agents the building blocks to create the whole system on a team's behalf.
+The SDK lets developers turn workspace context into custom workflows. External integrations connect those workflows to the rest of the organization's systems. Agents take on open-ended work, client extensions make the process visible inside an adaptable Macro interface, and the Macro Skill gives agents the building blocks to create the whole system on a team's behalf.
 
 Teams should not have to move their work into another tool to automate it. Their workflows, agents, and custom interfaces can live directly on top of the workspace that already contains the people, communication, documents, tasks, and context needed to get the work done.

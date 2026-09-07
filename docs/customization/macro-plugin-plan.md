@@ -4,7 +4,7 @@ Last updated: 2026-09-04
 
 ## Purpose
 
-This file records research and planning prompted by **customizing-macro.md**. It focuses on whether Macro can avoid building a plugin control plane, how self-hosted JavaScript automations and browser extensions change the product boundary, and what the Macro SDK needs for one event-handler API over webhooks and SSE.
+This file records research and planning prompted by **customizing-macro.md** (same directory). It focuses on whether Macro can avoid building a plugin control plane, how self-hosted JavaScript automations and browser extensions change the product boundary, and what the Macro SDK needs for one event-handler API over webhooks and SSE.
 
 ## Current Direction
 
@@ -91,40 +91,30 @@ macro.events.on('channel.message_posted', async ({ message }) => {
 app.post('/webhook', macro.events.webhook());
 
 // Browser, local process, or long-running worker
-const connection = macro.events.connect();
-await connection.closed;
+const stop = await macro.events.listen();
+// Call stop() during shutdown.
 ~~~
 
 The on(...) call and hydrated payload stay identical. Only startup and delivery semantics differ.
 
 ## Completed Repository Research
 
-### A managed Plugin Platform already exists in this checkout
+### The earlier managed Plugin Platform was removed
 
-The direction is not merely avoiding hypothetical work. The checkout contains an early managed-platform implementation:
+Between 2026-08-25 and 2026-08-26 this repository briefly carried an early managed-platform implementation: a Rust control plane for releases, installations, and grants (`crates/plugin_platform`, `services/plugin_http_service`, a MacroDB migration), a Bun server-plugin runtime, a `definePlugin()` compiler and CLI, an iframe host protocol in the web app, a settings fixture, and a first UI kit. It also carried a "task inbox artifact" experiment that added a process-local task-events SSE endpoint and an opaque-origin CORS mode to the storage service.
 
-- **crates/plugin_platform**: manifests, releases, installations, grants, capability intersection, settings, and runtime ports.
-- **services/plugin_http_service**: a dev-only HTTP control surface for manifest admission, invocation, and settings.
-- **services/plugin-runtime**: a Bun process that executes admitted server bundles with timeout and concurrency controls.
-- **packages/plugin**: definePlugin(), project-page, entity-side-panel, and best-effort server-event authoring types.
-- **packages/plugin-cli**: check, build, and release-oriented tooling.
-- **packages/plugin-ui**: a small isolated UI component package.
-- **apps/web/src/features/plugins**: iframe bootstrap, MessageChannel protocol, host session, and demo/settings UI.
-- **crates/macro_db_client/migrations/20260826020912_create_plugin_platform_core**: immutable releases and installations.
+Under the userspace direction none of that is on the critical path, so it was removed from the working tree rather than left half-wired. The full history is preserved on the `archive/plugin-platform-2026-08` branch. What survived, and why:
 
-Under the userspace direction, most of this is no longer on the critical path. No deletion should happen until the direction is approved, but the intended disposition is:
-
-| Area | Recommendation | Reason |
+| Area | Outcome | Reason |
 | --- | --- | --- |
-| Rust control plane and plugin HTTP service | Remove or park | Exists to admit, install, grant, and launch Macro-hosted artifacts. |
-| Bun server runtime | Remove or park | Self-hosted SDK applications use their own runtime. |
-| Release/install database tables | Remove if never shipped; otherwise deprecate with a migration | Browser stores and user infrastructure own distribution and lifecycle. |
-| Server entrypoints in packages/plugin | Remove | macro.events.on() is already the better API. |
-| Plugin CLI release/deploy flow | Remove or reduce to examples/scaffolding | There is no Macro deployment target. |
-| Client contribution descriptors | Keep only if backed by a stable browser-extension host bridge | Page/sidebar placement still needs a contract. |
-| Iframe host protocol | Optional | Useful for strong UI isolation, but not required if an extension uses Shadow DOM. |
-| packages/plugin-ui | Keep only as an explicitly supported, dogfooded design system | It has value independent of hosting. |
-| packages/sdk | Keep and expand | This becomes the actual customization platform. |
+| Rust control plane, plugin HTTP service, migration | Removed | Existed to admit, install, grant, and launch Macro-hosted artifacts. |
+| Bun server runtime | Removed | Self-hosted SDK applications use their own runtime. |
+| `packages/plugin` server entrypoints and `definePlugin()` | Removed | `macro.events.on()` is already the better API. |
+| Plugin CLI release/deploy flow | Removed | There is no Macro deployment target. |
+| Iframe host protocol in the web app | Removed | The DOM slot contract in `packages/sdk/src/extensions.ts` replaces it; extensions own isolation via Shadow DOM or their own iframe. |
+| Task-events SSE and opaque-origin CORS | Removed | Superseded by the upstream generic `macro.events.listen()` stream. |
+| UI kit | Kept as `@macro/ui` (`packages/ui`), on the same Solid 1.9 line as the web app | It has value independent of hosting, and the Document Health example dogfoods it in every placement. |
+| `packages/sdk` browser entrypoint | Kept and expanded | This is the actual customization platform. |
 
 ### Webhook event pipeline
 
@@ -175,7 +165,7 @@ macro.events.on('channel.message_posted', async ({ message }) => {
   await macro.tasks.create({ name: await message.content() });
 });
 
-await macro.events.connect({
+const stop = await macro.events.listen({
   filters: [{ events: ['channel.message_posted'] }],
 });
 ~~~
@@ -296,15 +286,15 @@ const macro = new Macro({
 });
 
 const off = macro.events.on('document.updated', async (event) => {
-  console.log(event.event_id, await event.document.name());
+  console.log(event.event_type, await event.document.name());
 });
 
-const connection = macro.events.connect({
+const stop = await macro.events.listen({
   filters: [{ events: ['document.updated'], ids: [documentId] }],
   signal: abortController.signal,
 });
 
-await connection.closed;
+stop();
 off();
 ~~~
 
@@ -317,16 +307,14 @@ macro.events.on('document.updated', handler);
 app.post('/webhook', macro.events.webhook());
 ~~~
 
-The exact common API is events.on(name, handler), EventName, and the hydrated handler payload. webhook() and connect() are transport adapters and are expected to differ.
+The exact common API is events.on(name, handler), EventName, and the hydrated handler payload. webhook() and listen() are transport adapters and are expected to differ.
 
 ### Public types
 
 1. Make macro.events available in both Node and browser clients, not conditionally undefined when webhookSecret is absent.
-2. Correct MacroEvent to include event_id and schema_version from the actual broker envelope.
-3. Keep event_type, metadata, event_id, schema_version, and hydrated entity handles identical for webhook and SSE dispatch.
-4. Export EventName, EventMap, EventHandler, EventFilter, EventConnection, and connection error/status types from both entrypoints.
-5. Type filter event names as EventName rather than string.
-6. Keep onSelfMention() as a convenience layered on on(). It should work unchanged over both transports.
+2. Keep event_type, metadata, and hydrated entity handles identical for webhook and SSE dispatch.
+3. Export EventName, EventMap, EventHandler, and ListenOptions from both entrypoints.
+4. Keep onSelfMention() as a convenience layered on on(). It should work unchanged over both transports.
 
 ### Internal refactor
 
@@ -357,24 +345,20 @@ Reuse or extract that implementation rather than adding an EventSource dependenc
 
 ### Connection lifecycle
 
-Recommended shape:
+Use the upstream SDK lifecycle:
 
 ~~~ts
-interface EventConnection {
-  readonly closed: Promise<void>;
-  close(): void;
+interface ListenOptions {
+  filters?: WebhookFilter[];
+  signal?: AbortSignal;
 }
 
-interface ConnectEventsOptions {
-  filters: readonly EventFilter[];
-  signal?: AbortSignal;
-  onError?: (error: unknown) => void;
-}
+const stop = await macro.events.listen(options);
 ~~~
 
-connect() should begin connecting immediately. close() and AbortSignal must be idempotent. Token sources should be called again for each reconnect so refreshed credentials are used.
+listen() opens the stream and returns an idempotent stop function. The generated SSE client owns parsing and reconnection.
 
-For Solid views, connect on mount and abort on cleanup. For a server process, await connection.closed. Multiple handlers should share one underlying stream per Macro instance; do not open one SSE request per handler.
+For Solid views, listen on mount and call stop on cleanup. Register all handlers before listen so one stream can derive the complete filter set.
 
 ### Dispatch and failure semantics
 
@@ -382,7 +366,7 @@ For Solid views, connect on mount and abort on cleanup. For a server process, aw
 - Decide explicitly whether handlers run concurrently. Current webhook dispatch uses Promise.all.
 - Handler failures over webhooks reject the HTTP request and cause the whole delivery to retry, so other handlers can run more than once.
 - SSE has no per-event HTTP acknowledgement. For the first version, document it as best-effort and surface handler errors without pretending they trigger server retries.
-- Expose event_id so applications can implement idempotency.
+- Preserve the upstream event payload contract rather than maintaining a custom envelope.
 - On reconnect after a gap, client UIs should refetch canonical state before consuming more deltas.
 - Do not promise exactly-once delivery.
 
@@ -463,6 +447,26 @@ Recommended staged contract:
 Webhooks remain the recommended durable server integration until V2 exists.
 
 ## Browser Extension Host Contract
+
+### Shipped local placements
+
+The Macro web client now publishes two versioned placements through the DOM
+slot contract in packages/sdk/src/extensions.ts, both LOCAL_ONLY:
+
+- **entity-sidebar**: a section in an open document's right sidebar. The
+  Document Health card renders here and offers an "Open full page" action.
+- **full-page**: a directly navigable page dedicated to one document. Split
+  layout pages are addressed as `component/<id>` URL pairs, and per-instance
+  component ids embed their entity id (the `reminder-view~<id>` convention),
+  so the Document Health page lives at
+  `/app/component/document-health~<documentId>`. Outside local mode the
+  component id resolves but redirects to the inbox.
+
+Both placements consume events through the upstream SDK transport only:
+register handlers with `macro.events.on('document.updated', ...)`, open the
+stream with `await macro.events.listen({ filters: [{ events:
+['document.updated'], ids: [documentId] }] })`, and call the returned stop
+function on unmount. There is no separate client SSE implementation.
 
 ### Minimum supported contract
 
@@ -564,7 +568,7 @@ Avoid saying:
 
 ## Migration Of The Current Document Health Prototype
 
-The existing prototype in the plugin-platform-demo worktree proves remote client loading and dynamic server execution. Those are precisely the two platform responsibilities the new direction removes.
+The earlier prototype (archived on `archive/plugin-platform-2026-08`) proved remote client loading and dynamic server execution. Those are precisely the two platform responsibilities the new direction removes.
 
 ### Reuse
 
@@ -616,13 +620,11 @@ The Solid helper can implement mount() by rendering a component and returning So
 
 ### Phase 1: transport-neutral SDK events
 
-1. Fix the generated public event envelope to include event_id and schema_version.
-2. Extract dispatch and hydration from webhook verification.
-3. Instantiate macro.events in both root and browser Macro classes.
-4. Preserve webhook() in the server entrypoint.
-5. Add connect() and EventConnection to both entrypoints.
-6. Reuse the generated fetch SSE parser and request interceptors.
-7. Add unit tests showing webhook and SSE bytes produce the same typed hydrated payload.
+1. Use upstream macro.events.listen() for SSE delivery.
+2. Instantiate macro.events in both root and browser Macro classes.
+3. Preserve webhook() in the server entrypoint.
+4. Reuse the generated fetch SSE parser and request interceptors.
+5. Add unit tests for browser authentication and hydrated SSE payloads.
 
 ### Phase 2: best-effort generic SSE backend
 
@@ -668,7 +670,7 @@ This phase is a small developer-platform/auth control plane. Browser extensions 
 
 - The same events.on() handler compiles in @macro/sdk and @macro/sdk/browser.
 - A webhook and SSE copy of one broker envelope hydrate to the same event object shape.
-- event_id and schema_version are visible to handlers.
+- Browser handlers receive the same upstream hydrated payload as Node handlers.
 - One Macro instance opens at most one shared SSE connection for a given subscription set.
 - Abort, close, reconnect, malformed input, token refresh, and handler rejection are tested.
 - Browser output contains no environment-variable fallback or Node-only dependency.
@@ -715,7 +717,7 @@ Move managed hosting, a registry, remote client bundle deployment, and monetizat
 - **Decision:** Use fetch-based SSE so browser bearer/bot authentication works without URL tokens.
 - **Decision:** Browser extensions can replace client deployment/control-plane work, subject to a stable frontend host bridge.
 - **Decision:** No claim of fine-grained capability enforcement until credentials and backend authorization enforce it.
-- **Decision:** packages/plugin-ui is valuable only if maintained and dogfooded beyond a demo.
+- **Decision:** `@macro/ui` is valuable only if maintained and dogfooded beyond a demo; the Document Health example is the first consumer.
 - **Decision:** Managed hosting remains a future product, not an MVP prerequisite.
 
 ## Open Product Decisions
