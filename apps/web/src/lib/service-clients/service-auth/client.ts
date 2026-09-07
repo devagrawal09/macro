@@ -99,7 +99,7 @@ function getExpiresAt(token: string) {
 
 // Promise to track ongoing refresh operations to prevent multiple concurrent refreshes
 let ongoingRefresh: Promise<string | null> | null = null;
-export async function getAccessToken(): Promise<string | null> {
+async function getAccessToken(): Promise<string | null> {
   const data = accessTokenData();
   if (!data) {
     return null;

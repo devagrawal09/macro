@@ -47,6 +47,12 @@
       "@macro/sdk/browser": [
         "../../packages/sdk/src/macro.browser.ts"
       ],
+      "@macro/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@macro-examples/document-health-extension/*": [
+        "../../examples/document-health-extension/*"
+      ],
       "@sandbox-sizes": [
         "../../crates/agent_harness/sandbox_sizes.json"
       ],

@@ -1,8 +1,8 @@
 import { useSplitPanelOrThrow } from '@components/app/split-layout/layoutUtils';
 import { openDocument } from '@core/component/LexicalMarkdown/component/core/BlockLink';
+import { DocumentHealthPage } from '@macro-examples/document-health-extension/src/DocumentHealthPage';
 import { createCallback } from '@solid-primitives/rootless';
 import { ErrorBoundary, onMount, Suspense } from 'solid-js';
-import DocumentHealthPage from '../../../../../../examples/document-health-extension/src/DocumentHealthPage';
 import { localExtensionEnvironment, localMacro } from './localMacroClient';
 
 /**

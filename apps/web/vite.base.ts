@@ -178,6 +178,27 @@ export const createAppViteConfig = (): UserConfigFn => {
         alias: [
           // Nix injects its Tauri API alias here inside the sandboxed build.
           // NIX_TAURI_ALIAS
+          // Source aliases for the local-only client-extension demo, so the
+          // example and @macro/ui resolve without a `dist` build and their
+          // own imports resolve the same way as the app's.
+          {
+            find: /^@macro\/sdk\/browser$/,
+            replacement: resolve(
+              __dirname,
+              '../../packages/sdk/src/macro.browser.ts'
+            ),
+          },
+          {
+            find: /^@macro\/ui$/,
+            replacement: resolve(__dirname, '../../packages/ui/src/index.ts'),
+          },
+          {
+            find: /^@macro-examples\/document-health-extension\/(.*)$/,
+            replacement: `${resolve(
+              __dirname,
+              '../../examples/document-health-extension'
+            )}/$1`,
+          },
         ],
         dedupe: [
           // Keep Loro resolution here: tsconfig path aliases cache a versioned
