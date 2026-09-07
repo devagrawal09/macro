@@ -1,5 +1,10 @@
 import { Macro, type MacroOpts } from "@macro/sdk";
-import { analyzeDocument, DOCUMENT_HEALTH_PROPERTY } from "./score";
+import {
+	analyzeDocument,
+	DOCUMENT_HEALTH_PROPERTY,
+	hashContent,
+	parseDocumentHealth,
+} from "./score";
 
 const LOCAL_WEBHOOK_URL = "http://sdk-webhook-relay:8787/macro-events";
 const env = readEnvironment();
@@ -79,21 +84,26 @@ try {
 	type Document = ReturnType<typeof eventMacro.documents.byId>;
 
 	const updateHealth = async (eventId: string, document: Document) => {
-		const health = analyzeDocument(await document.content());
-		const serialized = JSON.stringify(health);
+		const content = await document.content();
 		const properties = await document.properties();
 		const current = properties.find(
 			({ definition }) => definition.id === property.id,
 		);
-		if (
-			current?.value?.type === "String" &&
-			current.value.value === serialized
-		) {
-			console.log(`[${eventId}] ${document.id}: unchanged (${health.score})`);
+		const stored = parseDocumentHealth(
+			current?.value?.type === "String" ? current.value.value : undefined,
+		);
+		// The snapshot carries the content hash, so the sidebar can tell a
+		// fresh write from a stale read. Skip the write when nothing changed.
+		if (stored && stored.contentHash === hashContent(content)) {
+			console.log(`[${eventId}] ${document.id}: unchanged (${stored.score})`);
 			return;
 		}
 
-		await document.setProperty(property, { type: "string", value: serialized });
+		const health = analyzeDocument(content);
+		await document.setProperty(property, {
+			type: "string",
+			value: JSON.stringify(health),
+		});
 		console.log(`[${eventId}] ${document.id}: stored score ${health.score}`);
 	};
 

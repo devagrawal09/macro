@@ -4,23 +4,38 @@ import {
 	fetchDocumentHealthSnapshot,
 	subscribeToDocumentHealth,
 } from "./health-data";
-import { analyzeDocument, DOCUMENT_HEALTH_PROPERTY } from "./score";
+import {
+	analyzeDocument,
+	DOCUMENT_HEALTH_PROPERTY,
+	type DocumentHealth,
+} from "./score";
 
 type UpdateHandler = (event: { document: { id: string } }) => void;
 
 function createMacroStub(options: {
-	properties?: Array<{
-		definition: { display_name: string };
-		value?: { type: string; value: unknown };
-	}>;
+	/** Snapshots returned by successive property reads; the last one repeats. */
+	snapshots?: Array<DocumentHealth | undefined>;
 	listen?: () => Promise<() => void>;
 }) {
 	const handlers: UpdateHandler[] = [];
+	const snapshots = options.snapshots ?? [];
+	let reads = 0;
 	let unsubscribed = 0;
 	const macro = {
 		documents: {
 			byId: () => ({
-				properties: async () => options.properties ?? [],
+				properties: async () => {
+					const snapshot = snapshots[Math.min(reads, snapshots.length - 1)];
+					reads += 1;
+					return snapshot
+						? [
+								{
+									definition: { display_name: DOCUMENT_HEALTH_PROPERTY },
+									value: { type: "String", value: JSON.stringify(snapshot) },
+								},
+							]
+						: [];
+				},
 			}),
 		},
 		events: {
@@ -38,135 +53,126 @@ function createMacroStub(options: {
 		emit: (documentId: string) => {
 			for (const handler of handlers) handler({ document: { id: documentId } });
 		},
+		reads: () => reads,
 		unsubscribedCount: () => unsubscribed,
 	};
 }
 
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
 describe("fetchDocumentHealthSnapshot", () => {
 	test("parses the stored Document Health string property", async () => {
 		const snapshot = analyzeDocument("TODO: ship it");
-		const { macro } = createMacroStub({
-			properties: [
-				{
-					definition: { display_name: "Other" },
-					value: { type: "String", value: "junk" },
-				},
-				{
-					definition: { display_name: DOCUMENT_HEALTH_PROPERTY },
-					value: { type: "String", value: JSON.stringify(snapshot) },
-				},
-			],
-		});
-
-		expect(await fetchDocumentHealthSnapshot(macro, "doc_1")).toEqual(snapshot);
+		const { macro } = createMacroStub({ snapshots: [snapshot] });
+		expect(await fetchDocumentHealthSnapshot(macro, "doc")).toEqual(snapshot);
 	});
 
-	test("returns undefined for a missing or non-string property", async () => {
-		const missing = createMacroStub({ properties: [] });
-		expect(await fetchDocumentHealthSnapshot(missing.macro, "doc_1")).toBe(
-			undefined,
-		);
-
-		const wrongType = createMacroStub({
-			properties: [
-				{
-					definition: { display_name: DOCUMENT_HEALTH_PROPERTY },
-					value: { type: "Number", value: 42 },
-				},
-			],
-		});
-		expect(await fetchDocumentHealthSnapshot(wrongType.macro, "doc_1")).toBe(
-			undefined,
-		);
+	test("returns undefined when the workflow has not written yet", async () => {
+		const { macro } = createMacroStub({ snapshots: [undefined] });
+		expect(await fetchDocumentHealthSnapshot(macro, "doc")).toBeUndefined();
 	});
 });
 
 describe("subscribeToDocumentHealth", () => {
-	test("notifies for matching events only, with a trailing refetch", async () => {
-		const stub = createMacroStub({});
-		let changes = 0;
+	test("refetches until the stored content hash changes", async () => {
+		const before = analyzeDocument("first draft");
+		const after = analyzeDocument("second draft");
+		const stub = createMacroStub({ snapshots: [before, before, after] });
+		const received: Array<DocumentHealth | undefined> = [];
+
 		const stop = subscribeToDocumentHealth({
 			macro: stub.macro,
-			documentId: "doc_1",
-			onChange: () => {
-				changes += 1;
-			},
-			refreshDelayMs: 1,
+			documentId: "doc",
+			current: () => before,
+			onSnapshot: (snapshot) => received.push(snapshot),
+			retryDelaysMs: [0, 0, 0],
 		});
+		stub.emit("doc");
+		await settle();
 
-		stub.emit("doc_other");
-		expect(changes).toBe(0);
-
-		stub.emit("doc_1");
-		expect(changes).toBe(1);
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(changes).toBe(2);
-
+		expect(received).toEqual([after]);
+		expect(stub.reads()).toBe(3);
 		stop();
-		stub.emit("doc_1");
-		expect(changes).toBe(2);
-		expect(stub.unsubscribedCount()).toBe(1);
 	});
 
-	test("closes a stream that resolves after the subscription stopped", async () => {
-		let streamStops = 0;
-		let resolveListen: ((stop: () => void) => void) | undefined;
+	test("gives up after the last delay when nothing changed", async () => {
+		const same = analyzeDocument("unchanged");
+		const stub = createMacroStub({ snapshots: [same] });
+		const received: unknown[] = [];
+
+		const stop = subscribeToDocumentHealth({
+			macro: stub.macro,
+			documentId: "doc",
+			current: () => same,
+			onSnapshot: (snapshot) => received.push(snapshot),
+			retryDelaysMs: [0],
+		});
+		stub.emit("doc");
+		await settle();
+
+		expect(received).toEqual([]);
+		expect(stub.reads()).toBe(2);
+		stop();
+	});
+
+	test("ignores events for other documents", async () => {
+		const stub = createMacroStub({ snapshots: [analyzeDocument("x")] });
+		const stop = subscribeToDocumentHealth({
+			macro: stub.macro,
+			documentId: "doc",
+			current: () => undefined,
+			onSnapshot: () => {},
+			retryDelaysMs: [],
+		});
+		stub.emit("other");
+		await settle();
+		expect(stub.reads()).toBe(0);
+		stop();
+	});
+
+	test("stop before listen resolves still closes the stream", async () => {
+		let stopped = 0;
+		let resolveListen: (stop: () => void) => void = () => {};
 		const stub = createMacroStub({
 			listen: () =>
-				new Promise<() => void>((resolve) => {
+				new Promise((resolve) => {
 					resolveListen = resolve;
 				}),
 		});
 
 		const stop = subscribeToDocumentHealth({
 			macro: stub.macro,
-			documentId: "doc_1",
-			onChange: () => {},
+			documentId: "doc",
+			current: () => undefined,
+			onSnapshot: () => {},
 		});
 		stop();
 		stop();
+		resolveListen(() => {
+			stopped += 1;
+		});
+		await settle();
 
-		resolveListen?.(() => {
-			streamStops += 1;
-		});
-		await Promise.resolve();
-		expect(streamStops).toBe(1);
+		expect(stopped).toBe(1);
 		expect(stub.unsubscribedCount()).toBe(1);
 	});
 
-	test("reports stream failures without throwing, unless already stopped", async () => {
-		const failure = new Error("no stream");
-		const failing = createMacroStub({
+	test("reports a stream that cannot be established", async () => {
+		const errors: unknown[] = [];
+		const stub = createMacroStub({
 			listen: async () => {
-				throw failure;
+				throw new Error("offline");
 			},
 		});
-		const errors: unknown[] = [];
 		const stop = subscribeToDocumentHealth({
-			macro: failing.macro,
-			documentId: "doc_1",
-			onChange: () => {},
+			macro: stub.macro,
+			documentId: "doc",
+			current: () => undefined,
+			onSnapshot: () => {},
 			onStreamError: (error) => errors.push(error),
 		});
-		await Promise.resolve();
-		await Promise.resolve();
-		expect(errors).toEqual([failure]);
+		await settle();
+		expect(errors).toHaveLength(1);
 		stop();
-
-		const failingLate = createMacroStub({
-			listen: async () => {
-				throw failure;
-			},
-		});
-		const lateErrors: unknown[] = [];
-		subscribeToDocumentHealth({
-			macro: failingLate.macro,
-			documentId: "doc_1",
-			onChange: () => {},
-			onStreamError: (error) => lateErrors.push(error),
-		})();
-		await Promise.resolve();
-		await Promise.resolve();
-		expect(lateErrors).toEqual([]);
 	});
 });

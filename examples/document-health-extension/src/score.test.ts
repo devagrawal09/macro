@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	analyzeDocument,
 	describeHealthScore,
+	hashContent,
 	parseDocumentHealth,
 } from "./score";
 
@@ -26,6 +27,18 @@ describe("analyzeDocument", () => {
 		expect(analyzeDocument("A short, finished document.").score).toBe(100);
 	});
 
+	test("stamps a stable content hash and the analysis time", () => {
+		const at = new Date("2026-09-07T00:00:00.000Z");
+		const first = analyzeDocument("same words", at);
+		const second = analyzeDocument("same words", new Date());
+		expect(first.contentHash).toBe(hashContent("same words"));
+		expect(first.contentHash).toBe(second.contentHash);
+		expect(first.analyzedAt).toBe("2026-09-07T00:00:00.000Z");
+		expect(analyzeDocument("other words").contentHash).not.toBe(
+			first.contentHash,
+		);
+	});
+
 	test("describes score bands", () => {
 		expect(describeHealthScore(100)).toBe("Healthy");
 		expect(describeHealthScore(90)).toBe("Healthy");
@@ -38,5 +51,7 @@ describe("analyzeDocument", () => {
 		const health = analyzeDocument("TODO: ship it");
 		expect(parseDocumentHealth(JSON.stringify(health))).toEqual(health);
 		expect(parseDocumentHealth("not json")).toBeUndefined();
+		const { contentHash: _, ...legacy } = health;
+		expect(parseDocumentHealth(JSON.stringify(legacy))).toBeUndefined();
 	});
 });

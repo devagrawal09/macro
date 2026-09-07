@@ -4,12 +4,29 @@ export interface DocumentHealth {
 	readingMinutes: number;
 	longSentences: number;
 	openTodos: string[];
+	/** Stable hash of the analyzed content. Changes only when the content does. */
+	contentHash: string;
+	/** ISO timestamp of the analysis that produced this snapshot. */
+	analyzedAt: string;
 }
 
 export const DOCUMENT_HEALTH_PROPERTY = "Document Health";
 
+/** FNV-1a 32-bit hash, hex encoded. Small, dependency-free, deterministic. */
+export function hashContent(content: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < content.length; index++) {
+		hash ^= content.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
+}
+
 /** Calculate small, deterministic readability and completeness signals. */
-export function analyzeDocument(content: string): DocumentHealth {
+export function analyzeDocument(
+	content: string,
+	analyzedAt: Date = new Date(),
+): DocumentHealth {
 	const words = content.match(/\b[\w'-]+\b/g)?.length ?? 0;
 	const sentences = content
 		.split(/[.!?]+(?:\s|$)/)
@@ -29,6 +46,8 @@ export function analyzeDocument(content: string): DocumentHealth {
 		readingMinutes: Math.max(1, Math.ceil(words / 220)),
 		longSentences,
 		openTodos,
+		contentHash: hashContent(content),
+		analyzedAt: analyzedAt.toISOString(),
 	};
 }
 
@@ -53,7 +72,9 @@ export function parseDocumentHealth(
 			typeof parsed.readingMinutes !== "number" ||
 			typeof parsed.longSentences !== "number" ||
 			!Array.isArray(parsed.openTodos) ||
-			!parsed.openTodos.every((todo) => typeof todo === "string")
+			!parsed.openTodos.every((todo) => typeof todo === "string") ||
+			typeof parsed.contentHash !== "string" ||
+			typeof parsed.analyzedAt !== "string"
 		) {
 			return undefined;
 		}
