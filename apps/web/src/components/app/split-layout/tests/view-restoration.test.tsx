@@ -15,6 +15,7 @@ import {
   agentsRoute,
   agentsViewRoute,
   appRoute,
+  artifactsRoute,
   calendarSplitRoute,
   channelDetailRoute,
   channelsSplitRoute,
@@ -132,6 +133,10 @@ function setup(
               ...connectionsRoute,
               component: () => <AuthenticatedView viewId="agents" />,
             },
+            {
+              ...artifactsRoute,
+              component: () => <AuthenticatedView viewId="agents" />,
+            },
             { ...calendarSplitRoute, component: AuthenticatedView },
             {
               ...channelsSplitRoute,
@@ -202,25 +207,28 @@ afterEach(() => {
 });
 
 describe('opt-in view restoration', () => {
-  it('keeps Connections navigation in the same pane through Back and Forward', async () => {
-    const { router, manager, history } = setup('/agents');
-    const handle = manager.activeSplit()!;
-    openAgentsPage(manager, 'connections');
-    await router.settled();
-    expect(manager.splits()).toHaveLength(1);
-    expect(history.read().path).toBe('/connections');
-    expect(handle.content()).toMatchObject({ id: 'connections' });
+  it.each(['connections', 'artifacts'] as const)(
+    'keeps %s navigation in the same pane through Back and Forward',
+    async (page) => {
+      const { router, manager, history } = setup('/agents');
+      const handle = manager.activeSplit()!;
+      openAgentsPage(manager, page);
+      await router.settled();
+      expect(manager.splits()).toHaveLength(1);
+      expect(history.read().path).toBe(`/${page}`);
+      expect(handle.content()).toMatchObject({ id: page });
 
-    await router.navigatePane(router.panes()[0]!, '/home');
-    history.back();
-    expect(history.read().path).toBe('/connections');
-    expect(handle.content()).toMatchObject({ id: 'connections' });
-    history.back();
-    expect(history.read().path).toBe('/agents');
-    history.forward();
-    expect(history.read().path).toBe('/connections');
-    expect(handle.content()).toMatchObject({ id: 'connections' });
-  });
+      await router.navigatePane(router.panes()[0]!, '/home');
+      history.back();
+      expect(history.read().path).toBe(`/${page}`);
+      expect(handle.content()).toMatchObject({ id: page });
+      history.back();
+      expect(history.read().path).toBe('/agents');
+      history.forward();
+      expect(history.read().path).toBe(`/${page}`);
+      expect(handle.content()).toMatchObject({ id: page });
+    }
+  );
 
   it.each([
     ['view-agents', '/connections'],
@@ -243,23 +251,26 @@ describe('opt-in view restoration', () => {
     expect(formatPanePath(router.routes, location.route)).toBe(path);
   });
 
-  it('resumes a directly opened Connections page when returning to Agents', async () => {
-    const { router, manager } = setup('/connections');
-    const pane = router.panes()[0]!;
-    const handle = manager.activeSplit()!;
-    await router.settled();
-    expect(handle.content()).toMatchObject({ id: 'connections' });
-    await router.navigatePane(pane, '/home');
-    manager.openWithSplit(
-      { type: 'component', id: 'agents' },
-      { handle, resume: true }
-    );
-    await router.settled();
-    expect(router.entry(pane)?.location.route.matches.at(-1)?.id).toBe(
-      'view-connections'
-    );
-    expect(handle.content()).toMatchObject({ id: 'connections' });
-  });
+  it.each(['connections', 'artifacts'])(
+    'resumes a directly opened %s page when returning to Agents',
+    async (page) => {
+      const { router, manager } = setup(`/${page}`);
+      const pane = router.panes()[0]!;
+      const handle = manager.activeSplit()!;
+      await router.settled();
+      expect(handle.content()).toMatchObject({ id: page });
+      await router.navigatePane(pane, '/home');
+      manager.openWithSplit(
+        { type: 'component', id: 'agents' },
+        { handle, resume: true }
+      );
+      await router.settled();
+      expect(router.entry(pane)?.location.route.matches.at(-1)?.id).toBe(
+        `view-${page}`
+      );
+      expect(handle.content()).toMatchObject({ id: page });
+    }
+  );
 
   describe.each([
     { view: 'channels', detail: '/channels/channel-one', targetIndex: 0 },

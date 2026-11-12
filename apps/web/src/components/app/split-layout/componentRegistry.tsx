@@ -345,6 +345,9 @@ registerComponent('agents', () => <AgentsRouteView />, {
 registerComponent('connections', () => <AgentsRouteView />, {
   splitPanelLayout: 'composable',
 });
+registerComponent('artifacts', () => <AgentsRouteView />, {
+  splitPanelLayout: 'composable',
+});
 registerComponent(
   'mail',
   () => <MailRouteView />,

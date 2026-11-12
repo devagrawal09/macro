@@ -95,6 +95,7 @@ import {
   agentsRoute,
   agentsViewRoute,
   appRoute,
+  artifactsRoute,
   authRoute,
   baseRoute,
   bookingLinksRoute,
@@ -355,6 +356,11 @@ export function appRouteElements(): JSX.Element {
         />
         <Route
           definition={connectionsRoute}
+          component={AgentsRouteView}
+          loading={AgentsViewSkeleton}
+        />
+        <Route
+          definition={artifactsRoute}
           component={AgentsRouteView}
           loading={AgentsViewSkeleton}
         />

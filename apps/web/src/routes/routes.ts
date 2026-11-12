@@ -642,6 +642,14 @@ export const connectionsRoute = defineRoute({
   claim: () => ({ namespace: 'component', id: 'connections' }),
 });
 
+export const artifactsRoute = defineRoute({
+  info: OPEN_TO_AGENTS,
+  id: 'view-artifacts',
+  path: 'artifacts',
+  mountKey: AGENTS_WORKSPACE_MOUNT,
+  claim: () => ({ namespace: 'component', id: 'artifacts' }),
+});
+
 /** A new email, composed beside the list on desktop. */
 export const emailComposeRoute = defineRoute({
   id: 'mail-compose',
