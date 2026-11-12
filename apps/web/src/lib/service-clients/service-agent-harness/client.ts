@@ -1,6 +1,6 @@
 import { SERVER_HOSTS } from '@core/constant/servers';
 import { fetchWithToken } from '@core/util/fetchWithToken';
-import type { ErrorResponseHandler } from '@core/util/safeFetch';
+import { type ErrorResponseHandler, statusError } from '@core/util/safeFetch';
 import {
   type AI_USAGE_LIMIT_ERROR,
   readAiUsageLimitError,
@@ -28,9 +28,14 @@ import type {
   DiscoverAgentCapabilitiesResponse,
   DocumentBuildResponse,
   ExecutionRecord,
+  InstalledListingBuild,
+  Listing,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
+  MarketplaceListings,
   PreviewAgentSessionsResponse,
+  PublishListing,
+  PublishListingVersion,
   PullRequestSessionsResponse,
   PullRequestsSessionsResponse,
   RunDocumentProgram,
@@ -55,6 +60,8 @@ export type {
   AutoArchivePreferencesBody,
   CodingPreferencesBody,
   DocumentBuildResponse,
+  PublishListing,
+  PublishListingVersion,
   RunDocumentProgram,
   SandboxSize,
   SandboxSizeBody,
@@ -99,6 +106,54 @@ const documentBuildError: ErrorResponseHandler<
     };
   return sessionError(response);
 };
+
+/**
+ * Why the marketplace refused to publish. `PUBLISH_CONFLICT` is a first
+ * publish by someone without a team, or of a page that already has a
+ * listing; `PAGE_UNCHANGED` a new version of a page that hasn't changed
+ * since the newest one; `PAGE_DOES_NOT_BUILD` a page with build problems.
+ */
+export type PublishListingErrorCode =
+  | 'PUBLISH_CONFLICT'
+  | 'PAGE_UNCHANGED'
+  | 'PAGE_DOES_NOT_BUILD';
+
+/** The marketplace answers its refusals as JSON `{ message }`. */
+async function marketplaceMessage(response: Response): Promise<string> {
+  const fallback = `Marketplace request failed (HTTP ${response.status}).`;
+  if (!response.headers.get('content-type')?.includes('application/json'))
+    return fallback;
+
+  const body: unknown = await response.json();
+  if (typeof body !== 'object' || body === null || !('message' in body))
+    return fallback;
+
+  return typeof body.message === 'string' && body.message
+    ? body.message
+    : fallback;
+}
+
+/** A marketplace request's errors, worded by the server. */
+const marketplaceError: ErrorResponseHandler<never> = async (response) => ({
+  ...statusError(response.status),
+  message: await marketplaceMessage(response),
+});
+
+/** A publish's errors: `conflict` names what this route's 409 means. */
+function publishListingError(
+  conflict: 'PUBLISH_CONFLICT' | 'PAGE_UNCHANGED'
+): ErrorResponseHandler<PublishListingErrorCode> {
+  return async (response) => {
+    if (response.status === 409)
+      return { code: conflict, message: await marketplaceMessage(response) };
+    if (response.status === 422)
+      return {
+        code: 'PAGE_DOES_NOT_BUILD',
+        message: await marketplaceMessage(response),
+      };
+    return marketplaceError(response);
+  };
+}
 
 /** Session endpoints return safe, user-facing errors as plain text. */
 const sessionError: ErrorResponseHandler<never> = async (response) => {
@@ -471,6 +526,100 @@ export const agentHarnessServiceClient = {
   ) {
     return fetchWithToken<UserExecutionReceipt, 'DOCUMENT_CHANGED'>(
       `${agentHarnessHost}/documents/${documentId}/code-executions`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+        errorResponseHandler: documentProgramError,
+      }
+    );
+  },
+
+  /** The marketplace listings the caller may see: their team's and everyone's. */
+  listMarketplaceListings(signal?: AbortSignal) {
+    return fetchWithToken<MarketplaceListings>(
+      `${agentHarnessHost}/marketplace/listings`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /** Publish a stored HTML document the caller owns to their team, as 1.0. */
+  publishListing(request: PublishListing) {
+    return fetchWithToken<Listing, PublishListingErrorCode>(
+      `${agentHarnessHost}/marketplace/listings`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        errorResponseHandler: publishListingError('PUBLISH_CONFLICT'),
+      }
+    );
+  },
+
+  /** Publish a listing's page, as it is stored now, as its next version. */
+  publishListingVersion(listingId: string, request: PublishListingVersion) {
+    return fetchWithToken<Listing, PublishListingErrorCode>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/versions`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        errorResponseHandler: publishListingError('PAGE_UNCHANGED'),
+      }
+    );
+  },
+
+  /** Unlist a listing: its publisher or a team admin. Installs keep it. */
+  unlistListing(listingId: string) {
+    return fetchWithToken<Record<string, never>>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}`,
+      { method: 'DELETE', errorResponseHandler: marketplaceError }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /** Install a listing, or move the caller's install to its newest major. */
+  installListing(listingId: string) {
+    return fetchWithToken<Listing>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install`,
+      { method: 'PUT', errorResponseHandler: marketplaceError }
+    );
+  },
+
+  uninstallListing(listingId: string) {
+    return fetchWithToken<Record<string, never>>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install`,
+      { method: 'DELETE', errorResponseHandler: marketplaceError }
+    ).then((result) => result.map(() => undefined));
+  },
+
+  /**
+   * The build of the page the caller's install shows: the newest minor
+   * version of the major they are on. Errors as `getDocumentBuild`.
+   */
+  getInstalledListingBuild(listingId: string, signal?: AbortSignal) {
+    return fetchWithToken<
+      InstalledListingBuild,
+      'BUILD_UNAVAILABLE' | 'BUILD_TOO_LARGE' | 'SERVER_ERROR'
+    >(`${agentHarnessHost}/marketplace/listings/${listingId}/install/build`, {
+      method: 'GET',
+      signal,
+      errorResponseHandler: documentBuildError,
+    });
+  },
+
+  /**
+   * Run one program of the page an install shows, as the user. Answers 409
+   * (`DOCUMENT_CHANGED`) when a newer minor version was published since
+   * that page was built.
+   */
+  runInstalledListingProgram(
+    listingId: string,
+    request: RunDocumentProgram,
+    signal?: AbortSignal
+  ) {
+    return fetchWithToken<UserExecutionReceipt, 'DOCUMENT_CHANGED'>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install/code-executions`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

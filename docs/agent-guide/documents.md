@@ -3327,6 +3327,20 @@ page as a new version of the same document and builds again. Both work inside
 code mode. A plain upload or an edit in Drive builds when the page is first
 opened.
 
+With `enable-marketplace` also on, the title's file menu (**…**) of an HTML
+document the viewer owns has **Publish to marketplace…**, beside Download. The first
+time, its dialog asks for a **Title** (starting as the document's name) and a
+**Description**, and **Publish** lists the saved page for the viewer's team as
+version 1.0. After that it shows the listing's version and a choice between
+**Minor update** (everyone who installed it gets it right away) and **Major
+update** (people choose when to update), then **Publish update**. The server
+publishes the saved file, so the button waits while the editor's last changes
+save. The dialog stays open with the reason when the server refuses: nothing
+changed since the newest version, the page has build problems (fix the ones
+Render shows), or the viewer has no team or the page already has a listing.
+Teammates install and open published pages under Agents → Marketplace (see
+[AI chat](ai-chat.md)).
+
 To check it, publish such a page (or upload the file), open it, and confirm the list fills in Render;
 then rename a matching task in another split and watch the list follow without
 a reload. Change `query: 'launch'` to `query: 42`, save, and reopen Render: it

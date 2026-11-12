@@ -487,6 +487,29 @@ the shimmer.
   links are hidden, the same list is **Settings → Artifacts** (on phones **More
   views → Settings → Artifacts**), beside Routines; tapping a row closes the
   settings sheet and opens the document.
+- With `enable-marketplace` and `enable-html-code-mode` both on (on by default
+  in dev), the tool links add **Marketplace** after Artifacts, at
+  `/app/marketplace`: the HTML pages people published to the viewer's team.
+  Copied links, reload, and browser Back/Forward restore it like Artifacts;
+  code opens it with `openAgentsPage(layout, 'marketplace')`. With either flag
+  off the link is hidden and a direct visit says the marketplace isn't
+  available. **Browse** lists every listed page as a card (title, description,
+  publisher, newest version such as `v1.2`, install count, **Team** or
+  **Macro**); **Installed** lists the viewer's installs, including ones since
+  unlisted (badge **Unlisted**). **Install** adds a page; **Open** shows the
+  installed page in place of the lists, with **Back**, its title and the
+  version shown. An install follows the newest minor version of its major: a
+  minor update reaches every install at once (on the next run, or on
+  returning to the window, the page reloads with a notice), and a major
+  update waits behind a quiet **Update to v2** button on the card and the
+  open page. The card's **More actions** menu has **Uninstall**, and for the
+  publisher or a team admin **Unlist** (confirmed; people who installed the
+  page keep it). An installed page is not a document: it is the marketplace's
+  own build of the published version, and its programs run as the viewer. To
+  publish, open an HTML page you own and choose **Publish to marketplace…**
+  from its file menu (see
+  [Program blocks in HTML previews](documents.md#program-blocks-in-html-previews)).
+  The touch Settings sheet has no Marketplace entry yet.
 - Ask the agent to connect an MCP server by URL (for example "connect the MCP
   server at https://mcp.example.com/mcp"). It calls **ConnectMcpServer**, which
   adds a public `https` server to Connections and renders a **Connected MCP

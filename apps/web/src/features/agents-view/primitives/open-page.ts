@@ -8,7 +8,11 @@ export function openAgentsPage(
   page: AgentsPage,
   params: Record<string, unknown> = {}
 ) {
-  if (page === 'connections' || page === 'artifacts') {
+  if (
+    page === 'connections' ||
+    page === 'artifacts' ||
+    page === 'marketplace'
+  ) {
     layout.openWithSplit(
       { type: 'component', id: page, params },
       { activate: true, search: {} }

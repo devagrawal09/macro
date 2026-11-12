@@ -18,6 +18,7 @@ import entityActions from './en/entity-actions';
 import htmlPreview from './en/html-preview';
 import localRuntime from './en/local-runtime';
 import markdownEditor from './en/markdown-editor';
+import marketplace from './en/marketplace';
 import mobile from './en/mobile';
 import nav from './en/nav';
 import notificationsInbox from './en/notifications-inbox';
@@ -58,6 +59,7 @@ export default {
   htmlPreview,
   localRuntime,
   markdownEditor,
+  marketplace,
   mobile,
   nav,
   notificationsInbox,

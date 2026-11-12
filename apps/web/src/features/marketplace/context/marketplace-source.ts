@@ -1,0 +1,17 @@
+import type { Accessor } from 'solid-js';
+import type { Listing } from '../core/listing';
+
+/** The listings the marketplace page shows, and what a person does to them. */
+export type MarketplaceSource = {
+  /** Every listing the viewer may see, newest first. */
+  listings: Accessor<readonly Listing[]>;
+  /** The listings are still loading for the first time. */
+  loading: Accessor<boolean>;
+  failed: Accessor<boolean>;
+  retry(): Promise<void>;
+  /** Install a listing, or move the viewer's install to its newest major. */
+  install(listingId: string): Promise<Listing>;
+  uninstall(listingId: string): Promise<void>;
+  /** Hide a listing from Browse; people who installed it keep it. */
+  unlist(listingId: string): Promise<void>;
+};
