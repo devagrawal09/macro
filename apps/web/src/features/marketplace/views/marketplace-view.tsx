@@ -1,8 +1,13 @@
 import { t } from '@app/lib/i18n';
-import { usePending } from '@app/observability/flow';
+import {
+  beginInteraction,
+  TraceFlow,
+  usePending,
+} from '@app/observability/flow';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
+import { type Span, Telemetry } from '@macro-inc/observability';
 import { confirmDialog, Tabs } from '@ui';
 import { createSignal, Show } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
@@ -46,46 +51,81 @@ export function MarketplaceView(props: {
   };
   usePending('marketplace.listings', () => view().t === 'loading');
 
-  /** Runs one action on a listing: its card waits, and a toast says how it went. */
-  const act = async (
+  /**
+   * Runs one action on a listing in its own span, which its request joins:
+   * its card waits, and a toast says how it went.
+   */
+  const act = (
+    name: string,
     listing: Listing,
-    action: () => Promise<unknown>,
+    action: (span: Span) => Promise<unknown>,
     messages: { done: string; failed: string }
-  ) => {
-    setBusy((current) => new Set(current).add(listing.id));
-    const result = await catchToResult(action);
-    setBusy((current) => {
-      const next = new Set(current);
-      next.delete(listing.id);
-      return next;
+  ) =>
+    Telemetry.span(name, async (span) => {
+      span.setAttr('marketplace.listing_id', listing.id);
+      setBusy((current) => new Set(current).add(listing.id));
+      const result = await catchToResult(() => action(span));
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(listing.id);
+        return next;
+      });
+
+      if (result.isErr()) {
+        span.error(`${name} failed`);
+        toast.failure(messages.failed);
+        return;
+      }
+      toast.success(messages.done);
     });
 
-    if (result.isErr()) {
-      toast.failure(messages.failed);
-      return;
+  /** Show an installed listing's page; its flow joins this interaction. */
+  const open = (listing: Listing) => {
+    const interaction = beginInteraction('marketplace.open', {
+      attributes: { 'marketplace.listing_id': listing.id },
+      closeOnJoin: true,
+    });
+    try {
+      setOpenId(listing.id);
+    } finally {
+      interaction.end();
     }
-    toast.success(messages.done);
   };
 
   const install = (listing: Listing) =>
-    act(listing, () => props.source.install(listing.id), {
-      done: t('marketplace.installedToast', { title: listing.title }),
-      failed: t('marketplace.installFailed', { title: listing.title }),
-    });
+    act(
+      'marketplace.install',
+      listing,
+      (span) => props.source.install(listing.id, span),
+      {
+        done: t('marketplace.installedToast', { title: listing.title }),
+        failed: t('marketplace.installFailed', { title: listing.title }),
+      }
+    );
   // Installing again moves the install to the newest major.
   const update = (listing: Listing) =>
-    act(listing, () => props.source.install(listing.id), {
-      done: t('marketplace.updatedToast', {
-        title: listing.title,
-        version: versionLabel(listing.latestVersion),
-      }),
-      failed: t('marketplace.updateFailed', { title: listing.title }),
-    });
+    act(
+      'marketplace.update',
+      listing,
+      (span) => props.source.install(listing.id, span),
+      {
+        done: t('marketplace.updatedToast', {
+          title: listing.title,
+          version: versionLabel(listing.latestVersion),
+        }),
+        failed: t('marketplace.updateFailed', { title: listing.title }),
+      }
+    );
   const uninstall = (listing: Listing) =>
-    act(listing, () => props.source.uninstall(listing.id), {
-      done: t('marketplace.uninstalledToast', { title: listing.title }),
-      failed: t('marketplace.uninstallFailed', { title: listing.title }),
-    });
+    act(
+      'marketplace.uninstall',
+      listing,
+      (span) => props.source.uninstall(listing.id, span),
+      {
+        done: t('marketplace.uninstalledToast', { title: listing.title }),
+        failed: t('marketplace.uninstallFailed', { title: listing.title }),
+      }
+    );
   const unlist = async (listing: Listing) => {
     const confirmed = await confirmDialog({
       title: t('marketplace.unlistConfirmTitle', { title: listing.title }),
@@ -95,10 +135,15 @@ export function MarketplaceView(props: {
     });
     if (!confirmed) return;
 
-    await act(listing, () => props.source.unlist(listing.id), {
-      done: t('marketplace.unlistedToast', { title: listing.title }),
-      failed: t('marketplace.unlistFailed', { title: listing.title }),
-    });
+    await act(
+      'marketplace.unlist',
+      listing,
+      (span) => props.source.unlist(listing.id, span),
+      {
+        done: t('marketplace.unlistedToast', { title: listing.title }),
+        failed: t('marketplace.unlistFailed', { title: listing.title }),
+      }
+    );
   };
   const canUnlist = (listing: Listing) => {
     if (isPublisher(listing, props.userId)) return true;
@@ -145,7 +190,7 @@ export function MarketplaceView(props: {
                   onInstall={() =>
                     fireAndForget(install(listing()), 'marketplace')
                   }
-                  onOpen={() => setOpenId(listing().id)}
+                  onOpen={() => open(listing())}
                   onUpdate={() =>
                     fireAndForget(update(listing()), 'marketplace')
                   }
@@ -163,12 +208,18 @@ export function MarketplaceView(props: {
       }
     >
       {(listing) => (
-        <InstalledPageView
-          listing={listing()}
-          busy={busy().has(listing().id)}
-          onBack={() => setOpenId(undefined)}
-          onUpdate={() => fireAndForget(update(listing()), 'marketplace')}
-        />
+        <TraceFlow
+          name="marketplace.installed_page"
+          attributes={{ 'marketplace.listing_id': listing().id }}
+          key={() => listing().id}
+        >
+          <InstalledPageView
+            listing={listing()}
+            busy={busy().has(listing().id)}
+            onBack={() => setOpenId(undefined)}
+            onUpdate={() => fireAndForget(update(listing()), 'marketplace')}
+          />
+        </TraceFlow>
       )}
     </Show>
   );

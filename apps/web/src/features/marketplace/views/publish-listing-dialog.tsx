@@ -2,6 +2,7 @@ import { t } from '@app/lib/i18n';
 import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
+import { Telemetry } from '@macro-inc/observability';
 import type { VersionBump } from '@service-agent-harness/generated/schemas';
 import { ActionDialogShell, Button, Dialog, Tabs, TextField } from '@ui';
 import { createSignal, Show } from 'solid-js';
@@ -64,53 +65,73 @@ export function PublishListingDialog(props: {
     props.onOpenChange(open);
   };
 
-  /** Publishes, then closes with a toast, or stays open saying why not. */
-  const submit = async (current: Listing | undefined) => {
-    setRefusal(undefined);
-    const result = await catchToResult(() =>
-      current
-        ? publishVersion.mutateAsync({
-            listingId: current.id,
-            request: { documentId: props.documentId, bump: bump() },
-          })
-        : publish.mutateAsync({
-            documentId: props.documentId,
-            title: title().trim(),
-            description: description().trim(),
-          })
-    );
-
-    if (result.isErr()) {
-      const refused = (code: PublishListingErrorCode) =>
-        result.error.some((error) => error.code === code);
-
-      if (current && refused('PAGE_UNCHANGED')) {
-        setRefusal(
-          t('marketplace.publishUnchanged', {
-            version: versionLabel(current.latestVersion),
-          })
+  /**
+   * Publishes in its own span, which the request joins, then closes with a
+   * toast, or stays open saying why not.
+   */
+  const submit = (current: Listing | undefined) =>
+    Telemetry.span(
+      current ? 'marketplace.publish_version' : 'marketplace.publish',
+      async (span) => {
+        span.setAttr('document.id', props.documentId);
+        if (current) {
+          span.setAttr('marketplace.listing_id', current.id);
+          span.setAttr('marketplace.bump', bump());
+        }
+        setRefusal(undefined);
+        const result = await catchToResult(() =>
+          current
+            ? publishVersion.mutateAsync({
+                listingId: current.id,
+                request: { documentId: props.documentId, bump: bump() },
+                parentSpan: span,
+              })
+            : publish.mutateAsync({
+                request: {
+                  documentId: props.documentId,
+                  title: title().trim(),
+                  description: description().trim(),
+                },
+                parentSpan: span,
+              })
         );
-      } else if (refused('PAGE_DOES_NOT_BUILD')) {
-        setRefusal(t('marketplace.publishDoesNotBuild'));
-      } else if (refused('PUBLISH_CONFLICT')) {
-        setRefusal(t('marketplace.publishConflict'));
-      } else {
-        setRefusal(t('marketplace.publishFailed'));
-      }
-      return;
-    }
 
-    const listing = result.value;
-    toast.success(
-      current
-        ? t('marketplace.publishedVersionToast', {
-            title: listing.title,
-            version: versionLabel(listing.latestVersion),
-          })
-        : t('marketplace.publishedToast', { title: listing.title })
+        if (result.isErr()) {
+          span.error('Publishing to the marketplace failed');
+          const code = result.error[0]?.code;
+          if (code) span.setAttr('marketplace.error_code', code);
+          const refused = (code: PublishListingErrorCode) =>
+            result.error.some((error) => error.code === code);
+
+          if (current && refused('PAGE_UNCHANGED')) {
+            setRefusal(
+              t('marketplace.publishUnchanged', {
+                version: versionLabel(current.latestVersion),
+              })
+            );
+          } else if (refused('PAGE_DOES_NOT_BUILD')) {
+            setRefusal(t('marketplace.publishDoesNotBuild'));
+          } else if (refused('PUBLISH_CONFLICT')) {
+            setRefusal(t('marketplace.publishConflict'));
+          } else {
+            setRefusal(t('marketplace.publishFailed'));
+          }
+          return;
+        }
+
+        const listing = result.value;
+        span.setAttr('marketplace.listing_id', listing.id);
+        toast.success(
+          current
+            ? t('marketplace.publishedVersionToast', {
+                title: listing.title,
+                version: versionLabel(listing.latestVersion),
+              })
+            : t('marketplace.publishedToast', { title: listing.title })
+        );
+        props.onOpenChange(false);
+      }
     );
-    props.onOpenChange(false);
-  };
 
   return (
     <Dialog

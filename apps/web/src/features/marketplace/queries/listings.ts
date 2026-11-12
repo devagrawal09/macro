@@ -1,4 +1,5 @@
 import { throwOnErr } from '@core/util/result';
+import { Telemetry, type TraceContext } from '@macro-inc/observability';
 import { queryClient } from '@queries/client';
 import { type MutationCallbacks, withCallbacks } from '@queries/utils';
 import {
@@ -15,6 +16,28 @@ import type { Listing } from '../core/listing';
 import { marketplaceKeys } from './keys';
 
 export type { PublishListingErrorCode };
+
+/** An action on one listing, sent in the trace of the span that started it. */
+export type ListingAction = { listingId: string; parentSpan?: TraceContext };
+
+/** A first publish, sent in the trace of the span that started it. */
+export type PublishAction = {
+  request: PublishListing;
+  parentSpan?: TraceContext;
+};
+
+/** A new version of a listing, sent in the trace of the span that started it. */
+export type PublishVersionAction = ListingAction & {
+  request: PublishListingVersion;
+};
+
+/**
+ * Send in the caller's span: a mutation runs after an await, which loses the
+ * browser's trace context.
+ */
+function inTrace<T>(parentSpan: TraceContext | undefined, send: () => T): T {
+  return (parentSpan ?? Telemetry.captureContext()).run(send);
+}
 
 /**
  * The listings the viewer may see: their team's and everyone's. Always
@@ -65,12 +88,14 @@ function setListing(listing: Listing) {
 
 /** Installs a listing, or moves the viewer's install to its newest major. */
 export function useInstallListingMutation(
-  callbacks?: MutationCallbacks<Listing, Error, { listingId: string }>
+  callbacks?: MutationCallbacks<Listing, Error, ListingAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (args: { listingId: string }) =>
-      throwOnErr(() =>
-        agentHarnessServiceClient.installListing(args.listingId)
+    mutationFn: (args: ListingAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.installListing(args.listingId)
+        )
       ),
     ...withCallbacks(
       {
@@ -91,12 +116,14 @@ export function useInstallListingMutation(
 }
 
 export function useUninstallListingMutation(
-  callbacks?: MutationCallbacks<void, Error, { listingId: string }>
+  callbacks?: MutationCallbacks<void, Error, ListingAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (args: { listingId: string }) =>
-      throwOnErr(() =>
-        agentHarnessServiceClient.uninstallListing(args.listingId)
+    mutationFn: (args: ListingAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.uninstallListing(args.listingId)
+        )
       ),
     ...withCallbacks(
       {
@@ -113,22 +140,28 @@ export function useUninstallListingMutation(
 }
 
 export function useUnlistListingMutation(
-  callbacks?: MutationCallbacks<void, Error, { listingId: string }>
+  callbacks?: MutationCallbacks<void, Error, ListingAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (args: { listingId: string }) =>
-      throwOnErr(() => agentHarnessServiceClient.unlistListing(args.listingId)),
+    mutationFn: (args: ListingAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.unlistListing(args.listingId)
+        )
+      ),
     ...withCallbacks({ onSuccess: () => invalidateListings() }, callbacks),
   }));
 }
 
 /** Publishes a stored HTML document to the viewer's team, as version 1.0. */
 export function usePublishListingMutation(
-  callbacks?: MutationCallbacks<Listing, Error, PublishListing>
+  callbacks?: MutationCallbacks<Listing, Error, PublishAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (request: PublishListing) =>
-      throwOnErr(() => agentHarnessServiceClient.publishListing(request)),
+    mutationFn: (args: PublishAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() => agentHarnessServiceClient.publishListing(args.request))
+      ),
     ...withCallbacks(
       {
         onSuccess: async (listing) => {
@@ -143,18 +176,16 @@ export function usePublishListingMutation(
 
 /** Publishes a listing's page, as it is stored now, as its next version. */
 export function usePublishListingVersionMutation(
-  callbacks?: MutationCallbacks<
-    Listing,
-    Error,
-    { listingId: string; request: PublishListingVersion }
-  >
+  callbacks?: MutationCallbacks<Listing, Error, PublishVersionAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (args: { listingId: string; request: PublishListingVersion }) =>
-      throwOnErr(() =>
-        agentHarnessServiceClient.publishListingVersion(
-          args.listingId,
-          args.request
+    mutationFn: (args: PublishVersionAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.publishListingVersion(
+            args.listingId,
+            args.request
+          )
         )
       ),
     ...withCallbacks(
@@ -192,8 +223,11 @@ export function createMarketplaceSource(
     retry: async () => {
       await query.refetch();
     },
-    install: (listingId) => install.mutateAsync({ listingId }),
-    uninstall: (listingId) => uninstall.mutateAsync({ listingId }),
-    unlist: (listingId) => unlist.mutateAsync({ listingId }),
+    install: (listingId, parentSpan) =>
+      install.mutateAsync({ listingId, parentSpan }),
+    uninstall: (listingId, parentSpan) =>
+      uninstall.mutateAsync({ listingId, parentSpan }),
+    unlist: (listingId, parentSpan) =>
+      unlist.mutateAsync({ listingId, parentSpan }),
   };
 }

@@ -76,7 +76,7 @@ describe('Marketplace', () => {
     expect(within(card).queryByRole('button', { name: 'Open' })).toBeNull();
 
     fireEvent.click(within(card).getByRole('button', { name: 'Install' }));
-    expect(source.install).toHaveBeenCalledWith('dashboard');
+    expect(source.install).toHaveBeenCalledWith('dashboard', expect.anything());
     expect(
       await within(card).findByRole('button', { name: 'Open' })
     ).toBeTruthy();
@@ -112,7 +112,7 @@ describe('Marketplace', () => {
     fireEvent.click(
       within(behind).getByRole('button', { name: 'Update to v2' })
     );
-    expect(source.install).toHaveBeenCalledWith('dashboard');
+    expect(source.install).toHaveBeenCalledWith('dashboard', expect.anything());
   });
 
   it('lists only installed pages under Installed', () => {

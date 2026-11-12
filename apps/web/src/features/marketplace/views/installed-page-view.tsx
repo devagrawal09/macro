@@ -1,5 +1,6 @@
 import { ListSkeleton } from '@app/components/view-shell/ListSkeleton';
 import { t } from '@app/lib/i18n';
+import { usePending } from '@app/observability/flow';
 import {
   BuildError,
   BuildProblems,
@@ -32,6 +33,7 @@ export function InstalledPageView(props: {
   onUpdate(): void;
 }) {
   const build = useQuery(() => installedBuildQueryOptions(props.listing.id));
+  usePending('marketplace.installed_build', () => build.isPending);
   // A pending first load's data read would suspend the page.
   const installed = () => (build.isPending ? undefined : build.data);
   // Keyed by source: a refetch of the same version (on focus) keeps the
