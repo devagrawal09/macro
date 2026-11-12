@@ -31,28 +31,32 @@ fn page(html: &str) -> PublishedPage {
 /// A team owned by a new user `owner`; a person owns one team at most.
 async fn insert_team(pool: &PgPool, owner: &str) -> Uuid {
     let macro_user_id = Uuid::now_v7();
-    sqlx::query(
+    sqlx::query!(
         r#"INSERT INTO macro_user (id, username, email, stripe_customer_id) VALUES ($1, $2, $2, $2)"#,
+        macro_user_id,
+        owner,
     )
-    .bind(macro_user_id)
-    .bind(owner)
     .execute(pool)
     .await
     .expect("macro_user should insert");
-    sqlx::query(r#"INSERT INTO "User" (id, email, macro_user_id) VALUES ($1, $1, $2)"#)
-        .bind(owner)
-        .bind(macro_user_id)
-        .execute(pool)
-        .await
-        .expect("user should insert");
+    sqlx::query!(
+        r#"INSERT INTO "User" (id, email, macro_user_id) VALUES ($1, $1, $2)"#,
+        owner,
+        macro_user_id,
+    )
+    .execute(pool)
+    .await
+    .expect("user should insert");
 
     let team = Uuid::now_v7();
-    sqlx::query(r#"INSERT INTO team (id, name, owner_id) VALUES ($1, $2, $2)"#)
-        .bind(team)
-        .bind(owner)
-        .execute(pool)
-        .await
-        .expect("team should insert");
+    sqlx::query!(
+        r#"INSERT INTO team (id, name, owner_id) VALUES ($1, $2, $2)"#,
+        team,
+        owner,
+    )
+    .execute(pool)
+    .await
+    .expect("team should insert");
     team
 }
 
@@ -252,11 +256,13 @@ async fn a_listing_without_a_team_is_seen_by_everyone(pool: PgPool) {
     let repo = PgListingRepo::new(pool.clone());
     let listing = board(acme);
     repo.create_listing(listing.clone()).await.unwrap();
-    sqlx::query(r#"UPDATE marketplace_listing SET team_id = NULL WHERE id = $1"#)
-        .bind(listing.id.as_uuid())
-        .execute(&pool)
-        .await
-        .expect("listing should update");
+    sqlx::query!(
+        r#"UPDATE marketplace_listing SET team_id = NULL WHERE id = $1"#,
+        listing.id.as_uuid(),
+    )
+    .execute(&pool)
+    .await
+    .expect("listing should update");
 
     let without_team = repo.listings(&user(BEN), None, None).await.unwrap();
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
