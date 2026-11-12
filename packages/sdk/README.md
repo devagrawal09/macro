@@ -772,6 +772,15 @@ pass `simpleSave` the new content to save it as the next version. Version handle
 come from `document.version(number)`. PDF highlights and comment anchors are scoped
 handles from `anchors()` / `createHighlight(options)`, with kind-checked edits and
 deletion. `documents.byTeamSlug('ENG-42')` resolves a task reference.
+
+`documents.publishPage({ name, html, project })` saves a live HTML page whose
+`text/macro` programs run as its viewer, builds it, and returns `{ document,
+build, problems }`; `document.republishPage(html)` saves a fix as a new version
+and builds again. Neither throws once the page is saved: `build` is `built`,
+`failed` (page diagnostics or a build-request failure in `problems`),
+`busy` (republish later) or `unavailable` (live
+pages aren't available to the account). The page contract is in
+`publishPage`'s TSDoc.
 `sharePermissions`, `permissionsToken` and `documents.validatePermissionsToken`
 expose document access contracts.
 

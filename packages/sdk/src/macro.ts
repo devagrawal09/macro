@@ -470,6 +470,11 @@ export {
   type DocumentMarkdownWritten,
   type SetContentOptions,
 } from './entities/documents/markdown';
+export type {
+  PageBuildStatus,
+  PageProblem,
+  PagePublished,
+} from './entities/documents/page';
 export {
   CommentQuoteNotPlacedError,
   type TextComment,
