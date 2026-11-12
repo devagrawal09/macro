@@ -74,3 +74,10 @@ A block for editing code files with syntax highlighting and formatting.
   the link is returned exactly as stored. The stylesheet's class names are a
   contract with stored pages: add, don't rename. See the agent
   guide's "Program blocks in HTML previews" for the authoring contract.
+- A page that isn't a document reuses the same frames: `HtmlPreview.tsx`
+  exports `ProgramFrame` (which takes the page's own `run`, and as
+  `documentId` the id that `run` takes), `PlainFrame`, `BuildProblems` and
+  `BuildError`. An installed marketplace page
+  (`features/marketplace/views/installed-page-view.tsx`) renders its own
+  build endpoint's answer with them, so the policy, theme, navigation guard
+  and live events stay in one place. Traces record that id as `document.id`.
