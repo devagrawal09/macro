@@ -54,6 +54,7 @@ const methods: Record<string, Partial<Record<SdkVerb, string>>> = {
       getAgentAutoArchivePreferences getAgentCodingPreferences getAgentSandboxSize getAgentSession
       getAgentSessionAutoArchive getAgentSessionChanges getAgentSessionChangesPatch getCodeExecution
       getAgentSessionLog getAgentSessionFoldedLog getAgentSessionPermissions getSessionReview
+      getDocumentBuild
     `,
     listed: `
       listAgentConversations listAgentRepositories listAgentRepositoryBranches

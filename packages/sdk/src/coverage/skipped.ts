@@ -41,10 +41,8 @@ export const agentHarnessExcluded = [
   'runDocumentProgram',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
-export const agentHarnessBacklog = [
-  // A stored HTML page's build, which fits the documents namespace.
-  'getDocumentBuild',
-] as const satisfies readonly (keyof AgentHarnessSdk)[];
+export const agentHarnessBacklog =
+  [] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
 export const authExcluded = [
   'appleLogin',
