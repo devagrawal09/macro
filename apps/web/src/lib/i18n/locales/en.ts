@@ -14,6 +14,7 @@ import create from './en/create';
 import crm from './en/crm';
 import emailViews from './en/email-views';
 import entityActions from './en/entity-actions';
+import htmlPreview from './en/html-preview';
 import localRuntime from './en/local-runtime';
 import markdownEditor from './en/markdown-editor';
 import mobile from './en/mobile';
@@ -52,6 +53,7 @@ export default {
   crm,
   emailViews,
   entityActions,
+  htmlPreview,
   localRuntime,
   markdownEditor,
   mobile,
