@@ -18,7 +18,8 @@ export const AgentsRouteView = withAuth(() => {
   const panel = useSplitPanelOrThrow();
   useViewRestoration(
     panel.handle.content().id === 'connections' ||
-      panel.handle.content().id === 'artifacts'
+      panel.handle.content().id === 'artifacts' ||
+      panel.handle.content().id === 'marketplace'
       ? 'agents'
       : undefined
   );

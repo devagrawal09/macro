@@ -31,7 +31,10 @@ import {
   postFrameTheme,
 } from '../code-mode/macro-styles';
 import { attachNavigationGuard } from '../code-mode/navigation-guard';
-import { attachProgramHost } from '../code-mode/preview-runner';
+import {
+  attachProgramHost,
+  type ProgramHostOptions,
+} from '../code-mode/preview-runner';
 import {
   type DocumentBuildResponse,
   documentBuildQueryOptions,
@@ -109,7 +112,8 @@ function createFrameTheme(frame: Accessor<HTMLIFrameElement | undefined>) {
   };
 }
 
-function PlainFrame(props: { html: string }) {
+/** A page shown as it is stored: it runs no programs and gets no policy. */
+export function PlainFrame(props: { html: string }) {
   const [frame, setFrame] = createSignal<HTMLIFrameElement>();
   const theme = createFrameTheme(frame);
   const srcdoc = createMemo(() =>
@@ -241,6 +245,8 @@ function hasProgramBlocks(html: string): boolean {
  * doesn't catch its call's rejection otherwise shows nothing; `notice`
  * starts it, for a frame that replaced one whose run found it stale. A page
  * that starts to navigate away is closed, with a short notice in its place.
+ * A page that isn't a document (an installed marketplace page) passes its
+ * own `run`, and as `documentId` the id that `run` takes.
  */
 export function ProgramFrame(props: {
   documentId: string;
@@ -248,6 +254,7 @@ export function ProgramFrame(props: {
   sourceHash: string;
   notice?: string;
   onStale: () => void;
+  run?: ProgramHostOptions['run'];
 }) {
   const token = crypto.randomUUID();
   const [frame, setFrame] = createSignal<HTMLIFrameElement>();
@@ -263,7 +270,7 @@ export function ProgramFrame(props: {
   createEffect(() => {
     const element = frame();
     if (!element || left()) return;
-    const { documentId, sourceHash, onStale } = props;
+    const { documentId, sourceHash, onStale, run } = props;
     onCleanup(
       attachNavigationGuard(element, {
         token,
@@ -277,6 +284,7 @@ export function ProgramFrame(props: {
         token,
         onStale,
         onFailure: (message) => setFailure(message),
+        run,
       })
     );
     onCleanup(attachEventHost(element, { documentId, token }));
@@ -352,7 +360,7 @@ function PageLeft() {
 }
 
 /** The server failed to build the page, even after retrying. */
-function BuildError(props: { onRetry: () => void }) {
+export function BuildError(props: { onRetry: () => void }) {
   return (
     <div
       role="alert"
@@ -372,7 +380,7 @@ function BuildError(props: { onRetry: () => void }) {
 }
 
 /** Why the document doesn't build, block by block. */
-function BuildProblems(props: {
+export function BuildProblems(props: {
   problems: { file?: string | null; message: string }[];
 }) {
   return (

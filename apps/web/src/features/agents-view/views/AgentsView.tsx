@@ -75,6 +75,9 @@ import { NewChatPage, type StartConversation } from './NewChatPage';
 const ArtifactsPage = lazy(async () => ({
   default: (await import('../../artifacts/artifacts-page')).ArtifactsPage,
 }));
+const MarketplacePage = lazy(async () => ({
+  default: (await import('../../marketplace/marketplace-page')).MarketplacePage,
+}));
 
 type SelectedConversation = {
   conversation: AgentConversationTarget;
@@ -113,7 +116,8 @@ function AgentsWorkspace(props: { route?: AgentsRoute }) {
       content.type === 'component' &&
       (content.id === 'routines' ||
         content.id === 'connections' ||
-        content.id === 'artifacts')
+        content.id === 'artifacts' ||
+        content.id === 'marketplace')
     )
       return content.id;
   };
@@ -236,7 +240,12 @@ function AgentsWorkspace(props: { route?: AgentsRoute }) {
   const openPage = (next: AgentsPage) => {
     setCreatingKind(undefined);
     setMobileList(false);
-    if (next === 'routines' || next === 'connections' || next === 'artifacts') {
+    if (
+      next === 'routines' ||
+      next === 'connections' ||
+      next === 'artifacts' ||
+      next === 'marketplace'
+    ) {
       layout.openWithSplit(
         next === 'routines'
           ? routineContent()
@@ -353,6 +362,7 @@ function AgentsWorkspace(props: { route?: AgentsRoute }) {
     if (page() === 'agents') return 'Agents';
     if (page() === 'connections') return 'Integrations';
     if (page() === 'artifacts') return t('artifacts.title');
+    if (page() === 'marketplace') return t('marketplace.title');
     return undefined;
   };
 
@@ -472,6 +482,9 @@ function AgentsWorkspace(props: { route?: AgentsRoute }) {
                               </Match>
                               <Match when={page() === 'artifacts'}>
                                 <ArtifactsPage />
+                              </Match>
+                              <Match when={page() === 'marketplace'}>
+                                <MarketplacePage />
                               </Match>
                               <Match when={page() === 'agents'}>
                                 <AgentSettings

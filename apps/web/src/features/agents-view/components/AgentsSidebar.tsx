@@ -7,6 +7,7 @@ import {
 } from '@app/components/view-shell';
 import { CreateMenuItem } from '@app/components/view-shell/CreateMenuItem';
 import { ViewCreateButton } from '@app/components/view-shell/ViewCreateButton';
+import { useMarketplaceFlag } from '@app/features/marketplace/use-marketplace-flag';
 import {
   type EntityActionListState,
   type EntityActionViewContext,
@@ -29,6 +30,7 @@ import CodeIcon from '@icon/system/regular/code.svg';
 import ArtifactIcon from '@icon/system/regular/file-html.svg';
 import MagnifyingGlassIcon from '@icon/system/regular/magnifying-glass.svg';
 import PlugIcon from '@icon/system/regular/plugs-connected.svg';
+import MarketplaceIcon from '@icon/system/regular/puzzle-piece.svg';
 import AgentIcon from '@icon/system/regular/sparkle.svg';
 import { Key } from '@solid-primitives/keyed';
 import { makePersisted } from '@solid-primitives/storage';
@@ -166,6 +168,7 @@ export function AgentsSidebar(props: AgentsSidebarProps) {
   const panel = useSplitPanelOrThrow();
   const userId = useUserId();
   const agentUpdates = useFeatureFlag(enableAgentUpdates);
+  const marketplace = useMarketplaceFlag();
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [openPullRequestsOpen, setOpenPullRequestsOpen] = createSignal(true);
   const [conversationsOpen, setConversationsOpen] = createSignal(true);
@@ -343,6 +346,17 @@ export function AgentsSidebar(props: AgentsSidebarProps) {
                 </ViewSidebar.Icon>
                 <span>{t('artifacts.title')}</span>
               </ViewSidebar.Item>
+              <Show when={marketplace().enabled}>
+                <ViewSidebar.Item
+                  active={props.activePage === 'marketplace'}
+                  onClick={() => props.onOpenPage('marketplace')}
+                >
+                  <ViewSidebar.Icon>
+                    <MarketplaceIcon />
+                  </ViewSidebar.Icon>
+                  <span>{t('marketplace.title')}</span>
+                </ViewSidebar.Item>
+              </Show>
               <ViewSidebar.Item
                 active={props.activePage === 'connections'}
                 onClick={() => props.onOpenPage('connections')}

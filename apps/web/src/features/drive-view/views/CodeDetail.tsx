@@ -1,3 +1,4 @@
+import { usePublishToMarketplaceOperation } from '@app/features/marketplace/publish-to-marketplace';
 import { useAnalytics } from '@app/lib/analytics/analytics-context';
 import {
   type CodeBlockMode,
@@ -6,6 +7,7 @@ import {
 import { CodeModeControl } from '@block-code/component/CodeModeControl';
 import { isHtmlFileType } from '@block-code/util/fileMode';
 import { SidePanel } from '@components/app/side-panel';
+import type { FileOperation } from '@components/app/split-layout/components/SplitFileMenu';
 import { createFileDownload } from '@core/util/createFileDownload';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { Rerun } from '@solid-primitives/keyed';
@@ -34,6 +36,7 @@ function CodeDetailContent(props: {
   data: CodeDocumentData;
   text: Accessor<string>;
   onTextChange: Setter<string>;
+  onSave: (text: string) => Promise<void>;
 }) {
   const documentId = props.documentId;
   const fileType = props.data.documentMetadata.fileType;
@@ -60,7 +63,7 @@ function CodeDetailContent(props: {
           readOnly={readOnly}
           mode={mode()}
           onTextChange={props.onTextChange}
-          onSave={(nextText) => saveCodeDocument(documentId, nextText)}
+          onSave={props.onSave}
         />
       </div>
     </div>
@@ -74,6 +77,12 @@ function CodeDetailSession(props: {
 }) {
   const analytics = useAnalytics();
   const [text, setText] = createSignal(props.data.text);
+  // What the server stores: the text loaded, then each save that landed.
+  const [savedText, setSavedText] = createSignal(props.data.text);
+  const save = async (nextText: string) => {
+    await saveCodeDocument(props.documentId, nextText);
+    setSavedText(nextText);
+  };
   const download = createFileDownload(() => ({
     id: `${props.documentId}:${props.data.documentMetadata.documentVersionId}`,
     name: documentDownloadName(props.data.documentMetadata),
@@ -82,11 +91,23 @@ function CodeDetailSession(props: {
       return ok({ blob: new Blob([text() ?? ''], { type: 'text/plain' }) });
     },
   }));
-  const operations = [
-    downloadFileOperation(() =>
-      fireAndForget(download.start(), 'drive-file-download')
-    ),
-  ];
+  const downloadOperation = downloadFileOperation(() =>
+    fireAndForget(download.start(), 'drive-file-download')
+  );
+  // The marketplace publishes the stored file, so only its owner's HTML.
+  const publishable =
+    isHtmlFileType(props.data.documentMetadata.fileType) &&
+    props.data.userAccessLevel === 'owner';
+  const publishOperation = usePublishToMarketplaceOperation({
+    id: props.documentId,
+    name: () => props.data.documentMetadata.documentName,
+    unsaved: () => text() !== savedText(),
+  });
+  const operations = (): FileOperation[] => {
+    const publish = publishable ? publishOperation() : undefined;
+
+    return publish ? [downloadOperation, publish] : [downloadOperation];
+  };
 
   return (
     <>
@@ -94,7 +115,10 @@ function CodeDetailSession(props: {
         data: props.data,
         documentMetadata: props.data.documentMetadata,
         userAccessLevel: props.data.userAccessLevel,
-        operations,
+        // Read where the menu renders, so it follows the marketplace rollout.
+        get operations() {
+          return operations();
+        },
         download,
       })}
       <CodeDetailContent
@@ -102,6 +126,7 @@ function CodeDetailSession(props: {
         data={props.data}
         text={text}
         onTextChange={setText}
+        onSave={save}
       />
     </>
   );

@@ -119,6 +119,7 @@ members = [
   "crates/macro_event_topics",
   "crates/macro_queues",
   "crates/macro_sync_service_jwt",
+  "crates/marketplace",
   "crates/maybe_send",
   "crates/memory",
   "crates/messages",

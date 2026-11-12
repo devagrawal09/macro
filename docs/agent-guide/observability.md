@@ -341,7 +341,7 @@ spans, whose `resource_name` is the method and whose path is `@http.url`. The
 | `navigation` | `navigation` | split-router commit (`runner.ts`) | The innermost view it opened; none when it opened no view |
 | `view.<route id>` | `view` | `RouteView` in `split-router/solid/outlet.tsx`; a root only when no navigation is open, otherwise a phase of it | Its route |
 | Other `<TraceFlow>` roots (`quick_access.results`, `doc.editor` after the view settled) | `view` | `TraceFlow` | Last opened view |
-| `quick_access.open`, `quick_access.input`, `channel.tab`, `form.tab`, `email.tab`, `list.open`, `calendar.event.open` | `interaction` | `beginInteraction` | Last opened view, or the innermost view it opened |
+| `quick_access.open`, `quick_access.input`, `channel.tab`, `form.tab`, `email.tab`, `list.open`, `calendar.event.open`, `marketplace.open` | `interaction` | `beginInteraction` | Last opened view, or the innermost view it opened |
 | `database.cell.editor.open`, `database.cell.commit`, `form.submit`, `message.send`, `email.send`, `input.typing_burst` | `interaction` | `startUiOperation` | Last opened view |
 
 `urql.reconcile` and `graphql_cache.ipc.request` are perf-class spans that are
@@ -444,6 +444,12 @@ Phases you will see:
   row phase); `form.layout` times layout initialization. The respondent route
   is `view.form-respond` with `form.detail` and `form.response`; `form.submit`
   runs from Submit to the next paint opportunity, with HTTP below it.
+- Marketplace: the page waits for `marketplace.listings`. Opening an
+  installed page starts `marketplace.open`, which the
+  `marketplace.installed_page` flow joins with a `marketplace.installed_build`
+  phase. Install, update, uninstall, unlist, publish and publish-version are
+  unclassed `marketplace.<action>` spans (always exported) with
+  `marketplace.listing_id`, and their HTTP requests below them.
 - Channel tabs: `channel.tab` contains the selected `channel.<tab>.view` phase,
   for routed and block channels alike.
 - Command-K: `quick_access.open` starts at the hotkey and joins the

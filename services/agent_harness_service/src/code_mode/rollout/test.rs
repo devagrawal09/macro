@@ -1,4 +1,5 @@
 use super::*;
+use agent_code_mode::domain::DOCUMENT_PROGRAMS_FLAG;
 use feature_flags::{FlagSnapshot, FlagValue};
 use rootcause::Report;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,11 +30,12 @@ fn user() -> MacroUserIdStr<'static> {
 
 #[tokio::test(start_paused = true)]
 async fn reuses_an_answer_for_a_minute_then_asks_again() {
-    let gate = FlaggedDocumentPrograms::new(
+    let gate = FlaggedRollout::new(
         Some(Flags {
             answers: Mutex::new(vec![Ok(true), Ok(false)]),
             ..Flags::default()
         }),
+        DOCUMENT_PROGRAMS_FLAG,
         false,
     );
 
@@ -48,11 +50,12 @@ async fn reuses_an_answer_for_a_minute_then_asks_again() {
 
 #[tokio::test(start_paused = true)]
 async fn a_failed_read_keeps_the_last_answer_and_refuses_without_one() {
-    let gate = FlaggedDocumentPrograms::new(
+    let gate = FlaggedRollout::new(
         Some(Flags {
             answers: Mutex::new(vec![Err("down"), Ok(true), Err("down")]),
             ..Flags::default()
         }),
+        DOCUMENT_PROGRAMS_FLAG,
         false,
     );
 

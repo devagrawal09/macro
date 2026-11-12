@@ -1866,6 +1866,17 @@ export type EmailSuggestions = {
 export type EntityType = 'user' | 'chat' | 'channel' | 'channel_message' | 'document' | 'project' | 'email_thread' | 'calendar_event' | 'team' | 'call' | 'foreign_entity' | 'static_file' | 'crm_company' | 'crm_contact' | 'crm_pipeline' | 'reminder' | 'harness' | 'skill' | 'agent_session' | 'scheduled_action' | 'initiative' | 'database' | 'database_row' | 'form' | 'external_chat';
 
 /**
+ * A plain old json error response for use with axum.
+ * yup, thats it.
+ */
+export type ErrorResponse = {
+    /**
+     * Message to explain failure
+     */
+    message: string;
+};
+
+/**
  * A bounded SDK operation observed during execution; not an authorization or write receipt.
  */
 export type ExecutionActivity = {
@@ -2096,6 +2107,24 @@ export type InputSuggestions = {
 };
 
 /**
+ * The build of the page an install shows.
+ */
+export type InstalledListingBuild = {
+    /**
+     * The page to render, or why it doesn't build.
+     */
+    page: DocumentBuildResponse;
+    /**
+     * The version's source, when `page` is plain and is shown as it is.
+     */
+    plainHtml?: string | null;
+    /**
+     * The version built: the newest minor of the major the caller is on.
+     */
+    version: Version;
+};
+
+/**
  * Independent yes/no probabilities; these do not sum to one.
  */
 export type IntentScore = {
@@ -2160,6 +2189,87 @@ export type LinkedTaskResponse = {
 };
 
 /**
+ * A listing, as the person asking sees it.
+ */
+export type Listing = {
+    /**
+     * When it was first published.
+     */
+    createdAt: string;
+    /**
+     * What it does, in a few lines.
+     */
+    description: string;
+    /**
+     * Its id.
+     */
+    id: ListingId;
+    /**
+     * How many people installed it.
+     */
+    installCount: number;
+    /**
+     * The major version the person asking is on, when they installed it.
+     */
+    installedMajor?: number | null;
+    /**
+     * What it publishes.
+     */
+    kind: ListingKind;
+    /**
+     * Its newest version.
+     */
+    latestVersion: Version;
+    /**
+     * Who published it.
+     */
+    publisher: string;
+    /**
+     * Unlisted: only those who installed it still see it.
+     */
+    removed: boolean;
+    /**
+     * Who sees it.
+     */
+    scope: ListingScope;
+    /**
+     * The document its versions are published from.
+     */
+    sourceDocumentId: string;
+    /**
+     * Its name.
+     */
+    title: string;
+    /**
+     * When it last changed.
+     */
+    updatedAt: string;
+};
+
+/**
+ * Identifies a listing.
+ */
+export type ListingId = string;
+
+/**
+ * What a listing publishes.
+ */
+export type ListingKind = 'artifact';
+
+/**
+ * Who sees a listing.
+ */
+export type ListingScope = {
+    kind: 'team';
+    /**
+     * The team.
+     */
+    teamId: string;
+} | {
+    kind: 'global';
+};
+
+/**
  * HTTP request selecting one provider to probe.
  */
 export type LoadAgentModelsRequest = {
@@ -2220,6 +2330,16 @@ export type LogFrameDto = {
 };
 
 export type MacroUserIdStr = string;
+
+/**
+ * The listings the caller may see.
+ */
+export type MarketplaceListings = {
+    /**
+     * Their team's and everyone's, newest first.
+     */
+    listings: Array<Listing>;
+};
 
 /**
  * The entity whose permissions and lifecycle govern a message.
@@ -2410,6 +2530,38 @@ export type PromptAttachment = {
      * Where the agent can fetch the file.
      */
     uri: string;
+};
+
+/**
+ * Publish a page to the caller's team.
+ */
+export type PublishListing = {
+    /**
+     * What it does, in a few lines.
+     */
+    description?: string;
+    /**
+     * A stored HTML document the caller owns.
+     */
+    documentId: string;
+    /**
+     * The listing's name.
+     */
+    title: string;
+};
+
+/**
+ * Publish a listing's page as its next version.
+ */
+export type PublishListingVersion = {
+    /**
+     * Whether installs get it at once (`minor`) or wait (`major`).
+     */
+    bump: VersionBump;
+    /**
+     * The document the listing was published from.
+     */
+    documentId: string;
 };
 
 /**
@@ -3201,6 +3353,26 @@ export type UserExecutionReceipt = {
      */
     status: ExecutionStatus;
 };
+
+/**
+ * A listing's version. An install follows minor versions by itself and
+ * takes a major version only when its person asks.
+ */
+export type Version = {
+    /**
+     * Changes an install waits for.
+     */
+    major: number;
+    /**
+     * Changes every install on this major gets at once.
+     */
+    minor: number;
+};
+
+/**
+ * How a new version follows the newest one.
+ */
+export type VersionBump = 'minor' | 'major';
 
 /**
  * A client-minted id deduplicates warm calls without creating a conversation.
@@ -5039,6 +5211,218 @@ export type RunDocumentProgramResponses = {
 };
 
 export type RunDocumentProgramResponse = RunDocumentProgramResponses[keyof RunDocumentProgramResponses];
+
+export type ListMarketplaceListingsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/marketplace/listings';
+};
+
+export type ListMarketplaceListingsErrors = {
+    401: unknown;
+    404: unknown;
+    500: unknown;
+};
+
+export type ListMarketplaceListingsResponses = {
+    200: MarketplaceListings;
+};
+
+export type ListMarketplaceListingsResponse = ListMarketplaceListingsResponses[keyof ListMarketplaceListingsResponses];
+
+export type PublishMarketplaceListingData = {
+    body: PublishListing;
+    path?: never;
+    query?: never;
+    url: '/marketplace/listings';
+};
+
+export type PublishMarketplaceListingErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    413: unknown;
+    422: ErrorResponse;
+    500: unknown;
+    503: unknown;
+};
+
+export type PublishMarketplaceListingError = PublishMarketplaceListingErrors[keyof PublishMarketplaceListingErrors];
+
+export type PublishMarketplaceListingResponses = {
+    201: Listing;
+};
+
+export type PublishMarketplaceListingResponse = PublishMarketplaceListingResponses[keyof PublishMarketplaceListingResponses];
+
+export type UnlistMarketplaceListingData = {
+    body?: never;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}';
+};
+
+export type UnlistMarketplaceListingErrors = {
+    401: unknown;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type UnlistMarketplaceListingError = UnlistMarketplaceListingErrors[keyof UnlistMarketplaceListingErrors];
+
+export type UnlistMarketplaceListingResponses = {
+    204: void;
+};
+
+export type UnlistMarketplaceListingResponse = UnlistMarketplaceListingResponses[keyof UnlistMarketplaceListingResponses];
+
+export type UninstallMarketplaceListingData = {
+    body?: never;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install';
+};
+
+export type UninstallMarketplaceListingErrors = {
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type UninstallMarketplaceListingError = UninstallMarketplaceListingErrors[keyof UninstallMarketplaceListingErrors];
+
+export type UninstallMarketplaceListingResponses = {
+    204: void;
+};
+
+export type UninstallMarketplaceListingResponse = UninstallMarketplaceListingResponses[keyof UninstallMarketplaceListingResponses];
+
+export type InstallMarketplaceListingData = {
+    body?: never;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install';
+};
+
+export type InstallMarketplaceListingErrors = {
+    401: unknown;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type InstallMarketplaceListingError = InstallMarketplaceListingErrors[keyof InstallMarketplaceListingErrors];
+
+export type InstallMarketplaceListingResponses = {
+    200: Listing;
+};
+
+export type InstallMarketplaceListingResponse = InstallMarketplaceListingResponses[keyof InstallMarketplaceListingResponses];
+
+export type GetInstalledListingBuildData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/build';
+};
+
+export type GetInstalledListingBuildErrors = {
+    401: unknown;
+    404: unknown;
+    500: unknown;
+    503: unknown;
+};
+
+export type GetInstalledListingBuildResponses = {
+    200: InstalledListingBuild;
+};
+
+export type GetInstalledListingBuildResponse = GetInstalledListingBuildResponses[keyof GetInstalledListingBuildResponses];
+
+export type RunInstalledListingProgramData = {
+    body: RunDocumentProgram;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/code-executions';
+};
+
+export type RunInstalledListingProgramErrors = {
+    400: unknown;
+    401: unknown;
+    403: unknown;
+    404: unknown;
+    409: unknown;
+    422: unknown;
+    500: unknown;
+    503: unknown;
+};
+
+export type RunInstalledListingProgramResponses = {
+    200: UserExecutionReceipt;
+};
+
+export type RunInstalledListingProgramResponse = RunInstalledListingProgramResponses[keyof RunInstalledListingProgramResponses];
+
+export type PublishMarketplaceListingVersionData = {
+    body: PublishListingVersion;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/versions';
+};
+
+export type PublishMarketplaceListingVersionErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    409: ErrorResponse;
+    413: unknown;
+    422: ErrorResponse;
+    500: unknown;
+    503: unknown;
+};
+
+export type PublishMarketplaceListingVersionError = PublishMarketplaceListingVersionErrors[keyof PublishMarketplaceListingVersionErrors];
+
+export type PublishMarketplaceListingVersionResponses = {
+    201: Listing;
+};
+
+export type PublishMarketplaceListingVersionResponse = PublishMarketplaceListingVersionResponses[keyof PublishMarketplaceListingVersionResponses];
 
 export type ClassifyData = {
     body: ClassifyInputRequest;

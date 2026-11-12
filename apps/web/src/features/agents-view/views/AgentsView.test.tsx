@@ -35,6 +35,9 @@ vi.mock('@app/features/settings/IntegrationsPage', () => ({
 vi.mock('../../artifacts/artifacts-page', () => ({
   ArtifactsPage: () => <div data-testid="artifacts">Artifacts page</div>,
 }));
+vi.mock('../../marketplace/marketplace-page', () => ({
+  MarketplacePage: () => <div data-testid="marketplace">Marketplace page</div>,
+}));
 vi.mock('@app/features/soup/entity-notifications', () => ({
   withEntityNotifications: (entity: unknown) => entity,
 }));
@@ -123,7 +126,7 @@ vi.mock('../components/AgentSessionPane', () => ({
 vi.mock('../components/AgentsSidebar', () => ({
   AgentsSidebar: (props: {
     activePage?: string;
-    onOpenPage: (page: 'connections' | 'artifacts') => void;
+    onOpenPage: (page: 'connections' | 'artifacts' | 'marketplace') => void;
     activeConversationId?: string;
     onOpenConversation: (conversation: {
       id: string;
@@ -131,7 +134,7 @@ vi.mock('../components/AgentsSidebar', () => ({
     }) => void;
   }) => (
     <>
-      <For each={['connections', 'artifacts'] as const}>
+      <For each={['connections', 'artifacts', 'marketplace'] as const}>
         {(page) => (
           <button
             type="button"
@@ -267,7 +270,7 @@ it('keeps the open conversation mounted when it is selected again', async () => 
   expect(state.mounts).toEqual(['a']);
 });
 
-it.each(['connections', 'artifacts'])(
+it.each(['connections', 'artifacts', 'marketplace'])(
   'follows the %s destination without remounting the sidebar',
   async (page) => {
     const [contentId, setContentId] = createSignal('agents');
@@ -293,7 +296,7 @@ it.each(['connections', 'artifacts'])(
   }
 );
 
-it.each(['connections', 'artifacts'])(
+it.each(['connections', 'artifacts', 'marketplace'])(
   'shows a direct %s destination on touch and returns to conversations',
   async (page) => {
     state.touch = true;

@@ -1145,3 +1145,14 @@ export const enableHtmlCodeMode = defineFlag({
   env: 'ENABLE_HTML_CODE_MODE',
   default: onInDev,
 });
+
+/**
+ * The team marketplace of published HTML pages (`features/marketplace`). Its
+ * pages run programs, so the backend serves it only with
+ * `enable-html-code-mode` too; read both through `useMarketplaceFlag`.
+ */
+export const enableMarketplace = defineFlag({
+  key: 'enable-marketplace',
+  env: 'ENABLE_MARKETPLACE',
+  default: onInDev,
+});

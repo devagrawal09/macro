@@ -151,6 +151,7 @@ import {
   legacyContentRoute,
   loginPopupSuccessRoute,
   loginRoute,
+  marketplaceRoute,
   meetRoute,
   mobileEmailSignupRoute,
   notFoundRoute,
@@ -361,6 +362,11 @@ export function appRouteElements(): JSX.Element {
         />
         <Route
           definition={artifactsRoute}
+          component={AgentsRouteView}
+          loading={AgentsViewSkeleton}
+        />
+        <Route
+          definition={marketplaceRoute}
           component={AgentsRouteView}
           loading={AgentsViewSkeleton}
         />

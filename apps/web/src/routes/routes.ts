@@ -650,6 +650,14 @@ export const artifactsRoute = defineRoute({
   claim: () => ({ namespace: 'component', id: 'artifacts' }),
 });
 
+export const marketplaceRoute = defineRoute({
+  info: OPEN_TO_AGENTS,
+  id: 'view-marketplace',
+  path: 'marketplace',
+  mountKey: AGENTS_WORKSPACE_MOUNT,
+  claim: () => ({ namespace: 'component', id: 'marketplace' }),
+});
+
 /** A new email, composed beside the list on desktop. */
 export const emailComposeRoute = defineRoute({
   id: 'mail-compose',

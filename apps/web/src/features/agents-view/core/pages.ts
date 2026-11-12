@@ -4,7 +4,8 @@ export type AgentsPage =
   | 'agents'
   | 'connections'
   | 'routines'
-  | 'artifacts';
+  | 'artifacts'
+  | 'marketplace';
 
 export function parseAgentsPage(value: unknown): AgentsPage | undefined {
   if (
@@ -12,7 +13,8 @@ export function parseAgentsPage(value: unknown): AgentsPage | undefined {
     value === 'agents' ||
     value === 'connections' ||
     value === 'routines' ||
-    value === 'artifacts'
+    value === 'artifacts' ||
+    value === 'marketplace'
   )
     return value;
 }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE marketplace_listing\n            SET removed_at = now(), updated_at = now()\n            WHERE id = $1 AND removed_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63cfa254c90ab02f676969d2b1617e142f53105bc91c1c0c07280161c00d4289"
+}

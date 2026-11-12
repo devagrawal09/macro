@@ -23,6 +23,7 @@ import {
   driveSplitRoute,
   driveTabRoute,
   homeSplitRoute,
+  marketplaceRoute,
   notFoundRoute,
   searchRoute,
   taskDetailRoute,
@@ -137,6 +138,10 @@ function setup(
               ...artifactsRoute,
               component: () => <AuthenticatedView viewId="agents" />,
             },
+            {
+              ...marketplaceRoute,
+              component: () => <AuthenticatedView viewId="agents" />,
+            },
             { ...calendarSplitRoute, component: AuthenticatedView },
             {
               ...channelsSplitRoute,
@@ -207,7 +212,7 @@ afterEach(() => {
 });
 
 describe('opt-in view restoration', () => {
-  it.each(['connections', 'artifacts'] as const)(
+  it.each(['connections', 'artifacts', 'marketplace'] as const)(
     'keeps %s navigation in the same pane through Back and Forward',
     async (page) => {
       const { router, manager, history } = setup('/agents');
@@ -251,7 +256,7 @@ describe('opt-in view restoration', () => {
     expect(formatPanePath(router.routes, location.route)).toBe(path);
   });
 
-  it.each(['connections', 'artifacts'])(
+  it.each(['connections', 'artifacts', 'marketplace'])(
     'resumes a directly opened %s page when returning to Agents',
     async (page) => {
       const { router, manager } = setup(`/${page}`);

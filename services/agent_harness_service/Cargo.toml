@@ -118,6 +118,7 @@ lexical_client = { path = "../../crates/lexical_client" }
 lexical_mention_extractor = { path = "../../crates/lexical_mention_extractor" }
 log = { workspace = true }
 lru = { workspace = true }
+marketplace = { path = "../../crates/marketplace" }
 macro_auth = { path = "../../crates/macro_auth" }
 macro_authorization = { path = "../../crates/macro_authorization", features = ["axum", "outbound", "postgres"] }
 macro_aws_config = { path = "../../crates/macro_aws_config", features = ["s3"] }
