@@ -111,8 +111,9 @@ struct Membership {
     admin: bool,
 }
 
-/// The caller's membership, when they have a team. A receipt for someone
-/// else, or for something that isn't a team, is refused.
+/// The caller's membership, when they have a team, recorded as `team_id` on
+/// the current span. A receipt for someone else, or for something that isn't
+/// a team, is refused.
 fn membership(
     user: &MacroUserIdStr<'static>,
     team: Option<&EntityAccessReceipt<MemberTeamRole>>,
@@ -130,6 +131,7 @@ fn membership(
 
     let team_id =
         Uuid::parse_str(&team.entity().entity_id).map_err(|_| MarketplaceError::Forbidden)?;
+    tracing::Span::current().record("team_id", tracing::field::display(team_id));
     Ok(Some(Membership {
         team_id,
         admin: team.entity_permission().allows_team_role(TeamRole::Admin),
@@ -162,7 +164,7 @@ where
     P: Pages,
     R: Rollout,
 {
-    #[tracing::instrument(err, skip_all)]
+    #[tracing::instrument(err, skip_all, fields(team_id = tracing::field::Empty))]
     async fn listings(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -176,7 +178,15 @@ where
             .map_err(internal)
     }
 
-    #[tracing::instrument(err, skip_all)]
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(
+            team_id = tracing::field::Empty,
+            listing_id = tracing::field::Empty,
+            source_document_id = tracing::field::Empty,
+        )
+    )]
     async fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -190,9 +200,15 @@ where
             .team_id;
         let text = text.normalized()?;
         let source_document_id = owned_document(user, &document)?;
+        let span = tracing::Span::current();
+        span.record(
+            "source_document_id",
+            tracing::field::display(source_document_id),
+        );
         let page = self.published_page(document).await?;
 
         let id = ListingId::generate();
+        span.record("listing_id", tracing::field::display(id));
         let created = self
             .listings
             .create_listing(NewListing {
@@ -213,7 +229,7 @@ where
         self.listing(user, Some(team_id), id).await
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
     async fn publish_version(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -247,7 +263,7 @@ where
         }
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
     async fn unlist(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -269,7 +285,7 @@ where
         self.listings.remove_listing(id).await.map_err(internal)
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
     async fn install(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -299,7 +315,7 @@ where
         self.listings.uninstall(id, user).await.map_err(internal)
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
     async fn installed_build(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -316,7 +332,7 @@ where
         })
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
     async fn run_installed(
         &self,
         user: &MacroUserIdStr<'static>,
