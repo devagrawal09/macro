@@ -3904,6 +3904,479 @@
         }
       }
     },
+    "/marketplace/listings": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "The listings the caller may see: their team's and everyone's, each with\nthe major version they are on when they installed it.",
+        "operationId": "list_marketplace_listings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceListings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Publish an HTML document the caller owns to their team's marketplace, as\nversion 1.0. `409` means the caller has no team or the document already\nhas a listing; `422` means the page doesn't build.",
+        "operationId": "publish_marketplace_listing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishListing"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}": {
+      "delete": {
+        "tags": ["marketplace"],
+        "summary": "Unlist a listing: it leaves the marketplace, and those who installed it\nkeep it. Its publisher or an admin of its team may.",
+        "operationId": "unlist_marketplace_listing",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}/install": {
+      "put": {
+        "tags": ["marketplace"],
+        "summary": "Put the caller on the listing's newest major version: installs it, or\ntakes a major version they were waiting on. Repeating it changes nothing.",
+        "operationId": "install_marketplace_listing",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "tags": ["marketplace"],
+        "summary": "Remove the caller's install. Repeating it changes nothing.",
+        "operationId": "uninstall_marketplace_listing",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}/install/build": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "Build the page the caller's install shows: the newest minor version of\nthe major they are on.",
+        "operationId": "get_installed_listing_build",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstalledListingBuild"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}/install/code-executions": {
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Run one program of the page the caller's install shows, as the caller.\n`409` means a newer minor version was published since the page was built.",
+        "operationId": "run_installed_listing_program",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunDocumentProgram"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}/versions": {
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Publish the listing's document as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. `409` means the page hasn't changed.",
+        "operationId": "publish_marketplace_listing_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishListingVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/universal_input/classify": {
       "post": {
         "tags": ["universal_input::inbound::axum_router"],
@@ -6509,6 +6982,17 @@
           "external_chat"
         ]
       },
+      "ErrorResponse": {
+        "type": "object",
+        "description": "A plain old json error response for use with axum.\nyup, thats it.",
+        "required": ["message"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to explain failure"
+          }
+        }
+      },
       "ExecutionActivity": {
         "type": "object",
         "description": "A bounded SDK operation observed during execution; not an authorization or write receipt.",
@@ -6865,6 +7349,25 @@
         ],
         "description": "A single inferred destination together with only its applicable fields."
       },
+      "InstalledListingBuild": {
+        "type": "object",
+        "description": "The build of the page an install shows.",
+        "required": ["version", "page"],
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/DocumentBuildResponse",
+            "description": "The page to render, or why it doesn't build."
+          },
+          "plainHtml": {
+            "type": ["string", "null"],
+            "description": "The version's source, when `page` is plain and is shown as it is."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "The version built: the newest minor of the major the caller is on."
+          }
+        }
+      },
       "IntentScore": {
         "type": "object",
         "description": "Independent yes/no probabilities; these do not sum to one.",
@@ -6953,6 +7456,125 @@
           }
         }
       },
+      "Listing": {
+        "type": "object",
+        "description": "A listing, as the person asking sees it.",
+        "required": [
+          "id",
+          "kind",
+          "scope",
+          "publisher",
+          "sourceDocumentId",
+          "title",
+          "description",
+          "latestVersion",
+          "installCount",
+          "removed",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was first published."
+          },
+          "description": {
+            "type": "string",
+            "description": "What it does, in a few lines."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ListingId",
+            "description": "Its id."
+          },
+          "installCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many people installed it."
+          },
+          "installedMajor": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "The major version the person asking is on, when they installed it."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ListingKind",
+            "description": "What it publishes."
+          },
+          "latestVersion": {
+            "$ref": "#/components/schemas/Version",
+            "description": "Its newest version."
+          },
+          "publisher": {
+            "type": "string",
+            "description": "Who published it."
+          },
+          "removed": {
+            "type": "boolean",
+            "description": "Unlisted: only those who installed it still see it."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ListingScope",
+            "description": "Who sees it."
+          },
+          "sourceDocumentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The document its versions are published from."
+          },
+          "title": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "ListingId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Identifies a listing."
+      },
+      "ListingKind": {
+        "type": "string",
+        "description": "What a listing publishes.",
+        "enum": ["artifact"]
+      },
+      "ListingScope": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The members of one team.",
+            "required": ["teamId", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["team"]
+              },
+              "teamId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The team."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Everyone: a listing Macro provides.",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["global"]
+              }
+            }
+          }
+        ],
+        "description": "Who sees a listing."
+      },
       "LoadAgentModelsRequest": {
         "type": "object",
         "description": "HTTP request selecting one provider to probe.",
@@ -7013,6 +7635,20 @@
       },
       "MacroUserIdStr": {
         "type": "string"
+      },
+      "MarketplaceListings": {
+        "type": "object",
+        "description": "The listings the caller may see.",
+        "required": ["listings"],
+        "properties": {
+          "listings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Listing"
+            },
+            "description": "Their team's and everyone's, newest first."
+          }
+        }
       },
       "MessageParent": {
         "oneOf": [
@@ -7293,6 +7929,42 @@
           "uri": {
             "type": "string",
             "description": "Where the agent can fetch the file."
+          }
+        }
+      },
+      "PublishListing": {
+        "type": "object",
+        "description": "Publish a page to the caller's team.",
+        "required": ["documentId", "title"],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What it does, in a few lines."
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A stored HTML document the caller owns."
+          },
+          "title": {
+            "type": "string",
+            "description": "The listing's name."
+          }
+        }
+      },
+      "PublishListingVersion": {
+        "type": "object",
+        "description": "Publish a listing's page as its next version.",
+        "required": ["documentId", "bump"],
+        "properties": {
+          "bump": {
+            "$ref": "#/components/schemas/VersionBump",
+            "description": "Whether installs get it at once (`minor`) or wait (`major`)."
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The document the listing was published from."
           }
         }
       },
@@ -8700,6 +9372,28 @@
           }
         }
       },
+      "Version": {
+        "type": "object",
+        "description": "A listing's version. An install follows minor versions by itself and\ntakes a major version only when its person asks.",
+        "required": ["major", "minor"],
+        "properties": {
+          "major": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Changes an install waits for."
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Changes every install on this major gets at once."
+          }
+        }
+      },
+      "VersionBump": {
+        "type": "string",
+        "description": "How a new version follows the newest one.",
+        "enum": ["minor", "major"]
+      },
       "WarmAgentSessionRequest": {
         "type": "object",
         "description": "A client-minted id deduplicates warm calls without creating a conversation.",
@@ -8800,6 +9494,10 @@
     {
       "name": "documents",
       "description": "Programs embedded in documents, run as the viewer"
+    },
+    {
+      "name": "marketplace",
+      "description": "Pages people publish for their team to install"
     }
   ]
 }

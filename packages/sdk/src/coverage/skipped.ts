@@ -39,11 +39,21 @@ export const agentHarnessExcluded = [
   // An HTML preview's program runs are app-internal: an SDK user runs code
   // directly.
   'runDocumentProgram',
+  // So are an installed marketplace page's.
+  'runInstalledListingProgram',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
 export const agentHarnessBacklog = [
   // A stored HTML page's build, which fits the documents namespace.
   'getDocumentBuild',
+  // The marketplace is a prototype: its routes may still change shape.
+  'getInstalledListingBuild',
+  'installMarketplaceListing',
+  'listMarketplaceListings',
+  'publishMarketplaceListing',
+  'publishMarketplaceListingVersion',
+  'uninstallMarketplaceListing',
+  'unlistMarketplaceListing',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
 export const authExcluded = [

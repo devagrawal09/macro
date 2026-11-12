@@ -47,19 +47,25 @@ import type {
   DiscoveryRequest,
   DocumentBuildResponse,
   EditQueuedActionRequest,
+  ErrorResponse,
   ExecutionRecord,
   ExtractInputRequest,
   ExtractInputResponse,
   GetAgentSessionActivityParams,
+  InstalledListingBuild,
   LinkedTaskResponse,
   LinkTaskRequest,
   ListAgentRepositoryBranchesParams,
+  Listing,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
+  MarketplaceListings,
   OpenInApp,
   PresentView,
   PreviewAgentSessionsRequest,
   PreviewAgentSessionsResponse,
+  PublishListing,
+  PublishListingVersion,
   PullRequestSessionsResponse,
   PullRequestsSessionsResponse,
   PullRequestUrl,
@@ -4592,6 +4598,654 @@ export const runDocumentProgram = async (
     status: res.status,
     headers: res.headers,
   } as runDocumentProgramResponse;
+};
+
+/**
+ * @summary The listings the caller may see: their team's and everyone's, each with
+the major version they are on when they installed it.
+ */
+export type listMarketplaceListingsResponse200 = {
+  data: MarketplaceListings;
+  status: 200;
+};
+
+export type listMarketplaceListingsResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type listMarketplaceListingsResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type listMarketplaceListingsResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type listMarketplaceListingsResponseSuccess =
+  listMarketplaceListingsResponse200 & {
+    headers: Headers;
+  };
+export type listMarketplaceListingsResponseError = (
+  | listMarketplaceListingsResponse401
+  | listMarketplaceListingsResponse404
+  | listMarketplaceListingsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listMarketplaceListingsResponse =
+  | listMarketplaceListingsResponseSuccess
+  | listMarketplaceListingsResponseError;
+
+export const getListMarketplaceListingsUrl = () => {
+  return `/marketplace/listings`;
+};
+
+export const listMarketplaceListings = async (
+  options?: RequestInit
+): Promise<listMarketplaceListingsResponse> => {
+  const res = await fetch(getListMarketplaceListingsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listMarketplaceListingsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listMarketplaceListingsResponse;
+};
+
+/**
+ * @summary Publish an HTML document the caller owns to their team's marketplace, as
+version 1.0. `409` means the caller has no team or the document already
+has a listing; `422` means the page doesn't build.
+ */
+export type publishMarketplaceListingResponse201 = {
+  data: Listing;
+  status: 201;
+};
+
+export type publishMarketplaceListingResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type publishMarketplaceListingResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type publishMarketplaceListingResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type publishMarketplaceListingResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type publishMarketplaceListingResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type publishMarketplaceListingResponse413 = {
+  data: void;
+  status: 413;
+};
+
+export type publishMarketplaceListingResponse422 = {
+  data: ErrorResponse;
+  status: 422;
+};
+
+export type publishMarketplaceListingResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type publishMarketplaceListingResponse503 = {
+  data: void;
+  status: 503;
+};
+
+export type publishMarketplaceListingResponseSuccess =
+  publishMarketplaceListingResponse201 & {
+    headers: Headers;
+  };
+export type publishMarketplaceListingResponseError = (
+  | publishMarketplaceListingResponse400
+  | publishMarketplaceListingResponse401
+  | publishMarketplaceListingResponse403
+  | publishMarketplaceListingResponse404
+  | publishMarketplaceListingResponse409
+  | publishMarketplaceListingResponse413
+  | publishMarketplaceListingResponse422
+  | publishMarketplaceListingResponse500
+  | publishMarketplaceListingResponse503
+) & {
+  headers: Headers;
+};
+
+export type publishMarketplaceListingResponse =
+  | publishMarketplaceListingResponseSuccess
+  | publishMarketplaceListingResponseError;
+
+export const getPublishMarketplaceListingUrl = () => {
+  return `/marketplace/listings`;
+};
+
+export const publishMarketplaceListing = async (
+  publishListing: PublishListing,
+  options?: RequestInit
+): Promise<publishMarketplaceListingResponse> => {
+  const res = await fetch(getPublishMarketplaceListingUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(publishListing),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: publishMarketplaceListingResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as publishMarketplaceListingResponse;
+};
+
+/**
+ * @summary Unlist a listing: it leaves the marketplace, and those who installed it
+keep it. Its publisher or an admin of its team may.
+ */
+export type unlistMarketplaceListingResponse204 = {
+  data: void;
+  status: 204;
+};
+
+export type unlistMarketplaceListingResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type unlistMarketplaceListingResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type unlistMarketplaceListingResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type unlistMarketplaceListingResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type unlistMarketplaceListingResponseSuccess =
+  unlistMarketplaceListingResponse204 & {
+    headers: Headers;
+  };
+export type unlistMarketplaceListingResponseError = (
+  | unlistMarketplaceListingResponse401
+  | unlistMarketplaceListingResponse403
+  | unlistMarketplaceListingResponse404
+  | unlistMarketplaceListingResponse500
+) & {
+  headers: Headers;
+};
+
+export type unlistMarketplaceListingResponse =
+  | unlistMarketplaceListingResponseSuccess
+  | unlistMarketplaceListingResponseError;
+
+export const getUnlistMarketplaceListingUrl = (id: string) => {
+  return `/marketplace/listings/${id}`;
+};
+
+export const unlistMarketplaceListing = async (
+  id: string,
+  options?: RequestInit
+): Promise<unlistMarketplaceListingResponse> => {
+  const res = await fetch(getUnlistMarketplaceListingUrl(id), {
+    ...options,
+    method: 'DELETE',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: unlistMarketplaceListingResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as unlistMarketplaceListingResponse;
+};
+
+/**
+ * @summary Put the caller on the listing's newest major version: installs it, or
+takes a major version they were waiting on. Repeating it changes nothing.
+ */
+export type installMarketplaceListingResponse200 = {
+  data: Listing;
+  status: 200;
+};
+
+export type installMarketplaceListingResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type installMarketplaceListingResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type installMarketplaceListingResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type installMarketplaceListingResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type installMarketplaceListingResponseSuccess =
+  installMarketplaceListingResponse200 & {
+    headers: Headers;
+  };
+export type installMarketplaceListingResponseError = (
+  | installMarketplaceListingResponse401
+  | installMarketplaceListingResponse403
+  | installMarketplaceListingResponse404
+  | installMarketplaceListingResponse500
+) & {
+  headers: Headers;
+};
+
+export type installMarketplaceListingResponse =
+  | installMarketplaceListingResponseSuccess
+  | installMarketplaceListingResponseError;
+
+export const getInstallMarketplaceListingUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install`;
+};
+
+export const installMarketplaceListing = async (
+  id: string,
+  options?: RequestInit
+): Promise<installMarketplaceListingResponse> => {
+  const res = await fetch(getInstallMarketplaceListingUrl(id), {
+    ...options,
+    method: 'PUT',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: installMarketplaceListingResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as installMarketplaceListingResponse;
+};
+
+/**
+ * @summary Remove the caller's install. Repeating it changes nothing.
+ */
+export type uninstallMarketplaceListingResponse204 = {
+  data: void;
+  status: 204;
+};
+
+export type uninstallMarketplaceListingResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type uninstallMarketplaceListingResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type uninstallMarketplaceListingResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type uninstallMarketplaceListingResponseSuccess =
+  uninstallMarketplaceListingResponse204 & {
+    headers: Headers;
+  };
+export type uninstallMarketplaceListingResponseError = (
+  | uninstallMarketplaceListingResponse401
+  | uninstallMarketplaceListingResponse404
+  | uninstallMarketplaceListingResponse500
+) & {
+  headers: Headers;
+};
+
+export type uninstallMarketplaceListingResponse =
+  | uninstallMarketplaceListingResponseSuccess
+  | uninstallMarketplaceListingResponseError;
+
+export const getUninstallMarketplaceListingUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install`;
+};
+
+export const uninstallMarketplaceListing = async (
+  id: string,
+  options?: RequestInit
+): Promise<uninstallMarketplaceListingResponse> => {
+  const res = await fetch(getUninstallMarketplaceListingUrl(id), {
+    ...options,
+    method: 'DELETE',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: uninstallMarketplaceListingResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as uninstallMarketplaceListingResponse;
+};
+
+/**
+ * @summary Build the page the caller's install shows: the newest minor version of
+the major they are on.
+ */
+export type getInstalledListingBuildResponse200 = {
+  data: InstalledListingBuild;
+  status: 200;
+};
+
+export type getInstalledListingBuildResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type getInstalledListingBuildResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type getInstalledListingBuildResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type getInstalledListingBuildResponse503 = {
+  data: void;
+  status: 503;
+};
+
+export type getInstalledListingBuildResponseSuccess =
+  getInstalledListingBuildResponse200 & {
+    headers: Headers;
+  };
+export type getInstalledListingBuildResponseError = (
+  | getInstalledListingBuildResponse401
+  | getInstalledListingBuildResponse404
+  | getInstalledListingBuildResponse500
+  | getInstalledListingBuildResponse503
+) & {
+  headers: Headers;
+};
+
+export type getInstalledListingBuildResponse =
+  | getInstalledListingBuildResponseSuccess
+  | getInstalledListingBuildResponseError;
+
+export const getGetInstalledListingBuildUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/build`;
+};
+
+export const getInstalledListingBuild = async (
+  id: string,
+  options?: RequestInit
+): Promise<getInstalledListingBuildResponse> => {
+  const res = await fetch(getGetInstalledListingBuildUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getInstalledListingBuildResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getInstalledListingBuildResponse;
+};
+
+/**
+ * @summary Run one program of the page the caller's install shows, as the caller.
+`409` means a newer minor version was published since the page was built.
+ */
+export type runInstalledListingProgramResponse200 = {
+  data: UserExecutionReceipt;
+  status: 200;
+};
+
+export type runInstalledListingProgramResponse400 = {
+  data: void;
+  status: 400;
+};
+
+export type runInstalledListingProgramResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type runInstalledListingProgramResponse403 = {
+  data: void;
+  status: 403;
+};
+
+export type runInstalledListingProgramResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type runInstalledListingProgramResponse409 = {
+  data: void;
+  status: 409;
+};
+
+export type runInstalledListingProgramResponse422 = {
+  data: void;
+  status: 422;
+};
+
+export type runInstalledListingProgramResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type runInstalledListingProgramResponse503 = {
+  data: void;
+  status: 503;
+};
+
+export type runInstalledListingProgramResponseSuccess =
+  runInstalledListingProgramResponse200 & {
+    headers: Headers;
+  };
+export type runInstalledListingProgramResponseError = (
+  | runInstalledListingProgramResponse400
+  | runInstalledListingProgramResponse401
+  | runInstalledListingProgramResponse403
+  | runInstalledListingProgramResponse404
+  | runInstalledListingProgramResponse409
+  | runInstalledListingProgramResponse422
+  | runInstalledListingProgramResponse500
+  | runInstalledListingProgramResponse503
+) & {
+  headers: Headers;
+};
+
+export type runInstalledListingProgramResponse =
+  | runInstalledListingProgramResponseSuccess
+  | runInstalledListingProgramResponseError;
+
+export const getRunInstalledListingProgramUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/code-executions`;
+};
+
+export const runInstalledListingProgram = async (
+  id: string,
+  runDocumentProgram: RunDocumentProgram,
+  options?: RequestInit
+): Promise<runInstalledListingProgramResponse> => {
+  const res = await fetch(getRunInstalledListingProgramUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(runDocumentProgram),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: runInstalledListingProgramResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as runInstalledListingProgramResponse;
+};
+
+/**
+ * @summary Publish the listing's document as its next version. A minor version
+reaches every install on the newest major at once; a major version waits
+for each person to take it. `409` means the page hasn't changed.
+ */
+export type publishMarketplaceListingVersionResponse201 = {
+  data: Listing;
+  status: 201;
+};
+
+export type publishMarketplaceListingVersionResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type publishMarketplaceListingVersionResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type publishMarketplaceListingVersionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type publishMarketplaceListingVersionResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type publishMarketplaceListingVersionResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
+export type publishMarketplaceListingVersionResponse413 = {
+  data: void;
+  status: 413;
+};
+
+export type publishMarketplaceListingVersionResponse422 = {
+  data: ErrorResponse;
+  status: 422;
+};
+
+export type publishMarketplaceListingVersionResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type publishMarketplaceListingVersionResponse503 = {
+  data: void;
+  status: 503;
+};
+
+export type publishMarketplaceListingVersionResponseSuccess =
+  publishMarketplaceListingVersionResponse201 & {
+    headers: Headers;
+  };
+export type publishMarketplaceListingVersionResponseError = (
+  | publishMarketplaceListingVersionResponse400
+  | publishMarketplaceListingVersionResponse401
+  | publishMarketplaceListingVersionResponse403
+  | publishMarketplaceListingVersionResponse404
+  | publishMarketplaceListingVersionResponse409
+  | publishMarketplaceListingVersionResponse413
+  | publishMarketplaceListingVersionResponse422
+  | publishMarketplaceListingVersionResponse500
+  | publishMarketplaceListingVersionResponse503
+) & {
+  headers: Headers;
+};
+
+export type publishMarketplaceListingVersionResponse =
+  | publishMarketplaceListingVersionResponseSuccess
+  | publishMarketplaceListingVersionResponseError;
+
+export const getPublishMarketplaceListingVersionUrl = (id: string) => {
+  return `/marketplace/listings/${id}/versions`;
+};
+
+export const publishMarketplaceListingVersion = async (
+  id: string,
+  publishListingVersion: PublishListingVersion,
+  options?: RequestInit
+): Promise<publishMarketplaceListingVersionResponse> => {
+  const res = await fetch(getPublishMarketplaceListingVersionUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(publishListingVersion),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: publishMarketplaceListingVersionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as publishMarketplaceListingVersionResponse;
 };
 
 /**
