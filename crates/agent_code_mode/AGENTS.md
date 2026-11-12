@@ -61,7 +61,9 @@ stacks. Process isolation belongs to
   refresh metas, connection hints and nested frames, which its policy can't
   stop; and it types each `macro:programs` result as its JSON form
   (`programs_prelude.ts`).
-  Diagnostics name blocks, not generated files.
+  Diagnostics name blocks, not generated files. `demos/` holds pages that recreate built-in features, or combine
+  several areas, this way; the ignored Deno test `every_demo_page_builds`
+  builds each one, so keep them building when the SDK changes.
 - `src/domain/reviews.rs`: review revisions, claims and outcomes.
   `src/domain/reviews/drafts.rs` holds the typed drafts and results: items
   keyed by kind, reusing `SendEmail`, `CreateCalendarEvent` and their
