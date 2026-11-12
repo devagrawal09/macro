@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   navigate: { current: (_id: string) => {} },
   loads: new Map<string, (name: string) => void>(),
   mounts: [] as string[],
+  touch: false,
   pass: (props: ParentProps) => props.children,
 }));
 
@@ -29,7 +30,10 @@ vi.mock('@app/features/settings/AgentSettings', () => ({
   AgentSettings: () => null,
 }));
 vi.mock('@app/features/settings/IntegrationsPage', () => ({
-  IntegrationsPage: () => null,
+  IntegrationsPage: () => <div data-testid="connections">Connections page</div>,
+}));
+vi.mock('../../artifacts/artifacts-page', () => ({
+  ArtifactsPage: () => <div data-testid="artifacts">Artifacts page</div>,
 }));
 vi.mock('@app/features/soup/entity-notifications', () => ({
   withEntityNotifications: (entity: unknown) => entity,
@@ -85,7 +89,9 @@ vi.mock(
 vi.mock('@core/component/Toast/Toast', () => ({ toast: { alert: vi.fn() } }));
 vi.mock('@core/constant/featureFlags', () => ({ enableAgentUpdates: {} }));
 vi.mock('@core/context/user', () => ({ useUserId: () => () => 'user' }));
-vi.mock('@core/mobile/isTouchDevice', () => ({ isTouchDevice: () => false }));
+vi.mock('@core/mobile/isTouchDevice', () => ({
+  isTouchDevice: () => state.touch,
+}));
 vi.mock('@entity', () => ({ ListEntityMetadataQueryProvider: state.pass }));
 vi.mock('@notifications/mark-row-seen', () => ({
   markRowNotificationsSeenOnOpen: () => {},
@@ -116,28 +122,51 @@ vi.mock('../components/AgentSessionPane', () => ({
 }));
 vi.mock('../components/AgentsSidebar', () => ({
   AgentsSidebar: (props: {
+    activePage?: string;
+    onOpenPage: (page: 'connections' | 'artifacts') => void;
     activeConversationId?: string;
     onOpenConversation: (conversation: {
       id: string;
       type: 'agent_session';
     }) => void;
   }) => (
-    <For each={['a', 'b', 'c']}>
-      {(id) => (
-        <button
-          type="button"
-          aria-current={props.activeConversationId === id ? 'true' : undefined}
-          onClick={() =>
-            props.onOpenConversation({ id, type: 'agent_session' })
-          }
-        >
-          {id}
-        </button>
-      )}
-    </For>
+    <>
+      <For each={['connections', 'artifacts'] as const}>
+        {(page) => (
+          <button
+            type="button"
+            aria-current={props.activePage === page ? 'page' : undefined}
+            onClick={() => props.onOpenPage(page)}
+          >
+            {page}
+          </button>
+        )}
+      </For>
+      <For each={['a', 'b', 'c']}>
+        {(id) => (
+          <button
+            type="button"
+            aria-current={
+              props.activeConversationId === id ? 'true' : undefined
+            }
+            onClick={() =>
+              props.onOpenConversation({ id, type: 'agent_session' })
+            }
+          >
+            {id}
+          </button>
+        )}
+      </For>
+    </>
   ),
 }));
-vi.mock('../components/Topbar', () => ({ Topbar: () => null }));
+vi.mock('../components/Topbar', () => ({
+  Topbar: (props: { onBack?: () => void }) => (
+    <button type="button" onClick={props.onBack}>
+      Back to conversations
+    </button>
+  ),
+}));
 vi.mock('../context/data-mode', () => ({
   DataModeProvider: state.pass,
   dataModeFor: () => 'chat',
@@ -195,7 +224,8 @@ function row(name: string) {
 }
 
 beforeEach(() => {
-  state.contentId.current = 'agents';
+  state.contentId = { current: 'agents' };
+  state.touch = false;
   state.loads.clear();
   state.mounts.length = 0;
 });
@@ -236,3 +266,52 @@ it('keeps the open conversation mounted when it is selected again', async () => 
   expect(screen.getByTestId('pane').textContent).toBe('Session a');
   expect(state.mounts).toEqual(['a']);
 });
+
+it.each(['connections', 'artifacts'])(
+  'follows the %s destination without remounting the sidebar',
+  async (page) => {
+    const [contentId, setContentId] = createSignal('agents');
+    state.contentId = {
+      get current() {
+        return contentId();
+      },
+    };
+    state.navigate.current = setContentId;
+    render(() => <AgentsView />);
+
+    const link = screen.getByRole('button', { name: page });
+    fireEvent.click(link);
+    expect(contentId()).toBe(page);
+    expect(await screen.findByTestId(page)).toBeTruthy();
+    expect(link.getAttribute('aria-current')).toBe('page');
+
+    setContentId('agents');
+    expect(screen.queryByTestId(page)).toBeNull();
+    setContentId(page);
+    expect(await screen.findByTestId(page)).toBeTruthy();
+    expect(screen.getByRole('button', { name: page })).toBe(link);
+  }
+);
+
+it.each(['connections', 'artifacts'])(
+  'shows a direct %s destination on touch and returns to conversations',
+  async (page) => {
+    state.touch = true;
+    const [contentId, setContentId] = createSignal(page);
+    state.contentId = {
+      get current() {
+        return contentId();
+      },
+    };
+    state.navigate.current = setContentId;
+    render(() => <AgentsView />);
+
+    const content = await screen.findByTestId(page);
+    expect(content.closest('main')?.classList.contains('hidden')).toBe(false);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Back to conversations' })
+    );
+    expect(contentId()).toBe('agents');
+    expect(screen.getByRole('button', { name: page })).toBeTruthy();
+  }
+);

@@ -16,7 +16,12 @@ const AgentsView = lazy(async () => ({
 
 export const AgentsRouteView = withAuth(() => {
   const panel = useSplitPanelOrThrow();
-  useViewRestoration();
+  useViewRestoration(
+    panel.handle.content().id === 'connections' ||
+      panel.handle.content().id === 'artifacts'
+      ? 'agents'
+      : undefined
+  );
   const route = () => {
     const content = panel.handle.content();
     if (content.type === 'component' && content.id === 'routines') return;

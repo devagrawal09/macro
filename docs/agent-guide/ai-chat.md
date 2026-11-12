@@ -265,7 +265,7 @@ the header back button returns to the previous screen, or Agents for a direct li
 Portrait and landscape touch layouts have no conversation side panel. **Changes** opens a full-width,
 unified diff with **Back to conversation**; returning preserves the unsent draft.
 
-The mobile conversation list omits the desktop **Agents** and **Connections** controls. Use the Agents composer or global create menu to start
+The mobile conversation list omits the desktop **Agents**, **Routines**, **Artifacts** and **Connections** controls; Routines and Artifacts are under Settings on touch. Use the Agents composer or global create menu to start
 a conversation. Returning to the list and reopening the composer preserves the
 draft, attachments, agent, model, repository, and branch. Tap the
 agent/model control once to open a bottom sheet with its search field focused,
@@ -465,10 +465,28 @@ the shimmer.
 - Open **Go to Agents** → `/app/component/agents`. The workspace uses one
   sidebar for Chat and Code.
   **Agents** in the sidebar opens the same roster as the composer’s
-  **Create agent** action. **Connections** manages MCP integrations (including
-  app authentication and disconnection), also available under Settings → Integrations.
+  **Create agent** action. **Connections** opens `/app/connections` inside the
+  same Agents workspace and manages MCP integrations (including app authentication
+  and disconnection), also available under Settings → Integrations. Copying that
+  URL, reloading, and browser Back/Forward preserve the Connections destination;
+  switching between it and conversations keeps the desktop sidebar mounted.
   Home’s **Connect your tools** and agent replies’ **Connect app** chips open this
   Integrations page. It shows installed tools above the app catalog, with personal Gmail/GitHub account links in a separate section above.
+- The sidebar's tool links read **Agents**, **Routines**, **Artifacts**,
+  **Connections**. **Artifacts** lists every HTML document (`html` or `htm`)
+  the viewer can open, newest first, as unified list rows (name, sharing, last
+  update); email attachments stay out, as in Drive's default listing. These are
+  the pages agents publish, whose server programs run in Render (see
+  [Program blocks in HTML previews](documents.md#program-blocks-in-html-previews)).
+  Click a row to open the document as any list row does (Shift+click for a new
+  split). With none, the page shows **No artifacts yet** and explains that
+  published pages appear there. The page has its own `/app/artifacts` URL;
+  copied links, reload, and browser Back/Forward restore it while the desktop
+  Agents sidebar stays mounted. Code opens it with
+  `openAgentsPage(layout, 'artifacts')`. On touch, where the sidebar's tool
+  links are hidden, the same list is **Settings → Artifacts** (on phones **More
+  views → Settings → Artifacts**), beside Routines; tapping a row closes the
+  settings sheet and opens the document.
 - Ask the agent to connect an MCP server by URL (for example "connect the MCP
   server at https://mcp.example.com/mcp"). It calls **ConnectMcpServer**, which
   adds a public `https` server to Connections and renders a **Connected MCP
