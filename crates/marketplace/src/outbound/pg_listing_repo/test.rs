@@ -16,6 +16,7 @@ use crate::domain::ports::ListingRepo;
 const ADA: &str = "macro|ada@example.com";
 const BEN: &str = "macro|ben@example.com";
 const OTHER_OWNER: &str = "macro|olga@example.com";
+const CARA: &str = "macro|cara@example.com";
 
 fn user(id: &'static str) -> MacroUserIdStr<'static> {
     MacroUserIdStr::parse_from_str(id).expect("valid user id")
@@ -28,25 +29,30 @@ fn page(html: &str) -> PublishedPage {
     }
 }
 
-/// A team owned by a new user `owner`; a person owns one team at most.
-async fn insert_team(pool: &PgPool, owner: &str) -> Uuid {
+/// A new user `id`, as installs and listings reference them.
+async fn insert_user(pool: &PgPool, id: &str) {
     let macro_user_id = Uuid::now_v7();
     sqlx::query!(
         r#"INSERT INTO macro_user (id, username, email, stripe_customer_id) VALUES ($1, $2, $2, $2)"#,
         macro_user_id,
-        owner,
+        id,
     )
     .execute(pool)
     .await
     .expect("macro_user should insert");
     sqlx::query!(
         r#"INSERT INTO "User" (id, email, macro_user_id) VALUES ($1, $1, $2)"#,
-        owner,
+        id,
         macro_user_id,
     )
     .execute(pool)
     .await
     .expect("user should insert");
+}
+
+/// A team owned by a new user `owner`; a person owns one team at most.
+async fn insert_team(pool: &PgPool, owner: &str) -> Uuid {
+    insert_user(pool, owner).await;
 
     let team = Uuid::now_v7();
     sqlx::query!(
@@ -175,6 +181,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgPool) {
     let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
     let other = insert_team(&pool, OTHER_OWNER).await;
     let repo = PgListingRepo::new(pool);
     let listing = board(acme);
@@ -226,6 +233,7 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn a_removed_listing_stays_only_for_those_who_installed_it(pool: PgPool) {
     let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
     let repo = PgListingRepo::new(pool);
     let listing = board(acme);
     repo.create_listing(listing.clone()).await.unwrap();
@@ -253,6 +261,7 @@ async fn a_removed_listing_stays_only_for_those_who_installed_it(pool: PgPool) {
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn a_listing_without_a_team_is_seen_by_everyone(pool: PgPool) {
     let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
     let repo = PgListingRepo::new(pool.clone());
     let listing = board(acme);
     repo.create_listing(listing.clone()).await.unwrap();
@@ -274,4 +283,36 @@ async fn a_listing_without_a_team_is_seen_by_everyone(pool: PgPool) {
     assert_eq!(without_team.len(), 1);
     assert_eq!(without_team[0].scope, ListingScope::Global);
     assert!(page.is_some());
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn deleting_a_user_removes_their_installs_and_listings(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    let repo = PgListingRepo::new(pool.clone());
+    let adas = board(acme);
+    let bens = NewListing {
+        publisher: user(BEN),
+        ..board(acme)
+    };
+    repo.create_listing(adas.clone()).await.unwrap();
+    repo.create_listing(bens.clone()).await.unwrap();
+    repo.install_latest(adas.id, &user(BEN)).await.unwrap();
+    repo.install_latest(bens.id, &user(CARA)).await.unwrap();
+
+    sqlx::query!(r#"DELETE FROM "User" WHERE id = $1"#, BEN)
+        .execute(&pool)
+        .await
+        .expect("user should delete");
+
+    let listed = repo.listings(&user(CARA), Some(acme), None).await.unwrap();
+    let installs = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM marketplace_install"#)
+        .fetch_one(&pool)
+        .await
+        .expect("installs should count");
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, adas.id);
+    assert_eq!(installs, 0);
 }

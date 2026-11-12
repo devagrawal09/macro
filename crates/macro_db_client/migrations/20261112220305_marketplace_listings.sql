@@ -1,13 +1,17 @@
 -- The marketplace: HTML artifacts a person publishes for their team to
 -- install. A listing's content lives in its versions, and an install follows
 -- the newest minor version of the major it is on.
+--
+-- Deleting a user deletes their installs, and deletes the listings they
+-- published along with everyone's installs of them: a listing has no owner
+-- left to publish its versions or answer for it.
 SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS marketplace_listing (
     id UUID PRIMARY KEY,
     kind TEXT NOT NULL CHECK (kind IN ('artifact')),
     -- Who published it.
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
     -- The team that sees it. NULL is everyone: a listing Macro provides.
     team_id UUID REFERENCES team (id) ON DELETE CASCADE,
     -- The document its newest version was published from. A plain pointer,
@@ -46,7 +50,7 @@ CREATE TABLE IF NOT EXISTS marketplace_listing_version (
 -- A person's install of a listing: the major version they are on.
 CREATE TABLE IF NOT EXISTS marketplace_install (
     listing_id UUID NOT NULL REFERENCES marketplace_listing (id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
     major INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
