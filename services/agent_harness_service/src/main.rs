@@ -1925,10 +1925,11 @@ async fn run() -> anyhow::Result<()> {
         ),
     );
     // HTML documents build with the Deno toolchain and run their programs as
-    // the viewer on the documents' own executor.
-    let document_programs = match (&user_code_mode, &code_runner) {
+    // the viewer on the documents' own executor. The marketplace's published
+    // pages build and run through the same service, under the same limits.
+    let (document_programs, marketplace_listings) = match (&user_code_mode, &code_runner) {
         (Some((_, runner)), Some((_, _, _, _, toolchain))) => {
-            let service = agent_code_mode::domain::DocumentPrograms::new(
+            let programs = Arc::new(agent_code_mode::domain::DocumentPrograms::new(
                 Arc::new(
                     code_mode::document_sources::StoredDocumentSources::new(
                         tool_context.document_tool_context.service.clone(),
@@ -1938,20 +1939,43 @@ async fn run() -> anyhow::Result<()> {
                 Arc::clone(toolchain) as Arc<dyn code_execution::domain::ProgramChecker>,
                 Arc::clone(toolchain) as Arc<dyn code_execution::domain::ProgramBundler>,
                 runner.clone(),
-            );
-            agent_code_mode::inbound::document_router::document_program_router(
-                agent_code_mode::inbound::document_router::DocumentProgramRouterState::new(
-                    Arc::new(service),
-                    Arc::new(code_mode::document_rollout::FlaggedDocumentPrograms::new(
-                        feature_flags.clone(),
-                        matches!(config.environment, Environment::Local),
+            ));
+            let local = matches!(config.environment, Environment::Local);
+            let document_rollout = Arc::new(code_mode::rollout::FlaggedRollout::new(
+                feature_flags.clone(),
+                agent_code_mode::domain::DOCUMENT_PROGRAMS_FLAG,
+                local,
+            ));
+            let document_programs =
+                agent_code_mode::inbound::document_router::document_program_router(
+                    agent_code_mode::inbound::document_router::DocumentProgramRouterState::new(
+                        Arc::clone(&programs),
+                        document_rollout.clone(),
+                        entity_access.clone(),
+                        MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
+                    ),
+                );
+            let marketplace_listings = marketplace::inbound::axum_router::marketplace_router(
+                marketplace::inbound::axum_router::MarketplaceRouterState::new(
+                    Arc::new(marketplace::domain::service::MarketplaceServiceImpl::new(
+                        marketplace::outbound::pg_listing_repo::PgListingRepo::new(pool.clone()),
+                        programs,
+                        code_mode::rollout::MarketplaceRollout::new(
+                            code_mode::rollout::FlaggedRollout::new(
+                                feature_flags.clone(),
+                                marketplace::domain::models::MARKETPLACE_FLAG,
+                                local,
+                            ),
+                            document_rollout,
+                        ),
                     )),
                     entity_access.clone(),
                     MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
                 ),
-            )
+            );
+            (document_programs, marketplace_listings)
         }
-        _ => axum::Router::new(),
+        _ => (axum::Router::new(), axum::Router::new()),
     };
     let sharing = agent_session::inbound::axum_router::sharing::agent_session_sharing_router(
         AgentSessionRouterState::new(
@@ -2042,6 +2066,7 @@ async fn run() -> anyhow::Result<()> {
             .with_app_connections(app_connections)
             .with_code_executions(code_executions)
             .with_document_programs(document_programs)
+            .with_marketplace(marketplace_listings)
             .with_notifications(notification_ingress)
             .with_cognition(cognition_router)
             .with_universal_input(

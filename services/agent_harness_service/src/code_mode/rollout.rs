@@ -1,11 +1,12 @@
-//! The per-user rollout of document programs, read from PostHog.
-use agent_code_mode::domain::{DOCUMENT_PROGRAMS_FLAG, DocumentProgramGate};
+//! A per-user rollout read from PostHog: document programs and the
+//! marketplace of pages published from them.
+use agent_code_mode::domain::DocumentProgramGate;
 use async_trait::async_trait;
 use feature_flags::FeatureFlags;
 use macro_user_id::user_id::MacroUserIdStr;
 use std::{
     num::NonZeroUsize,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 use tokio::time::Instant;
@@ -15,14 +16,15 @@ const ROLLOUT_TTL: Duration = Duration::from_secs(60);
 /// Users whose answers are kept; past it the least recent is asked again.
 const CACHED_USERS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(4095);
 
-/// Document programs roll out per user through [`DOCUMENT_PROGRAMS_FLAG`].
-/// Each build and run asks, so a user's answer is kept for [`ROLLOUT_TTL`];
-/// when PostHog fails, the last answer stands, and a user with none is
-/// refused. A local stack always runs them, matching the web flag's dev
-/// default: its PostHog key is often a placeholder that PostHog refuses.
-/// Without a flag provider (no PostHog key) they are off.
-pub struct FlaggedDocumentPrograms<F> {
+/// A feature that rolls out per user through one PostHog flag. Every request
+/// asks, so a user's answer is kept for [`ROLLOUT_TTL`]; when PostHog fails,
+/// the last answer stands, and a user with none is refused. A local stack
+/// admits everyone, matching the web flags' dev default: its PostHog key is
+/// often a placeholder that PostHog refuses. Without a flag provider (no
+/// PostHog key) the feature is off.
+pub struct FlaggedRollout<F> {
     flags: Option<F>,
+    flag: &'static str,
     local: bool,
     answers: Mutex<lru::LruCache<MacroUserIdStr<'static>, Answer>>,
 }
@@ -33,25 +35,30 @@ struct Answer {
     read_at: Instant,
 }
 
-impl<F> FlaggedDocumentPrograms<F> {
-    /// `local` admits everyone, for a local stack.
-    pub fn new(flags: Option<F>, local: bool) -> Self {
+impl<F> FlaggedRollout<F> {
+    /// The rollout of `flag`. `local` admits everyone, for a local stack.
+    pub fn new(flags: Option<F>, flag: &'static str, local: bool) -> Self {
         Self {
             flags,
+            flag,
             local,
             answers: Mutex::new(lru::LruCache::new(CACHED_USERS)),
         }
     }
 }
 
-#[async_trait]
-impl<F: FeatureFlags + 'static> DocumentProgramGate for FlaggedDocumentPrograms<F> {
+impl<F: FeatureFlags + 'static> FlaggedRollout<F> {
+    /// Whether the rollout admits `user`.
     #[tracing::instrument(
-        name = "document_programs.rollout",
+        name = "feature_rollout",
         skip_all,
-        fields(cache = tracing::field::Empty, allowed = tracing::field::Empty)
+        fields(
+            flag = self.flag,
+            cache = tracing::field::Empty,
+            allowed = tracing::field::Empty,
+        )
     )]
-    async fn allows(&self, user: &MacroUserIdStr<'static>) -> bool {
+    pub async fn allows(&self, user: &MacroUserIdStr<'static>) -> bool {
         if self.local {
             return true;
         }
@@ -75,7 +82,7 @@ impl<F: FeatureFlags + 'static> DocumentProgramGate for FlaggedDocumentPrograms<
 
         let enabled = match flags.load(user).await {
             Ok(snapshot) => {
-                let enabled = snapshot.is_enabled(DOCUMENT_PROGRAMS_FLAG);
+                let enabled = snapshot.is_enabled(self.flag);
                 self.answers
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -108,7 +115,8 @@ impl<F: FeatureFlags + 'static> DocumentProgramGate for FlaggedDocumentPrograms<
                 tracing::warn!(
                     ?error,
                     reused = known.is_some(),
-                    "could not read document program rollout"
+                    flag = self.flag,
+                    "could not read a feature rollout"
                 );
                 span.record("cache", if known.is_some() { "stale" } else { "failed" });
                 last
@@ -116,6 +124,36 @@ impl<F: FeatureFlags + 'static> DocumentProgramGate for FlaggedDocumentPrograms<
         };
         span.record("allowed", enabled);
         enabled
+    }
+}
+
+#[async_trait]
+impl<F: FeatureFlags + 'static> DocumentProgramGate for FlaggedRollout<F> {
+    async fn allows(&self, user: &MacroUserIdStr<'static>) -> bool {
+        FlaggedRollout::allows(self, user).await
+    }
+}
+
+/// The marketplace's listings are pages with programs, so it admits a user
+/// only where both its own rollout and the document programs' do.
+pub struct MarketplaceRollout<F> {
+    marketplace: FlaggedRollout<F>,
+    document_programs: Arc<FlaggedRollout<F>>,
+}
+
+impl<F> MarketplaceRollout<F> {
+    /// Bind the marketplace's rollout and the document programs' shared one.
+    pub fn new(marketplace: FlaggedRollout<F>, document_programs: Arc<FlaggedRollout<F>>) -> Self {
+        Self {
+            marketplace,
+            document_programs,
+        }
+    }
+}
+
+impl<F: FeatureFlags + 'static> marketplace::domain::ports::Rollout for MarketplaceRollout<F> {
+    async fn allows(&self, user: &MacroUserIdStr<'static>) -> bool {
+        self.document_programs.allows(user).await && self.marketplace.allows(user).await
     }
 }
 

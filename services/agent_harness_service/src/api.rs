@@ -91,6 +91,7 @@ pub struct ApiStates<T, R, Opener, Bots, Requests, Access, Auth, Models, Changes
     app_connections: Router,
     code_executions: Router,
     document_programs: Router,
+    marketplace: Router,
     activity: Router,
     notifications: Router,
     changes: AgentChangesRouterState<Changes, Access, Auth>,
@@ -147,6 +148,7 @@ impl<T, R, Opener, Bots, Requests, Access, Auth, Models, Changes>
             app_connections: Router::new(),
             code_executions: Router::new(),
             document_programs: Router::new(),
+            marketplace: Router::new(),
             activity: Router::new(),
             notifications: Router::new(),
             changes,
@@ -228,6 +230,12 @@ impl<T, R, Opener, Bots, Requests, Access, Auth, Models, Changes>
     /// Attach the user-scoped runs of programs embedded in documents.
     pub fn with_document_programs(mut self, router: Router) -> Self {
         self.document_programs = router;
+        self
+    }
+
+    /// Attach the marketplace of pages people publish for their team.
+    pub fn with_marketplace(mut self, router: Router) -> Self {
+        self.marketplace = router;
         self
     }
 
@@ -435,6 +443,7 @@ where
         .merge(agent_repositories_router(states.repositories))
         .merge(states.routine_sessions)
         .merge(states.document_programs)
+        .merge(states.marketplace)
         .merge(states.coding_agents)
         .merge(states.capabilities)
         .merge(states.mode_choice)
