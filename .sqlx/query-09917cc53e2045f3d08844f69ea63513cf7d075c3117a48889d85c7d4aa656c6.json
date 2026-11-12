@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT major, minor, source_hash\n            FROM marketplace_listing_version\n            WHERE listing_id = $1\n            ORDER BY major DESC, minor DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "09917cc53e2045f3d08844f69ea63513cf7d075c3117a48889d85c7d4aa656c6"
+}
