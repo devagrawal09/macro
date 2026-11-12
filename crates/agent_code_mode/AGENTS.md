@@ -33,7 +33,7 @@ stacks. Process isolation belongs to
   `409` if the document changed since. The frame never sends source. Both
   need view access (a receipt minted in the handler), the rollout gate
   (`DocumentProgramGate`, `enable-html-code-mode`; harness adapter
-  `FlaggedDocumentPrograms`) and a signed-in user. Builds accept a token
+  `FlaggedRollout`) and a signed-in user. Builds accept a token
   minted for an agent's run, so the SDK's `publishPage` works in code mode;
   runs refuse it and any request marked as a program's (`is_agent_run`), so
   a program cannot start another run. Runs are `ToolCaller::Document` with the
@@ -45,7 +45,9 @@ stacks. Process isolation belongs to
   more wait, within their own deadline, and get `Busy` (503) past it. The
   wait is `queued_ms` on `document_programs.run`, and the run gets what is
   left of the deadline. The harness gives `DocumentPrograms` a runner on its
-  own executor.
+  own executor. `build_source` and `run_source` do the same for a page whose
+  source the caller holds instead of a stored document: `crates/marketplace`'s
+  published pages.
 - `src/domain/document_programs/page_build.rs`: the build. `text/macro` blocks are
   programs (`export default (args, { macro }: ProgramContext)`, plain JSON
   out); the one `<script type="module" lang="ts">` imports them typed from

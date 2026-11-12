@@ -151,6 +151,14 @@ impl DocumentPrograms {
         }
     }
 
+    /// The stored HTML of a document the caller may view.
+    pub async fn source(
+        &self,
+        document: &EntityAccessReceipt<ViewAccessLevel>,
+    ) -> Result<String, DocumentProgramError> {
+        Ok(self.sources.html(document).await?)
+    }
+
     /// The build of the document's current source, from the cache or new.
     #[tracing::instrument(
         name = "document_programs.build",
@@ -168,7 +176,28 @@ impl DocumentPrograms {
         document: &EntityAccessReceipt<ViewAccessLevel>,
     ) -> Result<DocumentBuild, DocumentProgramError> {
         let html = self.sources.html(document).await?;
-        let source_hash = SourceHash::of(&html);
+        self.build_html(&html).await
+    }
+
+    /// The build of a page that isn't a stored document, such as a published
+    /// snapshot: the same build and cache, for a source the caller holds.
+    #[tracing::instrument(
+        name = "document_programs.build",
+        skip_all,
+        fields(
+            source_bytes = tracing::field::Empty,
+            cached = tracing::field::Empty,
+            built = tracing::field::Empty,
+        ),
+        err
+    )]
+    pub async fn build_source(&self, html: &str) -> Result<DocumentBuild, DocumentProgramError> {
+        self.build_html(html).await
+    }
+
+    /// Builds `html`, recording on the caller's span.
+    async fn build_html(&self, html: &str) -> Result<DocumentBuild, DocumentProgramError> {
+        let source_hash = SourceHash::of(html);
         let span = tracing::Span::current();
         span.record("source_bytes", html.len());
 
@@ -182,15 +211,14 @@ impl DocumentPrograms {
         let outcome = match cached {
             Some(outcome) => outcome,
             None => {
-                let outcome =
-                    page_build::build(&html, self.checker.as_ref(), self.bundler.as_ref())
-                        .await
-                        .map_err(|error| match error {
-                            CheckError::Busy => DocumentProgramError::Busy,
-                            CheckError::InvalidSource | CheckError::Internal => {
-                                DocumentProgramError::Toolchain
-                            }
-                        })?;
+                let outcome = page_build::build(html, self.checker.as_ref(), self.bundler.as_ref())
+                    .await
+                    .map_err(|error| match error {
+                        CheckError::Busy => DocumentProgramError::Busy,
+                        CheckError::InvalidSource | CheckError::Internal => {
+                            DocumentProgramError::Toolchain
+                        }
+                    })?;
                 let outcome = Arc::new(outcome);
                 self.builds
                     .lock()
@@ -227,7 +255,38 @@ impl DocumentPrograms {
         request: RunProgram,
         cancel: CancellationToken,
     ) -> Result<UserExecutionReceipt, DocumentProgramError> {
-        let current = self.build(document).await?;
+        let html = self.sources.html(document).await?;
+        self.run_html(user, &html, request, cancel).await
+    }
+
+    /// Run a program of a page that isn't a stored document, as `user`, under
+    /// the same rules as [`Self::run`]: `html` is the page's current source,
+    /// and a build of anything else is refused as changed.
+    #[tracing::instrument(
+        name = "document_programs.run",
+        skip_all,
+        fields(program = %request.program, queued_ms = tracing::field::Empty),
+        err
+    )]
+    pub async fn run_source(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        html: &str,
+        request: RunProgram,
+        cancel: CancellationToken,
+    ) -> Result<UserExecutionReceipt, DocumentProgramError> {
+        self.run_html(user, html, request, cancel).await
+    }
+
+    /// Runs a program of `html`'s build, recording on the caller's span.
+    async fn run_html(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        html: &str,
+        request: RunProgram,
+        cancel: CancellationToken,
+    ) -> Result<UserExecutionReceipt, DocumentProgramError> {
+        let current = self.build_source(html).await?;
         if current.source_hash != request.source_hash {
             return Err(DocumentProgramError::Changed);
         }
