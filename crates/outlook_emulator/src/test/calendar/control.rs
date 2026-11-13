@@ -105,3 +105,18 @@ async fn the_control_api_lists_adds_changes_answers_and_deletes_events() {
         .unwrap();
     assert_eq!(invalid.status(), 400);
 }
+
+#[tokio::test]
+async fn the_control_api_names_one_occurrence_of_a_series_by_its_date() {
+    let (emulator, _) = start(SEED).await;
+    let series = super::stored_id(&emulator, ADA, "Weekly sync");
+
+    let second = emulator.occurrence_id(&series, "2026-11-09".parse().unwrap());
+    emulator.delete_event(ADA, &second).unwrap();
+
+    let weekly = super::stored(&emulator, ADA, "default", "Weekly sync");
+    assert_eq!(
+        weekly["cancelledOccurrences"],
+        json!(["2026-11-09", "2026-11-23"])
+    );
+}

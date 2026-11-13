@@ -162,7 +162,8 @@ local stack, without Microsoft accounts.
   calendar holds: `GET /_emulator/mailboxes/{email}/calendars` and
   `…/calendars/{id, name or default}/events`. A change made in Outlook:
   `POST …/calendars/{calendar}/events`, `PATCH`/`DELETE
-  …/events/{id}` (an occurrence's id changes or deletes that occurrence).
+  …/events/{id}` (an occurrence's id changes or deletes that occurrence;
+  `OutlookEmulator::occurrence_id` names it from the series and its date).
   An outside guest's answer: `POST …/events/{id}/answers`. An expired sync
   state: `POST …/delta/expire`, which also expires the calendar view's
   token. The mailbox time zone: `PUT …/time-zone`.

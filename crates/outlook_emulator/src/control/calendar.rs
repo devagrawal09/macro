@@ -187,6 +187,13 @@ impl OutlookEmulator {
         })
     }
 
+    /// The id Graph gives the occurrence of the series `series_id` that the
+    /// series puts on `date`, which addresses that one occurrence in
+    /// [`Self::update_event`] and [`Self::delete_event`].
+    pub fn occurrence_id(&self, series_id: &str, date: chrono::NaiveDate) -> String {
+        calendar::occurrence_id(series_id, date)
+    }
+
     /// Sets the mailbox's `mailboxSettings.timeZone`.
     pub fn set_time_zone(&self, email: &str, time_zone: &str) -> Result<(), EmulatorError> {
         self.with_state(|state| {
