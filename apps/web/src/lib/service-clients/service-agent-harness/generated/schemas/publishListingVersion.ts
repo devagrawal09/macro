@@ -4,14 +4,18 @@
  * agent_harness_service
  * OpenAPI spec version: 0.1.0
  */
+
+import type { ListingSource } from './listingSource';
 import type { VersionBump } from './versionBump';
 
 /**
- * Publish a listing's page as its next version.
+ * Publish a listing's source as its next version.
  */
 export interface PublishListingVersion {
-  /** Whether installs get it at once (`minor`) or wait (`major`). */
+  /** Whether installs get it at once (`minor`) or wait (`major`). A
+routine that asks something new of its installs takes a major
+version whatever is asked. */
   bump: VersionBump;
-  /** The document the listing was published from. */
-  documentId: string;
+  /** What the listing was published from. */
+  source: ListingSource;
 }

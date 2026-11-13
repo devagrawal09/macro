@@ -759,7 +759,7 @@ async fn run() -> anyhow::Result<()> {
     };
     let service_shutdown = tokio_util::sync::CancellationToken::new();
     let (http_listening, http_ready) = tokio::sync::watch::channel(false);
-    let scheduling_runtime = scheduling::build(
+    let (scheduling_runtime, marketplace_routines) = scheduling::build(
         scheduling::config::Config::from_env()?
             .resolve_remote_secrets(Environment::new_or_prod(), &secrets)
             .await
@@ -1926,7 +1926,8 @@ async fn run() -> anyhow::Result<()> {
     );
     // HTML documents build with the Deno toolchain and run their programs as
     // the viewer on the documents' own executor. The marketplace's published
-    // pages build and run through the same service, under the same limits.
+    // pages build and run through the same service, under the same limits,
+    // and its routine installs are saved through the scheduler's service.
     let (document_programs, marketplace_listings) = match (&user_code_mode, &code_runner) {
         (Some((_, runner)), Some((_, _, _, _, toolchain))) => {
             let programs = Arc::new(agent_code_mode::domain::DocumentPrograms::new(
@@ -1960,6 +1961,7 @@ async fn run() -> anyhow::Result<()> {
                     Arc::new(marketplace::domain::service::MarketplaceServiceImpl::new(
                         marketplace::outbound::pg_listing_repo::PgListingRepo::new(pool.clone()),
                         programs,
+                        marketplace_routines,
                         code_mode::rollout::MarketplaceRollout::new(
                             code_mode::rollout::FlaggedRollout::new(
                                 feature_flags.clone(),

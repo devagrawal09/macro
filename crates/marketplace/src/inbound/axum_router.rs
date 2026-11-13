@@ -1,5 +1,6 @@
 //! Axum router for the marketplace.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use agent_code_mode::domain::{
@@ -17,7 +18,7 @@ use axum::{
 };
 use entity_access::{
     domain::{
-        models::{AccessError, EntityAccessReceipt, EntityType, MemberTeamRole, OwnerAccessLevel},
+        models::{AccessError, EntityType, MemberTeamRole, OwnerAccessLevel},
         ports::EntityAccessService,
     },
     inbound::axum_extractors::OptionalMacroUserTeamExtractorV2,
@@ -26,8 +27,10 @@ use macro_authorization::{
     MacroAuthorizationExtractor, MacroAuthorizationService, MacroAuthorizationState, UserOnly,
     is_agent_run,
 };
+use chrono_tz::Tz;
 use macro_user_id::user_id::MacroUserIdStr;
 use model_error_response::ErrorResponse;
+use scheduled_action::domain::templates::{RoutineSnapshot, TemplateVariable, VariableFill};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -35,7 +38,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     models::{
-        InstalledBuild, Listing, ListingId, ListingText, MarketplaceError, Version, VersionBump,
+        InstallRequest, InstalledBuild, Listing, ListingId, ListingText, MarketplaceError,
+        PublishSource, PublishedVersion, Version, VersionBump,
     },
     ports::MarketplaceService,
 };
@@ -108,6 +112,10 @@ where
             post(publish_marketplace_listing_version::<S, Access, Auth>),
         )
         .route(
+            "/marketplace/listings/{id}/routine",
+            get(get_marketplace_listing_routine::<S, Access, Auth>),
+        )
+        .route(
             "/marketplace/listings/{id}/install",
             put(install_marketplace_listing::<S, Access, Auth>)
                 .delete(uninstall_marketplace_listing::<S, Access, Auth>),
@@ -131,12 +139,33 @@ pub struct MarketplaceListings {
     pub listings: Vec<Listing>,
 }
 
-/// Publish a page to the caller's team.
+/// What a listing is published from.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ListingSource {
+    /// A stored HTML document the caller owns, as an artifact.
+    #[serde(rename_all = "camelCase")]
+    Artifact {
+        /// The document.
+        document_id: Uuid,
+    },
+    /// A routine the caller owns.
+    #[serde(rename_all = "camelCase")]
+    Routine {
+        /// The routine.
+        routine_id: Uuid,
+        /// Its user-specific parts, marked as when sharing it as a template.
+        #[serde(default)]
+        variables: Vec<TemplateVariable>,
+    },
+}
+
+/// Publish a page or routine to the caller's team.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishListing {
-    /// A stored HTML document the caller owns.
-    pub document_id: Uuid,
+    /// What it is published from.
+    pub source: ListingSource,
     /// The listing's name.
     pub title: String,
     /// What it does, in a few lines.
@@ -144,14 +173,56 @@ pub struct PublishListing {
     pub description: String,
 }
 
-/// Publish a listing's page as its next version.
+/// Publish a listing's source as its next version.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishListingVersion {
-    /// The document the listing was published from.
-    pub document_id: Uuid,
-    /// Whether installs get it at once (`minor`) or wait (`major`).
+    /// What the listing was published from.
+    pub source: ListingSource,
+    /// Whether installs get it at once (`minor`) or wait (`major`). A
+    /// routine that asks something new of its installs takes a major
+    /// version whatever is asked.
     pub bump: VersionBump,
+}
+
+/// Install a listing, or take its newest major version. A routine is filled
+/// in as the caller's own; an artifact takes no body.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallListing {
+    /// The caller's time zone, which schedules filled in as them run in.
+    /// Required to install a routine; afterwards the stored one is kept.
+    #[serde(default)]
+    #[schema(value_type = Option<String>)]
+    pub timezone: Option<Tz>,
+    /// How to fill the routine's variables, by key, on top of those stored:
+    /// `shared` keeps a reference, `choice` leaves it out. Every variable its
+    /// author left to each person needs one.
+    #[serde(default)]
+    pub variables: BTreeMap<String, VariableFill>,
+    /// Whether a new routine starts switched on.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// A routine listing's newest version.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingRoutine {
+    /// Its version.
+    pub version: Version,
+    /// The routine as each install gets it, before filling in.
+    pub routine: RoutineSnapshot,
+}
+
+/// The routine's variables that need a fill before it can be installed.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingRoutineFills {
+    /// What went wrong, for people.
+    pub message: String,
+    /// The variables to ask for.
+    pub missing: Vec<TemplateVariable>,
 }
 
 /// The build of the page an install shows.
@@ -185,13 +256,17 @@ impl IntoResponse for MarketplaceError {
         let status = match &self {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Forbidden => StatusCode::FORBIDDEN,
-            Self::Invalid(_) => StatusCode::BAD_REQUEST,
+            Self::Invalid(_) | Self::RoutineRejected(_) => StatusCode::BAD_REQUEST,
             Self::NoTeam | Self::AlreadyPublished | Self::Unchanged => StatusCode::CONFLICT,
-            Self::DoesNotBuild => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::DoesNotBuild | Self::MissingFills(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Page(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let message = match self {
             Self::Page(error) => return DocumentProgramApiError::from(error).into_response(),
+            Self::MissingFills(missing) => {
+                let message = Self::MissingFills(missing.clone()).to_string();
+                return (status, Json(MissingRoutineFills { message, missing })).into_response();
+            }
             Self::Internal(_) => {
                 tracing::error!(error = ?self, "marketplace internal server error");
                 "internal server error".to_owned()
@@ -209,20 +284,25 @@ impl IntoResponse for MarketplaceError {
     }
 }
 
-/// The caller's owner receipt for a document they want to publish. A document
-/// they can't see, or don't own, answers like one that doesn't exist.
-async fn owned_document<S, Access: EntityAccessService, Auth>(
+/// The caller's owner receipt for a document or routine they want to
+/// publish. One they can't see, or don't own, answers like one that doesn't
+/// exist.
+async fn owned_source<S, Access: EntityAccessService, Auth>(
     state: &MarketplaceRouterState<S, Access, Auth>,
     user: &MacroUserIdStr<'static>,
-    document_id: Uuid,
-) -> Result<EntityAccessReceipt<OwnerAccessLevel>, MarketplaceError> {
-    state
+    source: ListingSource,
+) -> Result<PublishSource, MarketplaceError> {
+    let (id, entity_type) = match &source {
+        ListingSource::Artifact { document_id } => (*document_id, EntityType::Document),
+        ListingSource::Routine { routine_id, .. } => (*routine_id, EntityType::ScheduledAction),
+    };
+    let receipt = state
         .access
         .generate_entity_access_receipt::<OwnerAccessLevel>(
             user,
             None,
-            &document_id.to_string(),
-            EntityType::Document,
+            &id.to_string(),
+            entity_type,
         )
         .await
         .map_err(|error| match error {
@@ -232,7 +312,15 @@ async fn owned_document<S, Access: EntityAccessService, Auth>(
             | AccessError::BadRequest(_) => MarketplaceError::NotFound,
             AccessError::Unavailable(_) => MarketplaceError::Page(DocumentProgramError::Busy),
             AccessError::Internal(report) => MarketplaceError::Internal(report),
-        })
+        })?;
+
+    Ok(match source {
+        ListingSource::Artifact { .. } => PublishSource::Artifact(receipt),
+        ListingSource::Routine { variables, .. } => PublishSource::Routine {
+            routine: receipt,
+            variables,
+        },
+    })
 }
 
 type Caller<Auth> = MacroAuthorizationExtractor<Auth, UserOnly>;
@@ -266,9 +354,9 @@ where
 #[utoipa::path(post, path = "/marketplace/listings", tag = "marketplace", operation_id = "publish_marketplace_listing",
     request_body = PublishListing,
     responses((status = 201, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse), (status = 413), (status = 422, body = ErrorResponse), (status = 500), (status = 503)))]
-/// Publish an HTML document the caller owns to their team's marketplace, as
-/// version 1.0. `409` means the caller has no team or the document already
-/// has a listing; `422` means the page doesn't build.
+/// Publish an HTML document or a routine the caller owns to their team's
+/// marketplace, as version 1.0. `409` means the caller has no team or the
+/// source already has a listing; `422` means the page doesn't build.
 #[tracing::instrument(err, skip_all)]
 pub async fn publish_marketplace_listing<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,
@@ -282,13 +370,13 @@ where
     Auth: MacroAuthorizationService,
 {
     let user = &caller.authorization.macro_user_id;
-    let document = owned_document(&state, user, body.document_id).await?;
+    let source = owned_source(&state, user, body.source).await?;
     let listing = state
         .service
         .publish(
             user,
             team.entity_access_receipt.as_ref(),
-            document,
+            source,
             ListingText {
                 title: body.title,
                 description: body.description,
@@ -301,10 +389,14 @@ where
 #[utoipa::path(post, path = "/marketplace/listings/{id}/versions", tag = "marketplace", operation_id = "publish_marketplace_listing_version",
     params(("id" = Uuid, Path, description = "The listing")),
     request_body = PublishListingVersion,
-    responses((status = 201, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse), (status = 413), (status = 422, body = ErrorResponse), (status = 500), (status = 503)))]
-/// Publish the listing's document as its next version. A minor version
+    responses((status = 201, body = PublishedVersion), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse), (status = 413), (status = 422, body = ErrorResponse), (status = 500), (status = 503)))]
+/// Publish the listing's source as its next version. A minor version
 /// reaches every install on the newest major at once; a major version waits
-/// for each person to take it. `409` means the page hasn't changed.
+/// for each person to take it. A routine whose variables, required apps,
+/// trigger kinds or knobs changed takes a major version whatever was asked,
+/// and the answer says which bump applied. A minor routine version updates
+/// each installed routine its person hasn't edited, after the version is
+/// stored. `409` means nothing changed.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn publish_marketplace_listing_version<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,
@@ -312,25 +404,56 @@ pub async fn publish_marketplace_listing_version<S, Access, Auth>(
     caller: Caller<Auth>,
     team: Team<Access, Auth>,
     Json(body): Json<PublishListingVersion>,
-) -> Result<(StatusCode, Json<Listing>), MarketplaceError>
+) -> Result<(StatusCode, Json<PublishedVersion>), MarketplaceError>
 where
     S: MarketplaceService,
     Access: EntityAccessService,
     Auth: MacroAuthorizationService,
 {
     let user = &caller.authorization.macro_user_id;
-    let document = owned_document(&state, user, body.document_id).await?;
-    let listing = state
+    let source = owned_source(&state, user, body.source).await?;
+    let published = state
         .service
         .publish_version(
             user,
             team.entity_access_receipt.as_ref(),
             ListingId::from_uuid(id),
-            document,
+            source,
             body.bump,
         )
         .await?;
-    Ok((StatusCode::CREATED, Json(listing)))
+    Ok((StatusCode::CREATED, Json(published)))
+}
+
+#[utoipa::path(get, path = "/marketplace/listings/{id}/routine", tag = "marketplace", operation_id = "get_marketplace_listing_routine",
+    params(("id" = Uuid, Path, description = "A routine listing")),
+    responses((status = 200, body = ListingRoutine), (status = 401), (status = 404), (status = 500)))]
+/// A routine listing's newest version, to fill in before installing it or
+/// taking its newest major.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn get_marketplace_listing_routine<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<ListingRoutine>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let routine = state
+        .service
+        .routine_version(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+        )
+        .await?;
+    Ok(Json(ListingRoutine {
+        version: routine.version,
+        routine: routine.snapshot,
+    }))
 }
 
 #[utoipa::path(delete, path = "/marketplace/listings/{id}", tag = "marketplace", operation_id = "unlist_marketplace_listing",
@@ -363,27 +486,41 @@ where
 
 #[utoipa::path(put, path = "/marketplace/listings/{id}/install", tag = "marketplace", operation_id = "install_marketplace_listing",
     params(("id" = Uuid, Path, description = "The listing")),
-    responses((status = 200, body = Listing), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 500)))]
+    request_body(content = Option<InstallListing>, description = "A routine's fills; an artifact takes none"),
+    responses((status = 200, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 422, body = MissingRoutineFills), (status = 500)))]
 /// Put the caller on the listing's newest major version: installs it, or
-/// takes a major version they were waiting on. Repeating it changes nothing.
+/// takes a major version they were waiting on. Repeating it changes nothing
+/// for an artifact.
+///
+/// A routine listing creates the caller's own routine, filled in from the
+/// body and the fills stored when they first installed it; taking a new
+/// major fills in their routine again, replacing any edits, and it follows
+/// minor versions again. `422` lists the variables that still need a fill.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn install_marketplace_listing<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,
     Path(id): Path<Uuid>,
     caller: Caller<Auth>,
     team: Team<Access, Auth>,
+    body: Option<Json<InstallListing>>,
 ) -> Result<Json<Listing>, MarketplaceError>
 where
     S: MarketplaceService,
     Access: EntityAccessService,
     Auth: MacroAuthorizationService,
 {
+    let body = body.map(|Json(body)| body).unwrap_or_default();
     let listing = state
         .service
         .install(
             &caller.authorization.macro_user_id,
             team.entity_access_receipt.as_ref(),
             ListingId::from_uuid(id),
+            InstallRequest {
+                timezone: body.timezone,
+                variables: body.variables,
+                enabled: body.enabled,
+            },
         )
         .await?;
     Ok(Json(listing))
@@ -392,7 +529,8 @@ where
 #[utoipa::path(delete, path = "/marketplace/listings/{id}/install", tag = "marketplace", operation_id = "uninstall_marketplace_listing",
     params(("id" = Uuid, Path, description = "The listing")),
     responses((status = 204), (status = 401), (status = 404, body = ErrorResponse), (status = 500)))]
-/// Remove the caller's install. Repeating it changes nothing.
+/// Remove the caller's install. Repeating it changes nothing. A routine the
+/// install created stays the caller's own and no longer follows the listing.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn uninstall_marketplace_listing<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,

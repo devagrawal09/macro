@@ -157,7 +157,8 @@ impl SchedulingRuntime {
     }
 }
 
-/// Compose routine scheduling and event workers alongside the harness API.
+/// Compose routine scheduling and event workers alongside the harness API,
+/// and hand back routines as the marketplace saves installs' copies.
 pub async fn build<Ingress: notification::domain::service::NotificationIngress>(
     config: Config,
     db: sqlx::PgPool,
@@ -165,7 +166,10 @@ pub async fn build<Ingress: notification::domain::service::NotificationIngress>(
     code: Option<crate::routine_code::SdkRoutineCode>,
     ready: tokio::sync::watch::Receiver<bool>,
     notifications: Arc<Ingress>,
-) -> Result<SchedulingRuntime> {
+) -> Result<(
+    SchedulingRuntime,
+    Arc<impl marketplace::domain::ports::Routines + use<Ingress>>,
+)> {
     let environment = config.environment;
     let lifecycle = ServiceLifecycle::default();
 
@@ -509,6 +513,12 @@ pub async fn build<Ingress: notification::domain::service::NotificationIngress>(
         service: drafts,
         authorization_state: authorization_state.clone(),
     };
+    let marketplace_routines = Arc::new(
+        marketplace::outbound::scheduled_routines::ScheduledRoutines::new(
+            Arc::clone(&service),
+            Arc::clone(&access),
+        ),
+    );
     let state = ScheduledActionRouterState {
         service,
         access_service: access,
@@ -525,7 +535,7 @@ pub async fn build<Ingress: notification::domain::service::NotificationIngress>(
             macro_tower_layers::MacroRequestIdAndTracingLayer::new(Duration::from_millis(200))
                 .into_inner(),
         );
-    Ok(SchedulingRuntime { router, lifecycle })
+    Ok((SchedulingRuntime { router, lifecycle }, marketplace_routines))
 }
 
 fn mount_router(routes: Router) -> Router {

@@ -10,6 +10,24 @@ export type ClientOptions = {
 export type AccessLevel = 'view' | 'comment' | 'edit' | 'owner';
 
 /**
+ * A routine may run on one trigger or any of several schedules and Macro events.
+ */
+export type ActionTrigger = {
+    schedule: Schedule;
+    timezone: string;
+    type: 'cron';
+} | {
+    filters: EventFilters;
+    type: 'events';
+} | {
+    at: string;
+    type: 'once';
+} | {
+    triggers: RoutineTriggers;
+    type: 'multiple';
+};
+
+/**
  * One activity row on the wire — the realtime projection of an inserted
  * `activity_events` row.
  */
@@ -297,6 +315,23 @@ export type AgentConversationsDto = {
      * Empty for ordinary channels and other people's conversations.
      */
     conversations: Array<AgentConversationDto>;
+};
+
+/**
+ * One Pipedream app an agent lists under [`AgentMcpServers::Selected`].
+ *
+ * Only the catalog identity is stored. Whether a given person has connected
+ * the app is theirs, resolved at call time by the egress proxy, never here.
+ */
+export type AgentMcpServer = {
+    /**
+     * Pipedream app slug, e.g. `linear`.
+     */
+    app_slug: string;
+    /**
+     * Display name, e.g. `Linear`.
+     */
+    server_name: string;
 };
 
 /**
@@ -747,6 +782,54 @@ export type AgentSetModelAction = {
 };
 
 /**
+ * Hand the run to a model running as Macro, or to an agent.
+ */
+export type AgentStep = {
+    agent?: null | AgentTaskAgent;
+    /**
+     * What the model or agent should do. It also sees the triggering event
+     * and what earlier steps in this run did.
+     */
+    instructions: string;
+    /**
+     * Required when no agent is selected; otherwise overrides the agent's default model.
+     */
+    model?: string | null;
+};
+
+/**
+ * The single agent task: how routines were stored before they had steps,
+ * and still how a routine that is only an agent is saved.
+ */
+export type AgentTask = {
+    agent?: null | AgentTaskAgent;
+    /**
+     * Apps the routine requires on top of the agent's own. The owner must
+     * have each one connected to save the routine and for it to run.
+     */
+    mcp_servers?: Array<AgentMcpServer>;
+    model?: null | RoutineModelId;
+    /**
+     * Instructions placed before the user's.
+     */
+    prompt: string;
+    /**
+     * What the agent should do.
+     */
+    user_prompt: string;
+};
+
+/**
+ * A persona selection, independent of its runtime and current default model.
+ */
+export type AgentTaskAgent = {
+    /**
+     * The agent's bot id.
+     */
+    bot_id: string;
+};
+
+/**
  * One pending interaction, or one stalled session.
  */
 export type AgentUpdate = {
@@ -1181,6 +1264,43 @@ export type ClassifyInputResponse = {
      * Independent scores in the fixed intent-question order.
      */
     scores: Array<IntentScore>;
+};
+
+/**
+ * TypeScript written against Macro's SDK, usually by the AI that built the
+ * routine. It is type-checked before it is saved and runs with its owner's
+ * access.
+ */
+export type CodeStep = {
+    id?: null | StepId;
+    /**
+     * Values its owner can change without new code, which the code reads
+     * as `knobs.<name>`.
+     */
+    knobs?: Array<RoutineKnob>;
+    /**
+     * What it does as one sentence for its owner, with `{name}` where a
+     * knob's value shows and `{?name}` where a question knob's question
+     * shows, e.g. "Label it {label} when {?aboutMoney}". Saving checks every
+     * slot names one of its knobs.
+     */
+    sentence?: string | null;
+    /**
+     * A module exporting `async function main({ macro, run, routine,
+     * trigger, steps }: StepContext)`: `run` is this run (its time, zone and
+     * the previous run), `trigger` what started it (a schedule, an event and
+     * its item, or a person), `steps` the typed outputs of the steps before
+     * it. What `main` returns, as JSON of at most 64 KB, is the step's output.
+     */
+    source: string;
+    /**
+     * One or two sentences on how, for the routine's owner.
+     */
+    summary?: string;
+    /**
+     * What the step does, in a few words, e.g. "Label invoices".
+     */
+    title: string;
 };
 
 /**
@@ -1877,6 +1997,42 @@ export type ErrorResponse = {
 };
 
 /**
+ * An event name AND an entity ID must match within the same filter. A
+ * condition further requires the event's content to answer it with yes.
+ *
+ * `github` comes from outside Macro and carries its payload: it stands
+ * alone in its filter, takes no ids, and may require
+ * exact payload values with `match`. A `github` filter narrows deliveries
+ * with its `github` selector.
+ */
+export type EventFilter = {
+    /**
+     * Yes/no question about the triggering content, e.g. "Is this email an
+     * invoice?". The routine runs only when the answer is yes.
+     */
+    condition?: string | null;
+    events: Array<EventName>;
+    github?: null | GithubSelector;
+    ids?: Array<string> | null;
+    /**
+     * Exact tests on the payload, all of which must pass.
+     */
+    match?: Array<PayloadCondition> | null;
+    property?: null | PropertySelector;
+};
+
+/**
+ * Bounded nonempty OR of filters, canonicalized to remove duplicates.
+ */
+export type EventFilters = Array<EventFilter>;
+
+/**
+ * Closed allowlist: unknown names, deletions and ambiguous attribution are not
+ * selectors. Adding a broker variant does not automatically enable routines.
+ */
+export type EventName = 'document.created' | 'document.updated' | 'document.deleted' | 'task.created' | 'task.status_changed' | 'task.priority_changed' | 'task.property_changed' | 'email.message_received' | 'channel.created' | 'channel.message_posted' | 'channel.mentioned' | 'channel.message_patched' | 'channel.message_attachment_created' | 'call.started' | 'call.ended' | 'github';
+
+/**
  * A bounded SDK operation observed during execution; not an authorization or write receipt.
  */
 export type ExecutionActivity = {
@@ -2027,6 +2183,30 @@ export type GitRefDto = {
 };
 
 /**
+ * Which GitHub deliveries match.
+ */
+export type GithubSelector = {
+    /**
+     * Payload actions, such as `completed` or `opened`; any when empty.
+     */
+    actions?: Array<string>;
+    /**
+     * GitHub event names, such as `workflow_run` or `pull_request`; any when empty.
+     */
+    events?: Array<string>;
+    /**
+     * Also run for deliveries caused by bots and apps, including Macro's own.
+     */
+    includeBots?: boolean;
+    /**
+     * Repositories as `owner/name`, matched without regard to case; every
+     * repository the owner's installations cover when empty. A renamed
+     * repository stops matching until it is chosen again.
+     */
+    repositories?: Array<string>;
+};
+
+/**
  * A destination the composer can prepare, but never execute through inference.
  */
 export type InputIntent = 'ai' | 'search' | 'email' | 'note' | 'task' | 'calendar' | 'message';
@@ -2107,6 +2287,30 @@ export type InputSuggestions = {
 };
 
 /**
+ * Install a listing, or take its newest major version. A routine is filled
+ * in as the caller's own; an artifact takes no body.
+ */
+export type InstallListing = {
+    /**
+     * Whether a new routine starts switched on.
+     */
+    enabled?: boolean;
+    /**
+     * The caller's time zone, which schedules filled in as them run in.
+     * Required to install a routine; afterwards the stored one is kept.
+     */
+    timezone?: string | null;
+    /**
+     * How to fill the routine's variables, by key, on top of those stored:
+     * `shared` keeps a reference, `choice` leaves it out. Every variable its
+     * author left to each person needs one.
+     */
+    variables?: {
+        [key: string]: VariableFill;
+    };
+};
+
+/**
  * The build of the page an install shows.
  */
 export type InstalledListingBuild = {
@@ -2125,6 +2329,24 @@ export type InstalledListingBuild = {
 };
 
 /**
+ * The routine an install created, as its person sees it.
+ */
+export type InstalledRoutine = {
+    /**
+     * They edited it, so updates no longer reach it.
+     */
+    detached: boolean;
+    /**
+     * Their routine.
+     */
+    routineId: string;
+    /**
+     * The last update could not be applied; the next version tries again.
+     */
+    updateFailed: boolean;
+};
+
+/**
  * Independent yes/no probabilities; these do not sum to one.
  */
 export type IntentScore = {
@@ -2137,6 +2359,12 @@ export type IntentScore = {
      */
     score: number;
 };
+
+/**
+ * How code reads a knob: a lowercase letter, then up to 31 letters or
+ * digits, e.g. `dueWithinDays`.
+ */
+export type KnobName = string;
 
 /**
  * Where an acting agent's work came from.
@@ -2212,6 +2440,7 @@ export type Listing = {
      * The major version the person asking is on, when they installed it.
      */
     installedMajor?: number | null;
+    installedRoutine?: null | InstalledRoutine;
     /**
      * What it publishes.
      */
@@ -2233,9 +2462,10 @@ export type Listing = {
      */
     scope: ListingScope;
     /**
-     * The document its versions are published from.
+     * What its versions are published from: a document for an artifact, a
+     * routine for a routine.
      */
-    sourceDocumentId: string;
+    sourceId: string;
     /**
      * Its name.
      */
@@ -2254,7 +2484,21 @@ export type ListingId = string;
 /**
  * What a listing publishes.
  */
-export type ListingKind = 'artifact';
+export type ListingKind = 'artifact' | 'routine';
+
+/**
+ * A routine listing's newest version.
+ */
+export type ListingRoutine = {
+    /**
+     * The routine as each install gets it, before filling in.
+     */
+    routine: RoutineSnapshot;
+    /**
+     * Its version.
+     */
+    version: Version;
+};
 
 /**
  * Who sees a listing.
@@ -2267,6 +2511,27 @@ export type ListingScope = {
     teamId: string;
 } | {
     kind: 'global';
+};
+
+/**
+ * What a listing is published from.
+ */
+export type ListingSource = {
+    /**
+     * The document.
+     */
+    documentId: string;
+    kind: 'artifact';
+} | {
+    kind: 'routine';
+    /**
+     * The routine.
+     */
+    routineId: string;
+    /**
+     * Its user-specific parts, marked as when sharing it as a template.
+     */
+    variables?: Array<TemplateVariable>;
 };
 
 /**
@@ -2397,6 +2662,20 @@ export type MessageSuggestions = {
 };
 
 /**
+ * The routine's variables that need a fill before it can be installed.
+ */
+export type MissingRoutineFills = {
+    /**
+     * What went wrong, for people.
+     */
+    message: string;
+    /**
+     * The variables to ask for.
+     */
+    missing: Array<TemplateVariable>;
+};
+
+/**
  * Harness names accepted by the model discovery endpoint.
  */
 export type ModelHarnessDto = 'in-memory' | 'cursor' | 'macrod';
@@ -2448,6 +2727,40 @@ export type OpenInApp = {
      */
     placement?: UiPlacement;
 };
+
+/**
+ * `path` walks objects by key; `*` steps into every element of an array and
+ * a number into one. Give exactly one test. `notIn` also passes when the
+ * path finds nothing.
+ */
+export type PayloadCondition = {
+    equals?: null | PayloadScalar;
+    /**
+     * Whether the path finds a non-null value.
+     */
+    exists?: boolean | null;
+    /**
+     * Some text found matches this glob; `*` matches any run of characters.
+     */
+    glob?: string | null;
+    /**
+     * Some value found is one of these.
+     */
+    in?: Array<PayloadScalar> | null;
+    /**
+     * No value found is one of these.
+     */
+    notIn?: Array<PayloadScalar> | null;
+    /**
+     * Keys from the payload's root, e.g. `["workflow_run", "conclusion"]`.
+     */
+    path: Array<string>;
+};
+
+/**
+ * A JSON text, number, boolean or null that payload values are compared with.
+ */
+export type PayloadScalar = null | boolean | number | string;
 
 /**
  * The decision carried by an [`AgentPermissionAction`].
@@ -2533,7 +2846,23 @@ export type PromptAttachment = {
 };
 
 /**
- * Publish a page to the caller's team.
+ * Narrows a task property change filter to one property and, optionally, the
+ * values it must gain.
+ */
+export type PropertySelector = {
+    /**
+     * The property definition that must have changed.
+     */
+    definitionId: string;
+    /**
+     * Select option ids or referenced entity ids, one of which the change must
+     * add. Any change to the property matches when empty.
+     */
+    values?: Array<string>;
+};
+
+/**
+ * Publish a page or routine to the caller's team.
  */
 export type PublishListing = {
     /**
@@ -2541,9 +2870,9 @@ export type PublishListing = {
      */
     description?: string;
     /**
-     * A stored HTML document the caller owns.
+     * What it is published from.
      */
-    documentId: string;
+    source: ListingSource;
     /**
      * The listing's name.
      */
@@ -2551,17 +2880,38 @@ export type PublishListing = {
 };
 
 /**
- * Publish a listing's page as its next version.
+ * Publish a listing's source as its next version.
  */
 export type PublishListingVersion = {
     /**
-     * Whether installs get it at once (`minor`) or wait (`major`).
+     * Whether installs get it at once (`minor`) or wait (`major`). A
+     * routine that asks something new of its installs takes a major
+     * version whatever is asked.
      */
     bump: VersionBump;
     /**
-     * The document the listing was published from.
+     * What the listing was published from.
      */
-    documentId: string;
+    source: ListingSource;
+};
+
+/**
+ * A new version and how it was numbered.
+ */
+export type PublishedVersion = {
+    /**
+     * The bump applied: a routine whose interface changed takes a major
+     * version whatever was asked.
+     */
+    bump: VersionBump;
+    /**
+     * The listing with its new version.
+     */
+    listing: Listing;
+    /**
+     * Installs a minor routine version reached.
+     */
+    updates: RoutineUpdates;
 };
 
 /**
@@ -2938,6 +3288,195 @@ export type RoutineCause = {
 };
 
 /**
+ * A value a code step reads as `knobs.<name>`, which its owner can change
+ * without the step being rewritten: the label it adds, a priority, a
+ * number of days, a question it asks AI. Its type is part of the step's
+ * type-checked contract; its value is not, so changing it needs no check.
+ */
+export type RoutineKnob = {
+    /**
+     * What it is, for the owner, e.g. "Label for money email".
+     */
+    label: string;
+    /**
+     * How the code reads it: `knobs.<name>`.
+     */
+    name: KnobName;
+    type: 'text';
+    /**
+     * Its value.
+     */
+    value: string;
+} | {
+    /**
+     * What it is, for the owner.
+     */
+    label: string;
+    /**
+     * The largest value the owner may set.
+     */
+    max?: number | null;
+    /**
+     * The smallest value the owner may set.
+     */
+    min?: number | null;
+    /**
+     * How the code reads it: `knobs.<name>`.
+     */
+    name: KnobName;
+    type: 'number';
+    /**
+     * Its value.
+     */
+    value: number;
+} | {
+    /**
+     * What it is, for the owner.
+     */
+    label: string;
+    /**
+     * How the code reads it: `knobs.<name>`.
+     */
+    name: KnobName;
+    type: 'boolean';
+    /**
+     * Its value.
+     */
+    value: boolean;
+} | {
+    /**
+     * What it is, for the owner.
+     */
+    label: string;
+    /**
+     * How the code reads it: `knobs.<name>`.
+     */
+    name: KnobName;
+    /**
+     * Every option, in the order they are offered.
+     */
+    options: Array<string>;
+    type: 'choice';
+    /**
+     * The chosen option.
+     */
+    value: string;
+} | {
+    /**
+     * The condition as a short clause that reads inside the step's
+     * sentence, e.g. "it's about money".
+     */
+    label: string;
+    /**
+     * How the code reads it: `knobs.<name>`.
+     */
+    name: KnobName;
+    type: 'question';
+    /**
+     * The question AI is asked, e.g. "Is this email about money:
+     * investors, fundraising or finance?".
+     */
+    value: string;
+};
+
+/**
+ * A nonblank model identifier. Runtime catalogs, not the scheduler, own availability.
+ */
+export type RoutineModelId = string;
+
+/**
+ * What a routine does each time it runs.
+ */
+export type RoutineProgram = {
+    /**
+     * Code steps write as the owner, with no agent badge: their posts,
+     * comments and emails appear written by the owner. Set only when the
+     * owner explicitly asked for the routine to act or send as them; by
+     * default code steps' writes are attributed to Macro's agent acting for
+     * the owner. Agent ("Ask AI") steps keep their own agent attribution
+     * either way: an agent session speaking as a person is a different
+     * change. A single agent task has no code steps, so it never applies.
+     */
+    dangerously_operate_as_user?: boolean;
+    /**
+     * Apps the routine requires, handed to its agent on top of the agent's
+     * own. The owner must have each one connected to save the routine and
+     * for it to run.
+     */
+    mcp_servers?: Array<AgentMcpServer>;
+    sdk?: null | SdkFingerprint;
+    /**
+     * Steps run in order. A failed step stops the run.
+     */
+    steps: Array<RoutineStep>;
+};
+
+/**
+ * A routine as someone else gets it: what a template and a marketplace
+ * listing's version both store.
+ */
+export type RoutineSnapshot = {
+    description: string;
+    name: string;
+    task: RoutineTask;
+    trigger: ActionTrigger;
+    variables: Array<TemplateVariable>;
+};
+
+/**
+ * One step of a routine.
+ */
+export type RoutineStep = (CodeStep & {
+    type: 'code';
+}) | (AgentStep & {
+    type: 'agent';
+});
+
+/**
+ * A stored task's two forms, as the scheduler's API describes `task`:
+ * [`RoutineProgram::from_task`] reads them.
+ */
+export type RoutineTask = RoutineProgram | AgentTask;
+
+/**
+ * An individual trigger in a routine's trigger list.
+ */
+export type RoutineTrigger = {
+    schedule: Schedule;
+    timezone: string;
+    type: 'cron';
+} | {
+    filters: EventFilters;
+    type: 'events';
+} | {
+    at: string;
+    type: 'once';
+};
+
+/**
+ * Bounded schedules and one combined set of event filters.
+ */
+export type RoutineTriggers = Array<RoutineTrigger>;
+
+/**
+ * What became of the installs a minor routine version reached.
+ */
+export type RoutineUpdates = {
+    /**
+     * Routines their person edited, now detached and left alone.
+     */
+    detached: number;
+    /**
+     * Routines that could not be updated this time.
+     */
+    failed: number;
+    /**
+     * Routines updated to the new version.
+     */
+    updated: number;
+};
+
+/**
  * Run one program of the build a page shows.
  */
 export type RunDocumentProgram = {
@@ -2978,6 +3517,14 @@ export type SandboxSizeBody = {
      */
     size: SandboxSize;
 };
+
+export type Schedule = string;
+
+/**
+ * Identifies the SDK API code was type-checked against: its version and a
+ * hash of its declarations, e.g. `0.2.2+18cc1c19c35c`.
+ */
+export type SdkFingerprint = string;
 
 /**
  * Only the selected type's fields can appear in a search suggestion.
@@ -3139,6 +3686,12 @@ export type StartFreshAgentConversationRequest = {
 };
 
 /**
+ * Names a step's output: a lowercase letter, then up to 31 lowercase
+ * letters, digits or underscores.
+ */
+export type StepId = string;
+
+/**
  * Task facets match the shared search editor; assignee and creator are distinct.
  */
 export type TaskSearchSuggestions = {
@@ -3184,6 +3737,29 @@ export type TaskSuggestions = {
      * Suggested note, task, or event title.
      */
     title?: string | null;
+};
+
+/**
+ * A user-specific part of a shared routine.
+ */
+export type TemplateVariable = {
+    fill: VariableFill;
+    id: string;
+    kind: 'user';
+    label: string;
+} | {
+    /**
+     * The mention's block name, such as `channel` or `md`.
+     */
+    block_name: string;
+    fill: VariableFill;
+    id: string;
+    kind: 'item';
+    label: string;
+} | {
+    fill: VariableFill;
+    kind: 'time_zone';
+    timezone: string;
 };
 
 /**
@@ -3353,6 +3929,11 @@ export type UserExecutionReceipt = {
      */
     status: ExecutionStatus;
 };
+
+/**
+ * How a variable is filled when someone activates the template.
+ */
+export type VariableFill = 'activator' | 'shared' | 'choice';
 
 /**
  * A listing's version. An install follows minor versions by itself and
@@ -5312,7 +5893,10 @@ export type UninstallMarketplaceListingResponses = {
 export type UninstallMarketplaceListingResponse = UninstallMarketplaceListingResponses[keyof UninstallMarketplaceListingResponses];
 
 export type InstallMarketplaceListingData = {
-    body?: never;
+    /**
+     * A routine's fills; an artifact takes none
+     */
+    body?: null | InstallListing;
     path: {
         /**
          * The listing
@@ -5324,9 +5908,11 @@ export type InstallMarketplaceListingData = {
 };
 
 export type InstallMarketplaceListingErrors = {
+    400: ErrorResponse;
     401: unknown;
     403: ErrorResponse;
     404: ErrorResponse;
+    422: MissingRoutineFills;
     500: unknown;
 };
 
@@ -5392,6 +5978,30 @@ export type RunInstalledListingProgramResponses = {
 
 export type RunInstalledListingProgramResponse = RunInstalledListingProgramResponses[keyof RunInstalledListingProgramResponses];
 
+export type GetMarketplaceListingRoutineData = {
+    body?: never;
+    path: {
+        /**
+         * A routine listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/routine';
+};
+
+export type GetMarketplaceListingRoutineErrors = {
+    401: unknown;
+    404: unknown;
+    500: unknown;
+};
+
+export type GetMarketplaceListingRoutineResponses = {
+    200: ListingRoutine;
+};
+
+export type GetMarketplaceListingRoutineResponse = GetMarketplaceListingRoutineResponses[keyof GetMarketplaceListingRoutineResponses];
+
 export type PublishMarketplaceListingVersionData = {
     body: PublishListingVersion;
     path: {
@@ -5419,7 +6029,7 @@ export type PublishMarketplaceListingVersionErrors = {
 export type PublishMarketplaceListingVersionError = PublishMarketplaceListingVersionErrors[keyof PublishMarketplaceListingVersionErrors];
 
 export type PublishMarketplaceListingVersionResponses = {
-    201: Listing;
+    201: PublishedVersion;
 };
 
 export type PublishMarketplaceListingVersionResponse = PublishMarketplaceListingVersionResponses[keyof PublishMarketplaceListingVersionResponses];

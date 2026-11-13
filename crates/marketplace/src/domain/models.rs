@@ -1,10 +1,16 @@
 //! Domain models for the marketplace.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use agent_code_mode::domain::{DocumentBuild, DocumentProgramError, SourceHash};
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
+use entity_access::domain::models::{EntityAccessReceipt, OwnerAccessLevel};
 use macro_user_id::user_id::MacroUserIdStr;
+use scheduled_action::domain::templates::{
+    RoutineSnapshot, TemplateVariable, VariableFill, fill::RoutineFills,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -64,6 +70,8 @@ impl fmt::Display for ListingId {
 pub enum ListingKind {
     /// A stored HTML page.
     Artifact,
+    /// A routine, which each install copies as its person's own.
+    Routine,
 }
 
 /// Who sees a listing.
@@ -142,8 +150,9 @@ pub struct Listing {
     /// Who published it.
     #[schema(value_type = String)]
     pub publisher: MacroUserIdStr<'static>,
-    /// The document its versions are published from.
-    pub source_document_id: Uuid,
+    /// What its versions are published from: a document for an artifact, a
+    /// routine for a routine.
+    pub source_id: Uuid,
     /// Its name.
     pub title: String,
     /// What it does, in a few lines.
@@ -152,6 +161,8 @@ pub struct Listing {
     pub latest_version: Version,
     /// The major version the person asking is on, when they installed it.
     pub installed_major: Option<i32>,
+    /// The routine the person asking got from installing it.
+    pub installed_routine: Option<InstalledRoutine>,
     /// How many people installed it.
     pub install_count: i64,
     /// Unlisted: only those who installed it still see it.
@@ -209,23 +220,80 @@ pub struct PublishedPage {
     pub html: String,
 }
 
+/// A routine's snapshot as published: what a version stores.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublishedRoutine {
+    /// The hash of the snapshot.
+    pub source_hash: SourceHash,
+    /// The routine as each install gets it.
+    pub snapshot: RoutineSnapshot,
+}
+
+impl PublishedRoutine {
+    /// Hash `snapshot` by its content, so publishing it again is noticed.
+    pub fn new(snapshot: RoutineSnapshot) -> Self {
+        let json = serde_json::to_value(&snapshot)
+            .map(|value| canonical_json(&value))
+            .unwrap_or_default();
+
+        Self {
+            source_hash: SourceHash::of(&json),
+            snapshot,
+        }
+    }
+}
+
+/// What a version holds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListingContent {
+    /// An artifact's page.
+    Page(PublishedPage),
+    /// A routine's snapshot.
+    Routine(PublishedRoutine),
+}
+
+impl ListingContent {
+    /// The kind of listing that holds it.
+    pub fn kind(&self) -> ListingKind {
+        match self {
+            Self::Page(_) => ListingKind::Artifact,
+            Self::Routine(_) => ListingKind::Routine,
+        }
+    }
+
+    /// The hash that tells two versions' content apart.
+    pub fn source_hash(&self) -> &SourceHash {
+        match self {
+            Self::Page(page) => &page.source_hash,
+            Self::Routine(routine) => &routine.source_hash,
+        }
+    }
+}
+
+/// A listing's routine version.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutineVersion {
+    /// Its version.
+    pub version: Version,
+    /// The routine it holds.
+    pub snapshot: RoutineSnapshot,
+}
+
 /// A listing to store, with its first version.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewListing {
     /// Its id.
     pub id: ListingId,
-    /// What it publishes.
-    pub kind: ListingKind,
     /// Who publishes it.
     pub publisher: MacroUserIdStr<'static>,
     /// The team that sees it.
     pub team_id: Uuid,
-    /// The document it is published from.
-    pub source_document_id: Uuid,
+    /// The document or routine it is published from.
+    pub source_id: Uuid,
     /// Its title and description.
     pub text: ListingText,
-    /// Its first version's page.
-    pub page: PublishedPage,
+    /// Its first version's content, which decides its kind.
+    pub content: ListingContent,
 }
 
 /// What became of a new version.
@@ -260,6 +328,172 @@ pub struct InstalledBuild {
     pub html: String,
 }
 
+/// What a person publishes from: a document they own or a routine they own.
+#[derive(Debug, Clone)]
+pub enum PublishSource {
+    /// A stored HTML document, as an artifact.
+    Artifact(EntityAccessReceipt<OwnerAccessLevel>),
+    /// A routine, with the references marked as variables.
+    Routine {
+        /// The owner's receipt for the routine.
+        routine: EntityAccessReceipt<OwnerAccessLevel>,
+        /// Its user-specific parts, as when sharing it as a template.
+        variables: Vec<TemplateVariable>,
+    },
+}
+
+impl PublishSource {
+    /// The receipt naming what is published.
+    pub fn receipt(&self) -> &EntityAccessReceipt<OwnerAccessLevel> {
+        match self {
+            Self::Artifact(receipt) | Self::Routine { routine: receipt, .. } => receipt,
+        }
+    }
+
+    /// The kind of listing it publishes.
+    pub fn kind(&self) -> ListingKind {
+        match self {
+            Self::Artifact(_) => ListingKind::Artifact,
+            Self::Routine { .. } => ListingKind::Routine,
+        }
+    }
+}
+
+/// A new version and how it was numbered.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedVersion {
+    /// The listing with its new version.
+    pub listing: Listing,
+    /// The bump applied: a routine whose interface changed takes a major
+    /// version whatever was asked.
+    pub bump: VersionBump,
+    /// Installs a minor routine version reached.
+    pub updates: RoutineUpdates,
+}
+
+/// What became of the installs a minor routine version reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutineUpdates {
+    /// Routines updated to the new version.
+    pub updated: u32,
+    /// Routines their person edited, now detached and left alone.
+    pub detached: u32,
+    /// Routines that could not be updated this time.
+    pub failed: u32,
+}
+
+/// What a person sends to install a routine listing, or take its newest
+/// major version.
+#[derive(Debug, Clone, Default)]
+pub struct InstallRequest {
+    /// Their time zone; required the first time.
+    pub timezone: Option<Tz>,
+    /// Fills for the routine's variables, by key, on top of those stored.
+    pub variables: BTreeMap<String, VariableFill>,
+    /// Whether their routine starts switched on.
+    pub enabled: bool,
+}
+
+/// A routine install: the copy a person got and how it was filled in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutineInstall {
+    /// The version their routine was last filled in from.
+    pub version: Version,
+    /// Their routine.
+    pub routine_id: Uuid,
+    /// What they chose when installing it.
+    pub fills: RoutineFills,
+    /// The hash of their routine's task as installed or last updated.
+    pub task_hash: TaskHash,
+}
+
+/// A routine install the marketplace still keeps up to date.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FollowingInstall {
+    /// Who installed it.
+    pub user: MacroUserIdStr<'static>,
+    /// The install.
+    pub install: RoutineInstall,
+}
+
+/// The routine an install created, as its person sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledRoutine {
+    /// Their routine.
+    pub routine_id: Uuid,
+    /// They edited it, so updates no longer reach it.
+    pub detached: bool,
+    /// The last update could not be applied; the next version tries again.
+    pub update_failed: bool,
+}
+
+/// The hash of a routine's task, which tells whether its person edited it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskHash(pub String);
+
+/// A routine created for an install.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoutineCopy {
+    /// Its id.
+    pub routine_id: Uuid,
+    /// The hash of its task as saved.
+    pub task_hash: TaskHash,
+}
+
+/// What updating an installed routine came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoutineUpdate {
+    /// Saved; its task now hashes to this.
+    Updated(TaskHash),
+    /// Its person edited it since, so it was left alone.
+    Edited,
+    /// It no longer exists or is no longer theirs.
+    Gone,
+}
+
+/// What became of one install's update, as recorded.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstallUpdate {
+    /// Its routine is on `version`, with this task.
+    Updated {
+        /// The version applied.
+        version: Version,
+        /// Its task's hash now.
+        task_hash: TaskHash,
+    },
+    /// Its routine is its person's own from now on.
+    Detached,
+    /// It failed; the install stays where it was.
+    Failed,
+}
+
+/// JSON with every object's keys sorted, so equal values hash alike however
+/// they were stored.
+pub fn canonical_json(value: &serde_json::Value) -> String {
+    fn sorted(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(fields) => {
+                let mut keys: Vec<&String> = fields.keys().collect();
+                keys.sort();
+                serde_json::Value::Object(
+                    keys.into_iter()
+                        .map(|key| (key.clone(), sorted(&fields[key])))
+                        .collect(),
+                )
+            }
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.iter().map(sorted).collect())
+            }
+            other => other.clone(),
+        }
+    }
+
+    sorted(value).to_string()
+}
+
 /// Why a marketplace request could not be done.
 #[derive(Debug, thiserror::Error)]
 pub enum MarketplaceError {
@@ -276,11 +510,18 @@ pub enum MarketplaceError {
     #[error("{0}")]
     Invalid(String),
     /// The document already has a listing.
-    #[error("this page is already published; publish a new version of its listing")]
+    #[error("this is already published; publish a new version of its listing")]
     AlreadyPublished,
     /// The page is the same as the newest version.
-    #[error("the page hasn't changed since its newest version")]
+    #[error("nothing changed since its newest version")]
     Unchanged,
+    /// The routine's variables left to each person need their fills.
+    #[error("choose what to do with {} of this routine's references", .0.len())]
+    MissingFills(Vec<TemplateVariable>),
+    /// The routine can't be saved as given, such as an app its person
+    /// hasn't connected.
+    #[error("{0}")]
+    RoutineRejected(String),
     /// The page has problems its author must fix first.
     #[error("this page doesn't build, so it can't be published")]
     DoesNotBuild,

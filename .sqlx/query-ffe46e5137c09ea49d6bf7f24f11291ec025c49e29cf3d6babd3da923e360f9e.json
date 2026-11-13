@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE marketplace_install\n                    SET detached_at = now(), update_failed_at = NULL, updated_at = now()\n                    WHERE listing_id = $1 AND user_id = $2 AND detached_at IS NULL\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ffe46e5137c09ea49d6bf7f24f11291ec025c49e29cf3d6babd3da923e360f9e"
+}

@@ -6,6 +6,7 @@
  */
 import type { ListingId } from './listingId';
 import type { ListingInstalledMajor } from './listingInstalledMajor';
+import type { ListingInstalledRoutine } from './listingInstalledRoutine';
 import type { ListingKind } from './listingKind';
 import type { ListingScope } from './listingScope';
 import type { Version } from './version';
@@ -24,6 +25,7 @@ export interface Listing {
   installCount: number;
   /** The major version the person asking is on, when they installed it. */
   installedMajor?: ListingInstalledMajor;
+  installedRoutine?: ListingInstalledRoutine;
   /** What it publishes. */
   kind: ListingKind;
   /** Its newest version. */
@@ -34,8 +36,9 @@ export interface Listing {
   removed: boolean;
   /** Who sees it. */
   scope: ListingScope;
-  /** The document its versions are published from. */
-  sourceDocumentId: string;
+  /** What its versions are published from: a document for an artifact, a
+routine for a routine. */
+  sourceId: string;
   /** Its name. */
   title: string;
   /** When it last changed. */

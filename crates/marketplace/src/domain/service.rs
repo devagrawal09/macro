@@ -7,6 +7,9 @@ mod test;
 use std::sync::Arc;
 
 use agent_code_mode::domain::{BuildOutcome, RunProgram, UserExecutionReceipt};
+use futures::StreamExt;
+use scheduled_action::domain::templates::{RoutineSnapshot, fill::RoutineFills};
+use tracing::Instrument;
 use entity_access::domain::models::{
     EntityAccessReceipt, EntityType, MemberTeamRole, OwnerAccessLevel, TeamRole, ViewAccessLevel,
 };
@@ -15,29 +18,38 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingKind, ListingText,
-    MarketplaceError, NewListing, PublishedPage, VersionBump,
+    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
+    Listing, ListingContent, ListingId, ListingKind, ListingText, MarketplaceError, NewListing,
+    PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall,
+    RoutineUpdate, RoutineUpdates, RoutineVersion, Version, VersionBump,
 };
-use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout};
+use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, Routines};
 
-/// The marketplace service over its repository, page builder and rollout.
-pub struct MarketplaceServiceImpl<Listings, P, R> {
-    listings: Listings,
+/// How many installed routines a minor version updates at once.
+const UPDATE_CONCURRENCY: usize = 8;
+
+/// The marketplace service over its repository, page builder, routines and
+/// rollout.
+pub struct MarketplaceServiceImpl<Listings, P, Ro, R> {
+    listings: Arc<Listings>,
     pages: Arc<P>,
+    routines: Arc<Ro>,
     rollout: R,
 }
 
-impl<Listings, P, R> MarketplaceServiceImpl<Listings, P, R>
+impl<Listings, P, Ro, R> MarketplaceServiceImpl<Listings, P, Ro, R>
 where
     Listings: ListingRepo,
     P: Pages,
+    Ro: Routines,
     R: Rollout,
 {
-    /// Bind the repository, the page builder and the rollout.
-    pub fn new(listings: Listings, pages: Arc<P>, rollout: R) -> Self {
+    /// Bind the repository, the page builder, routines and the rollout.
+    pub fn new(listings: Listings, pages: Arc<P>, routines: Arc<Ro>, rollout: R) -> Self {
         Self {
-            listings,
+            listings: Arc::new(listings),
             pages,
+            routines,
             rollout,
         }
     }
@@ -86,6 +98,156 @@ where
             source_hash: build.source_hash,
             html,
         })
+    }
+
+    /// What a new version of `source` holds: a document's page, or a
+    /// routine's snapshot described as `description`.
+    async fn content(
+        &self,
+        source: PublishSource,
+        description: &str,
+    ) -> Result<ListingContent, MarketplaceError> {
+        match source {
+            PublishSource::Artifact(document) => {
+                Ok(ListingContent::Page(self.published_page(document).await?))
+            }
+            PublishSource::Routine { routine, variables } => {
+                let snapshot = self
+                    .routines
+                    .snapshot(&routine, description, variables)
+                    .await?;
+                Ok(ListingContent::Routine(PublishedRoutine::new(snapshot)))
+            }
+        }
+    }
+
+    /// Fill the listing's newest routine version in as the caller's own and
+    /// save it: a new routine, or the one their install made, which then
+    /// follows minor versions again even if they had edited it.
+    async fn install_routine(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        id: ListingId,
+        request: InstallRequest,
+    ) -> Result<(), MarketplaceError> {
+        let newest = self
+            .listings
+            .routine_version(id, None)
+            .await
+            .map_err(internal)?
+            .ok_or(MarketplaceError::NotFound)?;
+        let existing = self
+            .listings
+            .routine_install(id, user)
+            .await
+            .map_err(internal)?;
+
+        // A new major is filled in from the fills stored when installing,
+        // with the caller's new ones on top.
+        let fills = match (&existing, request.timezone) {
+            (Some(install), timezone) => install.fills.clone().merged(RoutineFills {
+                timezone: timezone.unwrap_or(install.fills.timezone),
+                variables: request.variables,
+            }),
+            (None, Some(timezone)) => RoutineFills {
+                timezone,
+                variables: request.variables,
+            },
+            (None, None) => {
+                return Err(MarketplaceError::Invalid(
+                    "installing a routine needs your time zone".to_owned(),
+                ));
+            }
+        };
+        let filled = newest
+            .snapshot
+            .fill(user, &fills)
+            .map_err(|missing| MarketplaceError::MissingFills(missing.0))?;
+
+        let updated = match &existing {
+            Some(install) => {
+                self.routines
+                    .update(user, install.routine_id, &filled, None)
+                    .await?
+            }
+            None => RoutineUpdate::Gone,
+        };
+        let copy = match (updated, existing) {
+            (RoutineUpdate::Updated(task_hash), Some(install)) => RoutineCopy {
+                routine_id: install.routine_id,
+                task_hash,
+            },
+            // No routine yet, or the one it made is gone: make one.
+            _ => self.routines.create(user, &filled, request.enabled).await?,
+        };
+        tracing::Span::current().record("routine_id", tracing::field::display(copy.routine_id));
+
+        self.listings
+            .save_routine_install(
+                id,
+                user,
+                &RoutineInstall {
+                    version: newest.version,
+                    routine_id: copy.routine_id,
+                    fills,
+                    task_hash: copy.task_hash,
+                },
+            )
+            .await
+            .map_err(internal)
+    }
+
+    /// Bring every install on `version`'s major that still follows the
+    /// listing to `version`. A failed update is recorded on its install and
+    /// fails nothing else; the next minor version tries it again, as does
+    /// its person taking the listing again.
+    ///
+    /// The updates run on their own task, so a publish request dropped
+    /// mid-way can't leave a routine updated and its install unrecorded,
+    /// which would read as its person's edit.
+    async fn update_installs(
+        &self,
+        id: ListingId,
+        version: Version,
+        snapshot: RoutineSnapshot,
+    ) -> RoutineUpdates {
+        let installs = match self.listings.installs_behind(id, version).await {
+            Ok(installs) => installs,
+            Err(error) => {
+                tracing::error!(error = %error, "could not read the installs to update");
+                return RoutineUpdates::default();
+            }
+        };
+
+        let listings = Arc::clone(&self.listings);
+        let routines = Arc::clone(&self.routines);
+        let updates = async move {
+            let snapshot = &snapshot;
+            futures::stream::iter(installs)
+                .map(|following| update_install(&*listings, &*routines, id, version, snapshot, following))
+                .buffer_unordered(UPDATE_CONCURRENCY)
+                .fold(RoutineUpdates::default(), |mut updates, update| async move {
+                    match update {
+                        InstallUpdate::Updated { .. } => updates.updated += 1,
+                        InstallUpdate::Detached => updates.detached += 1,
+                        InstallUpdate::Failed => updates.failed += 1,
+                    }
+                    updates
+                })
+                .await
+        };
+
+        let updates = tokio::spawn(updates.in_current_span())
+            .await
+            .unwrap_or_else(|error| {
+                tracing::error!(error = %error, "updating installed routines stopped");
+                RoutineUpdates::default()
+            });
+        let span = tracing::Span::current();
+        span.record("routines_updated", updates.updated);
+        span.record("routines_detached", updates.detached);
+        span.record("routines_failed", updates.failed);
+        updates
     }
 
     /// The page the caller's install shows.
@@ -138,30 +300,94 @@ fn membership(
     }))
 }
 
-/// The id of a document the caller's receipt proves they own.
-fn owned_document(
+/// The id of the document or routine the caller's receipt proves they own,
+/// as a listing of `kind` publishes it.
+fn owned_source(
     user: &MacroUserIdStr<'static>,
-    document: &EntityAccessReceipt<OwnerAccessLevel>,
+    source: &EntityAccessReceipt<OwnerAccessLevel>,
+    kind: ListingKind,
 ) -> Result<Uuid, MarketplaceError> {
-    let same_user = document
+    let entity_type = match kind {
+        ListingKind::Artifact => EntityType::Document,
+        ListingKind::Routine => EntityType::ScheduledAction,
+    };
+    let same_user = source
         .get_authenticated_user()
         .is_ok_and(|owner| owner == user);
-    if !same_user || document.entity().entity_type != EntityType::Document {
+    if !same_user || source.entity().entity_type != entity_type {
         return Err(MarketplaceError::Forbidden);
     }
 
-    Uuid::parse_str(&document.entity().entity_id)
-        .map_err(|_| MarketplaceError::Invalid("this document can't be published".to_owned()))
+    Uuid::parse_str(&source.entity().entity_id)
+        .map_err(|_| MarketplaceError::Invalid("this can't be published".to_owned()))
+}
+
+/// The bump a routine version gets: what was asked, unless the routine asks
+/// something new of those who installed it, which only a major version may.
+fn routine_bump(
+    requested: VersionBump,
+    newest: &RoutineSnapshot,
+    next: &RoutineSnapshot,
+) -> VersionBump {
+    if newest.interface() == next.interface() {
+        requested
+    } else {
+        VersionBump::Major
+    }
+}
+
+/// Update one install's routine to `version`, unless its person edited it,
+/// and record what came of it.
+async fn update_install<Listings: ListingRepo, Ro: Routines>(
+    listings: &Listings,
+    routines: &Ro,
+    id: ListingId,
+    version: Version,
+    snapshot: &RoutineSnapshot,
+    following: FollowingInstall,
+) -> InstallUpdate {
+    let FollowingInstall { user, install } = following;
+    let saved = match snapshot.fill(&user, &install.fills) {
+        Ok(filled) => {
+            routines
+                .update(&user, install.routine_id, &filled, Some(&install.task_hash))
+                .await
+        }
+        Err(missing) => Err(MarketplaceError::MissingFills(missing.0)),
+    };
+
+    let update = match saved {
+        Ok(RoutineUpdate::Updated(task_hash)) => InstallUpdate::Updated { version, task_hash },
+        Ok(RoutineUpdate::Edited | RoutineUpdate::Gone) => InstallUpdate::Detached,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                routine_id = %install.routine_id,
+                "could not update an installed routine"
+            );
+            InstallUpdate::Failed
+        }
+    };
+
+    if let Err(error) = listings.record_update(id, &user, &update).await {
+        tracing::error!(
+            error = %error,
+            routine_id = %install.routine_id,
+            "could not record an installed routine's update"
+        );
+    }
+    update
 }
 
 fn internal<E: std::error::Error + Send + Sync + 'static>(error: E) -> MarketplaceError {
     MarketplaceError::Internal(rootcause::Report::new(error).into_dynamic())
 }
 
-impl<Listings, P, R> MarketplaceService for MarketplaceServiceImpl<Listings, P, R>
+impl<Listings, P, Ro, R> MarketplaceService for MarketplaceServiceImpl<Listings, P, Ro, R>
 where
     Listings: ListingRepo,
     P: Pages,
+    Ro: Routines,
     R: Rollout,
 {
     #[tracing::instrument(err, skip_all, fields(team_id = tracing::field::Empty))]
@@ -184,14 +410,15 @@ where
         fields(
             team_id = tracing::field::Empty,
             listing_id = tracing::field::Empty,
-            source_document_id = tracing::field::Empty,
+            source_id = tracing::field::Empty,
+            kind = %source.kind(),
         )
     )]
     async fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
-        document: EntityAccessReceipt<OwnerAccessLevel>,
+        source: PublishSource,
         text: ListingText,
     ) -> Result<Listing, MarketplaceError> {
         self.admit(user).await?;
@@ -199,13 +426,10 @@ where
             .ok_or(MarketplaceError::NoTeam)?
             .team_id;
         let text = text.normalized()?;
-        let source_document_id = owned_document(user, &document)?;
+        let source_id = owned_source(user, source.receipt(), source.kind())?;
         let span = tracing::Span::current();
-        span.record(
-            "source_document_id",
-            tracing::field::display(source_document_id),
-        );
-        let page = self.published_page(document).await?;
+        span.record("source_id", tracing::field::display(source_id));
+        let content = self.content(source, &text.description).await?;
 
         let id = ListingId::generate();
         span.record("listing_id", tracing::field::display(id));
@@ -213,12 +437,11 @@ where
             .listings
             .create_listing(NewListing {
                 id,
-                kind: ListingKind::Artifact,
                 publisher: user.clone(),
                 team_id,
-                source_document_id,
+                source_id,
                 text,
-                page,
+                content,
             })
             .await
             .map_err(internal)?;
@@ -229,38 +452,100 @@ where
         self.listing(user, Some(team_id), id).await
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(
+            listing_id = %id,
+            team_id = tracing::field::Empty,
+            bump = tracing::field::Empty,
+            routines_updated = tracing::field::Empty,
+            routines_detached = tracing::field::Empty,
+            routines_failed = tracing::field::Empty,
+        )
+    )]
     async fn publish_version(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
-        document: EntityAccessReceipt<OwnerAccessLevel>,
+        source: PublishSource,
         bump: VersionBump,
-    ) -> Result<Listing, MarketplaceError> {
+    ) -> Result<PublishedVersion, MarketplaceError> {
         self.admit(user).await?;
         let team = membership(user, team)?.map(|member| member.team_id);
         let listing = self.listing(user, team, id).await?;
         if listing.publisher != *user {
             return Err(MarketplaceError::Forbidden);
         }
-        if owned_document(user, &document)? != listing.source_document_id {
+        let same_source = source.kind() == listing.kind
+            && owned_source(user, source.receipt(), source.kind())? == listing.source_id;
+        if !same_source {
             return Err(MarketplaceError::Invalid(
-                "a listing's versions come from the page it was published from".to_owned(),
+                "a listing's versions come from what it was published from".to_owned(),
             ));
         }
 
-        let page = self.published_page(document).await?;
+        let content = self.content(source, &listing.description).await?;
+        let bump = match &content {
+            ListingContent::Page(_) => bump,
+            ListingContent::Routine(routine) => {
+                let newest = self
+                    .listings
+                    .routine_version(id, None)
+                    .await
+                    .map_err(internal)?
+                    .ok_or(MarketplaceError::NotFound)?;
+                routine_bump(bump, &newest.snapshot, &routine.snapshot)
+            }
+        };
+        tracing::Span::current().record("bump", tracing::field::debug(bump));
+
         let added = self
             .listings
-            .add_version(id, bump, &page)
+            .add_version(id, bump, &content)
             .await
             .map_err(internal)?;
-        match added {
-            AddedVersion::Added(_) => self.listing(user, team, id).await,
-            AddedVersion::Unchanged => Err(MarketplaceError::Unchanged),
-            AddedVersion::Missing => Err(MarketplaceError::NotFound),
+        let version = match added {
+            AddedVersion::Added(version) => version,
+            AddedVersion::Unchanged => return Err(MarketplaceError::Unchanged),
+            AddedVersion::Missing => return Err(MarketplaceError::NotFound),
+        };
+
+        // The version is stored: updating installs can't fail the publish.
+        let updates = match (content, bump) {
+            (ListingContent::Routine(routine), VersionBump::Minor) => {
+                self.update_installs(id, version, routine.snapshot).await
+            }
+            _ => RoutineUpdates::default(),
+        };
+
+        Ok(PublishedVersion {
+            listing: self.listing(user, team, id).await?,
+            bump,
+            updates,
+        })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
+    async fn routine_version(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> Result<RoutineVersion, MarketplaceError> {
+        self.admit(user).await?;
+        let team = membership(user, team)?.map(|member| member.team_id);
+        let listing = self.listing(user, team, id).await?;
+        if listing.kind != ListingKind::Routine {
+            return Err(MarketplaceError::NotFound);
         }
+
+        self.listings
+            .routine_version(id, None)
+            .await
+            .map_err(internal)?
+            .ok_or(MarketplaceError::NotFound)
     }
 
     #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
@@ -285,23 +570,32 @@ where
         self.listings.remove_listing(id).await.map_err(internal)
     }
 
-    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(listing_id = %id, team_id = tracing::field::Empty, routine_id = tracing::field::Empty)
+    )]
     async fn install(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
+        request: InstallRequest,
     ) -> Result<Listing, MarketplaceError> {
         self.admit(user).await?;
         let team = membership(user, team)?.map(|member| member.team_id);
         // Seeing it is what allows installing it; an unlisted listing is
         // seen only by those who already did.
-        self.listing(user, team, id).await?;
+        let listing = self.listing(user, team, id).await?;
 
-        self.listings
-            .install_latest(id, user)
-            .await
-            .map_err(internal)?;
+        match listing.kind {
+            ListingKind::Artifact => self
+                .listings
+                .install_latest(id, user)
+                .await
+                .map_err(internal)?,
+            ListingKind::Routine => self.install_routine(user, id, request).await?,
+        }
         self.listing(user, team, id).await
     }
 

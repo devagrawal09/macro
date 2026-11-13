@@ -53,17 +53,21 @@ import type {
   ExtractInputResponse,
   GetAgentSessionActivityParams,
   InstalledListingBuild,
+  InstallMarketplaceListingBody,
   LinkedTaskResponse,
   LinkTaskRequest,
   ListAgentRepositoryBranchesParams,
   Listing,
+  ListingRoutine,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
   MarketplaceListings,
+  MissingRoutineFills,
   OpenInApp,
   PresentView,
   PreviewAgentSessionsRequest,
   PreviewAgentSessionsResponse,
+  PublishedVersion,
   PublishListing,
   PublishListingVersion,
   PullRequestSessionsResponse,
@@ -4665,9 +4669,9 @@ export const listMarketplaceListings = async (
 };
 
 /**
- * @summary Publish an HTML document the caller owns to their team's marketplace, as
-version 1.0. `409` means the caller has no team or the document already
-has a listing; `422` means the page doesn't build.
+ * @summary Publish an HTML document or a routine the caller owns to their team's
+marketplace, as version 1.0. `409` means the caller has no team or the
+source already has a listing; `422` means the page doesn't build.
  */
 export type publishMarketplaceListingResponse201 = {
   data: Listing;
@@ -4840,12 +4844,22 @@ export const unlistMarketplaceListing = async (
 };
 
 /**
+ * A routine listing creates the caller's own routine, filled in from the
+body and the fills stored when they first installed it; taking a new
+major fills in their routine again, replacing any edits, and it follows
+minor versions again. `422` lists the variables that still need a fill.
  * @summary Put the caller on the listing's newest major version: installs it, or
-takes a major version they were waiting on. Repeating it changes nothing.
+takes a major version they were waiting on. Repeating it changes nothing
+for an artifact.
  */
 export type installMarketplaceListingResponse200 = {
   data: Listing;
   status: 200;
+};
+
+export type installMarketplaceListingResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type installMarketplaceListingResponse401 = {
@@ -4863,6 +4877,11 @@ export type installMarketplaceListingResponse404 = {
   status: 404;
 };
 
+export type installMarketplaceListingResponse422 = {
+  data: MissingRoutineFills;
+  status: 422;
+};
+
 export type installMarketplaceListingResponse500 = {
   data: void;
   status: 500;
@@ -4873,9 +4892,11 @@ export type installMarketplaceListingResponseSuccess =
     headers: Headers;
   };
 export type installMarketplaceListingResponseError = (
+  | installMarketplaceListingResponse400
   | installMarketplaceListingResponse401
   | installMarketplaceListingResponse403
   | installMarketplaceListingResponse404
+  | installMarketplaceListingResponse422
   | installMarketplaceListingResponse500
 ) & {
   headers: Headers;
@@ -4891,11 +4912,14 @@ export const getInstallMarketplaceListingUrl = (id: string) => {
 
 export const installMarketplaceListing = async (
   id: string,
+  installMarketplaceListingBody: InstallMarketplaceListingBody,
   options?: RequestInit
 ): Promise<installMarketplaceListingResponse> => {
   const res = await fetch(getInstallMarketplaceListingUrl(id), {
     ...options,
     method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(installMarketplaceListingBody),
   });
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
@@ -4911,7 +4935,8 @@ export const installMarketplaceListing = async (
 };
 
 /**
- * @summary Remove the caller's install. Repeating it changes nothing.
+ * @summary Remove the caller's install. Repeating it changes nothing. A routine the
+install created stays the caller's own and no longer follows the listing.
  */
 export type uninstallMarketplaceListingResponse204 = {
   data: void;
@@ -5144,12 +5169,81 @@ export const runInstalledListingProgram = async (
 };
 
 /**
- * @summary Publish the listing's document as its next version. A minor version
+ * @summary A routine listing's newest version, to fill in before installing it or
+taking its newest major.
+ */
+export type getMarketplaceListingRoutineResponse200 = {
+  data: ListingRoutine;
+  status: 200;
+};
+
+export type getMarketplaceListingRoutineResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type getMarketplaceListingRoutineResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type getMarketplaceListingRoutineResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type getMarketplaceListingRoutineResponseSuccess =
+  getMarketplaceListingRoutineResponse200 & {
+    headers: Headers;
+  };
+export type getMarketplaceListingRoutineResponseError = (
+  | getMarketplaceListingRoutineResponse401
+  | getMarketplaceListingRoutineResponse404
+  | getMarketplaceListingRoutineResponse500
+) & {
+  headers: Headers;
+};
+
+export type getMarketplaceListingRoutineResponse =
+  | getMarketplaceListingRoutineResponseSuccess
+  | getMarketplaceListingRoutineResponseError;
+
+export const getGetMarketplaceListingRoutineUrl = (id: string) => {
+  return `/marketplace/listings/${id}/routine`;
+};
+
+export const getMarketplaceListingRoutine = async (
+  id: string,
+  options?: RequestInit
+): Promise<getMarketplaceListingRoutineResponse> => {
+  const res = await fetch(getGetMarketplaceListingRoutineUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getMarketplaceListingRoutineResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getMarketplaceListingRoutineResponse;
+};
+
+/**
+ * @summary Publish the listing's source as its next version. A minor version
 reaches every install on the newest major at once; a major version waits
-for each person to take it. `409` means the page hasn't changed.
+for each person to take it. A routine whose variables, required apps,
+trigger kinds or knobs changed takes a major version whatever was asked,
+and the answer says which bump applied. A minor routine version updates
+each installed routine its person hasn't edited, after the version is
+stored. `409` means nothing changed.
  */
 export type publishMarketplaceListingVersionResponse201 = {
-  data: Listing;
+  data: PublishedVersion;
   status: 201;
 };
 

@@ -84,6 +84,7 @@ impl Modify for SecurityAddon {
         marketplace::inbound::axum_router::list_marketplace_listings,
         marketplace::inbound::axum_router::publish_marketplace_listing,
         marketplace::inbound::axum_router::publish_marketplace_listing_version,
+        marketplace::inbound::axum_router::get_marketplace_listing_routine,
         marketplace::inbound::axum_router::unlist_marketplace_listing,
         marketplace::inbound::axum_router::install_marketplace_listing,
         marketplace::inbound::axum_router::uninstall_marketplace_listing,
@@ -229,7 +230,7 @@ impl Modify for SecurityAddon {
         (name = "agent-repositories", description = "Repositories a coding session can work on"),
         (name = "agent-mode-choice", description = "Whether a composer prompt goes to a chat or a coding agent"),
         (name = "documents", description = "Programs embedded in documents, run as the viewer"),
-        (name = "marketplace", description = "Pages people publish for their team to install")
+        (name = "marketplace", description = "Pages and routines people publish for their team to install")
     )
 )]
 pub struct ApiDoc;

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE marketplace_install\n                    SET routine_minor = $3,\n                        routine_task_hash = $4,\n                        update_failed_at = NULL,\n                        updated_at = now()\n                    WHERE listing_id = $1 AND user_id = $2 AND major = $5\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "953653c970cfff2ebb76361098f4911d66cda603c5b4a69fb03ae271c272b02c"
+}

@@ -2,3 +2,4 @@
 
 pub mod document_pages;
 pub mod pg_listing_repo;
+pub mod scheduled_routines;

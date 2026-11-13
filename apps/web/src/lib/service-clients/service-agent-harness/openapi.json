@@ -3933,7 +3933,7 @@
       },
       "post": {
         "tags": ["marketplace"],
-        "summary": "Publish an HTML document the caller owns to their team's marketplace, as\nversion 1.0. `409` means the caller has no team or the document already\nhas a listing; `422` means the page doesn't build.",
+        "summary": "Publish an HTML document or a routine the caller owns to their team's\nmarketplace, as version 1.0. `409` means the caller has no team or the\nsource already has a listing; `422` means the page doesn't build.",
         "operationId": "publish_marketplace_listing",
         "requestBody": {
           "content": {
@@ -4074,7 +4074,8 @@
     "/marketplace/listings/{id}/install": {
       "put": {
         "tags": ["marketplace"],
-        "summary": "Put the caller on the listing's newest major version: installs it, or\ntakes a major version they were waiting on. Repeating it changes nothing.",
+        "summary": "Put the caller on the listing's newest major version: installs it, or\ntakes a major version they were waiting on. Repeating it changes nothing\nfor an artifact.",
+        "description": "A routine listing creates the caller's own routine, filled in from the\nbody and the fills stored when they first installed it; taking a new\nmajor fills in their routine again, replacing any edits, and it follows\nminor versions again. `422` lists the variables that still need a fill.",
         "operationId": "install_marketplace_listing",
         "parameters": [
           {
@@ -4088,6 +4089,23 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "A routine's fills; an artifact takes none",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/InstallListing"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -4095,6 +4113,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -4122,6 +4150,16 @@
               }
             }
           },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissingRoutineFills"
+                }
+              }
+            }
+          },
           "500": {
             "description": ""
           }
@@ -4129,7 +4167,7 @@
       },
       "delete": {
         "tags": ["marketplace"],
-        "summary": "Remove the caller's install. Repeating it changes nothing.",
+        "summary": "Remove the caller's install. Repeating it changes nothing. A routine the\ninstall created stays the caller's own and no longer follows the listing.",
         "operationId": "uninstall_marketplace_listing",
         "parameters": [
           {
@@ -4274,10 +4312,50 @@
         }
       }
     },
+    "/marketplace/listings/{id}/routine": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "A routine listing's newest version, to fill in before installing it or\ntaking its newest major.",
+        "operationId": "get_marketplace_listing_routine",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A routine listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingRoutine"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/marketplace/listings/{id}/versions": {
       "post": {
         "tags": ["marketplace"],
-        "summary": "Publish the listing's document as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. `409` means the page hasn't changed.",
+        "summary": "Publish the listing's source as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. A routine whose variables, required apps,\ntrigger kinds or knobs changed takes a major version whatever was asked,\nand the answer says which bump applied. A minor routine version updates\neach installed routine its person hasn't edited, after the version is\nstored. `409` means nothing changed.",
         "operationId": "publish_marketplace_listing_version",
         "parameters": [
           {
@@ -4307,7 +4385,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Listing"
+                  "$ref": "#/components/schemas/PublishedVersion"
                 }
               }
             }
@@ -4466,6 +4544,68 @@
         "type": "string",
         "description": "Ordered from least to most access top -> bottom",
         "enum": ["view", "comment", "edit", "owner"]
+      },
+      "ActionTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["schedule", "timezone", "type"],
+            "properties": {
+              "schedule": {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["cron"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["filters", "type"],
+            "properties": {
+              "filters": {
+                "$ref": "#/components/schemas/EventFilters"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["events"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Fires once at `at`, or as soon as it is saved when `at` has passed.",
+            "required": ["at", "type"],
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["once"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["triggers", "type"],
+            "properties": {
+              "triggers": {
+                "$ref": "#/components/schemas/RoutineTriggers"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["multiple"]
+              }
+            }
+          }
+        ],
+        "description": "A routine may run on one trigger or any of several schedules and Macro events."
       },
       "ActivityWireRow": {
         "type": "object",
@@ -4942,6 +5082,21 @@
               "$ref": "#/components/schemas/AgentConversationDto"
             },
             "description": "Empty for ordinary channels and other people's conversations."
+          }
+        }
+      },
+      "AgentMcpServer": {
+        "type": "object",
+        "description": "One Pipedream app an agent lists under [`AgentMcpServers::Selected`].\n\nOnly the catalog identity is stored. Whether a given person has connected\nthe app is theirs, resolved at call time by the egress proxy, never here.",
+        "required": ["app_slug", "server_name"],
+        "properties": {
+          "app_slug": {
+            "type": "string",
+            "description": "Pipedream app slug, e.g. `linear`."
+          },
+          "server_name": {
+            "type": "string",
+            "description": "Display name, e.g. `Linear`."
           }
         }
       },
@@ -5516,6 +5671,90 @@
           }
         }
       },
+      "AgentStep": {
+        "type": "object",
+        "description": "Hand the run to a model running as Macro, or to an agent.",
+        "required": ["instructions"],
+        "properties": {
+          "agent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentTaskAgent",
+                "description": "The agent (persona) that runs, by `bot_id` from ListAgents."
+              }
+            ]
+          },
+          "instructions": {
+            "type": "string",
+            "description": "What the model or agent should do. It also sees the triggering event\nand what earlier steps in this run did."
+          },
+          "model": {
+            "type": ["string", "null"],
+            "description": "Required when no agent is selected; otherwise overrides the agent's default model."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentTask": {
+        "type": "object",
+        "description": "The single agent task: how routines were stored before they had steps,\nand still how a routine that is only an agent is saved.",
+        "required": ["prompt", "user_prompt"],
+        "properties": {
+          "agent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentTaskAgent",
+                "description": "Absent when using Macro's agent-session runtime with a selected model."
+              }
+            ]
+          },
+          "mcp_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentMcpServer"
+            },
+            "description": "Apps the routine requires on top of the agent's own. The owner must\nhave each one connected to save the routine and for it to run."
+          },
+          "model": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoutineModelId",
+                "description": "Required for model targets; overrides the persona default for agent targets."
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Instructions placed before the user's."
+          },
+          "user_prompt": {
+            "type": "string",
+            "description": "What the agent should do."
+          }
+        }
+      },
+      "AgentTaskAgent": {
+        "type": "object",
+        "description": "A persona selection, independent of its runtime and current default model.",
+        "required": ["bot_id"],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The agent's bot id."
+          }
+        },
+        "additionalProperties": false
+      },
       "AgentUpdate": {
         "type": "object",
         "description": "One pending interaction, or one stalled session.",
@@ -6088,6 +6327,48 @@
             "description": "Independent scores in the fixed intent-question order."
           }
         }
+      },
+      "CodeStep": {
+        "type": "object",
+        "description": "TypeScript written against Macro's SDK, usually by the AI that built the\nroutine. It is type-checked before it is saved and runs with its owner's\naccess.",
+        "required": ["title", "source"],
+        "properties": {
+          "id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepId",
+                "description": "Names this step's output for later steps: `steps.<id>` in later code.\nSaving gives a step without one an id from its title, e.g.\n`label_invoices`."
+              }
+            ]
+          },
+          "knobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoutineKnob"
+            },
+            "description": "Values its owner can change without new code, which the code reads\nas `knobs.<name>`."
+          },
+          "sentence": {
+            "type": ["string", "null"],
+            "description": "What it does as one sentence for its owner, with `{name}` where a\nknob's value shows and `{?name}` where a question knob's question\nshows, e.g. \"Label it {label} when {?aboutMoney}\". Saving checks every\nslot names one of its knobs."
+          },
+          "source": {
+            "type": "string",
+            "description": "A module exporting `async function main({ macro, run, routine,\ntrigger, steps }: StepContext)`: `run` is this run (its time, zone and\nthe previous run), `trigger` what started it (a schedule, an event and\nits item, or a person), `steps` the typed outputs of the steps before\nit. What `main` returns, as JSON of at most 64 KB, is the step's output."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One or two sentences on how, for the routine's owner."
+          },
+          "title": {
+            "type": "string",
+            "description": "What the step does, in a few words, e.g. \"Label invoices\"."
+          }
+        },
+        "additionalProperties": false
       },
       "CodingAgent": {
         "type": "object",
@@ -6993,6 +7274,88 @@
           }
         }
       },
+      "EventFilter": {
+        "type": "object",
+        "description": "An event name AND an entity ID must match within the same filter. A\ncondition further requires the event's content to answer it with yes.\n\n`github` comes from outside Macro and carries its payload: it stands\nalone in its filter, takes no ids, and may require\nexact payload values with `match`. A `github` filter narrows deliveries\nwith its `github` selector.",
+        "required": ["events"],
+        "properties": {
+          "condition": {
+            "type": ["string", "null"],
+            "description": "Yes/no question about the triggering content, e.g. \"Is this email an\ninvoice?\". The routine runs only when the answer is yes.",
+            "maxLength": 500
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventName"
+            }
+          },
+          "github": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GithubSelector",
+                "description": "Which GitHub deliveries match; required for, and only for, `github`."
+              }
+            ]
+          },
+          "ids": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            }
+          },
+          "match": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/PayloadCondition"
+            },
+            "description": "Exact tests on the payload, all of which must pass."
+          },
+          "property": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PropertySelector",
+                "description": "The task property that must have changed, and the values it must gain."
+              }
+            ]
+          }
+        }
+      },
+      "EventFilters": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/EventFilter"
+        },
+        "description": "Bounded nonempty OR of filters, canonicalized to remove duplicates."
+      },
+      "EventName": {
+        "type": "string",
+        "description": "Closed allowlist: unknown names, deletions and ambiguous attribution are not\nselectors. Adding a broker variant does not automatically enable routines.",
+        "enum": [
+          "document.created",
+          "document.updated",
+          "document.deleted",
+          "task.created",
+          "task.status_changed",
+          "task.priority_changed",
+          "task.property_changed",
+          "email.message_received",
+          "channel.created",
+          "channel.message_posted",
+          "channel.mentioned",
+          "channel.message_patched",
+          "channel.message_attachment_created",
+          "call.started",
+          "call.ended",
+          "github"
+        ]
+      },
       "ExecutionActivity": {
         "type": "object",
         "description": "A bounded SDK operation observed during execution; not an authorization or write receipt.",
@@ -7197,6 +7560,38 @@
           }
         }
       },
+      "GithubSelector": {
+        "type": "object",
+        "description": "Which GitHub deliveries match.",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Payload actions, such as `completed` or `opened`; any when empty."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "GitHub event names, such as `workflow_run` or `pull_request`; any when empty."
+          },
+          "includeBots": {
+            "type": "boolean",
+            "description": "Also run for deliveries caused by bots and apps, including Macro's own."
+          },
+          "repositories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repositories as `owner/name`, matched without regard to case; every\nrepository the owner's installations cover when empty. A renamed\nrepository stops matching until it is chosen again."
+          }
+        },
+        "additionalProperties": false
+      },
       "InputIntent": {
         "type": "string",
         "description": "A destination the composer can prepare, but never execute through inference.",
@@ -7349,6 +7744,30 @@
         ],
         "description": "A single inferred destination together with only its applicable fields."
       },
+      "InstallListing": {
+        "type": "object",
+        "description": "Install a listing, or take its newest major version. A routine is filled\nin as the caller's own; an artifact takes no body.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether a new routine starts switched on."
+          },
+          "timezone": {
+            "type": ["string", "null"],
+            "description": "The caller's time zone, which schedules filled in as them run in.\nRequired to install a routine; afterwards the stored one is kept."
+          },
+          "variables": {
+            "type": "object",
+            "description": "How to fill the routine's variables, by key, on top of those stored:\n`shared` keeps a reference, `choice` leaves it out. Every variable its\nauthor left to each person needs one.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/VariableFill"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "InstalledListingBuild": {
         "type": "object",
         "description": "The build of the page an install shows.",
@@ -7368,6 +7787,26 @@
           }
         }
       },
+      "InstalledRoutine": {
+        "type": "object",
+        "description": "The routine an install created, as its person sees it.",
+        "required": ["routineId", "detached", "updateFailed"],
+        "properties": {
+          "detached": {
+            "type": "boolean",
+            "description": "They edited it, so updates no longer reach it."
+          },
+          "routineId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Their routine."
+          },
+          "updateFailed": {
+            "type": "boolean",
+            "description": "The last update could not be applied; the next version tries again."
+          }
+        }
+      },
       "IntentScore": {
         "type": "object",
         "description": "Independent yes/no probabilities; these do not sum to one.",
@@ -7383,6 +7822,10 @@
             "description": "Independent probability between zero and one."
           }
         }
+      },
+      "KnobName": {
+        "type": "string",
+        "description": "How code reads a knob: a lowercase letter, then up to 31 letters or\ndigits, e.g. `dueWithinDays`."
       },
       "Lineage": {
         "oneOf": [
@@ -7464,7 +7907,7 @@
           "kind",
           "scope",
           "publisher",
-          "sourceDocumentId",
+          "sourceId",
           "title",
           "description",
           "latestVersion",
@@ -7497,6 +7940,17 @@
             "format": "int32",
             "description": "The major version the person asking is on, when they installed it."
           },
+          "installedRoutine": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstalledRoutine",
+                "description": "The routine the person asking got from installing it."
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/ListingKind",
             "description": "What it publishes."
@@ -7517,10 +7971,10 @@
             "$ref": "#/components/schemas/ListingScope",
             "description": "Who sees it."
           },
-          "sourceDocumentId": {
+          "sourceId": {
             "type": "string",
             "format": "uuid",
-            "description": "The document its versions are published from."
+            "description": "What its versions are published from: a document for an artifact, a\nroutine for a routine."
           },
           "title": {
             "type": "string",
@@ -7541,7 +7995,22 @@
       "ListingKind": {
         "type": "string",
         "description": "What a listing publishes.",
-        "enum": ["artifact"]
+        "enum": ["artifact", "routine"]
+      },
+      "ListingRoutine": {
+        "type": "object",
+        "description": "A routine listing's newest version.",
+        "required": ["version", "routine"],
+        "properties": {
+          "routine": {
+            "$ref": "#/components/schemas/RoutineSnapshot",
+            "description": "The routine as each install gets it, before filling in."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "Its version."
+          }
+        }
       },
       "ListingScope": {
         "oneOf": [
@@ -7574,6 +8043,50 @@
           }
         ],
         "description": "Who sees a listing."
+      },
+      "ListingSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A stored HTML document the caller owns, as an artifact.",
+            "required": ["documentId", "kind"],
+            "properties": {
+              "documentId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The document."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["artifact"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A routine the caller owns.",
+            "required": ["routineId", "kind"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["routine"]
+              },
+              "routineId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The routine."
+              },
+              "variables": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TemplateVariable"
+                },
+                "description": "Its user-specific parts, marked as when sharing it as a template."
+              }
+            }
+          }
+        ],
+        "description": "What a listing is published from."
       },
       "LoadAgentModelsRequest": {
         "type": "object",
@@ -7768,6 +8281,24 @@
         },
         "additionalProperties": false
       },
+      "MissingRoutineFills": {
+        "type": "object",
+        "description": "The routine's variables that need a fill before it can be installed.",
+        "required": ["message", "missing"],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "What went wrong, for people."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVariable"
+            },
+            "description": "The variables to ask for."
+          }
+        }
+      },
       "ModelHarnessDto": {
         "type": "string",
         "description": "Harness names accepted by the model discovery endpoint.",
@@ -7824,6 +8355,73 @@
           }
         },
         "additionalProperties": false
+      },
+      "PayloadCondition": {
+        "type": "object",
+        "description": "`path` walks objects by key; `*` steps into every element of an array and\na number into one. Give exactly one test. `notIn` also passes when the\npath finds nothing.",
+        "required": ["path"],
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PayloadScalar",
+                "description": "Some value found equals this."
+              }
+            ]
+          },
+          "exists": {
+            "type": ["boolean", "null"],
+            "description": "Whether the path finds a non-null value."
+          },
+          "glob": {
+            "type": ["string", "null"],
+            "description": "Some text found matches this glob; `*` matches any run of characters."
+          },
+          "in": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/PayloadScalar"
+            },
+            "description": "Some value found is one of these."
+          },
+          "notIn": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/PayloadScalar"
+            },
+            "description": "No value found is one of these."
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keys from the payload's root, e.g. `[\"workflow_run\", \"conclusion\"]`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PayloadScalar": {
+        "oneOf": [
+          {
+            "type": "null",
+            "default": null
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number",
+            "format": "double"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "description": "A JSON text, number, boolean or null that payload values are compared with."
       },
       "PermissionAnswer": {
         "oneOf": [
@@ -7932,19 +8530,37 @@
           }
         }
       },
+      "PropertySelector": {
+        "type": "object",
+        "description": "Narrows a task property change filter to one property and, optionally, the\nvalues it must gain.",
+        "required": ["definitionId"],
+        "properties": {
+          "definitionId": {
+            "type": "string",
+            "description": "The property definition that must have changed."
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Select option ids or referenced entity ids, one of which the change must\nadd. Any change to the property matches when empty."
+          }
+        },
+        "additionalProperties": false
+      },
       "PublishListing": {
         "type": "object",
-        "description": "Publish a page to the caller's team.",
-        "required": ["documentId", "title"],
+        "description": "Publish a page or routine to the caller's team.",
+        "required": ["source", "title"],
         "properties": {
           "description": {
             "type": "string",
             "description": "What it does, in a few lines."
           },
-          "documentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "A stored HTML document the caller owns."
+          "source": {
+            "$ref": "#/components/schemas/ListingSource",
+            "description": "What it is published from."
           },
           "title": {
             "type": "string",
@@ -7954,17 +8570,35 @@
       },
       "PublishListingVersion": {
         "type": "object",
-        "description": "Publish a listing's page as its next version.",
-        "required": ["documentId", "bump"],
+        "description": "Publish a listing's source as its next version.",
+        "required": ["source", "bump"],
         "properties": {
           "bump": {
             "$ref": "#/components/schemas/VersionBump",
-            "description": "Whether installs get it at once (`minor`) or wait (`major`)."
+            "description": "Whether installs get it at once (`minor`) or wait (`major`). A\nroutine that asks something new of its installs takes a major\nversion whatever is asked."
           },
-          "documentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The document the listing was published from."
+          "source": {
+            "$ref": "#/components/schemas/ListingSource",
+            "description": "What the listing was published from."
+          }
+        }
+      },
+      "PublishedVersion": {
+        "type": "object",
+        "description": "A new version and how it was numbered.",
+        "required": ["listing", "bump", "updates"],
+        "properties": {
+          "bump": {
+            "$ref": "#/components/schemas/VersionBump",
+            "description": "The bump applied: a routine whose interface changed takes a major\nversion whatever was asked."
+          },
+          "listing": {
+            "$ref": "#/components/schemas/Listing",
+            "description": "The listing with its new version."
+          },
+          "updates": {
+            "$ref": "#/components/schemas/RoutineUpdates",
+            "description": "Installs a minor routine version reached."
           }
         }
       },
@@ -8546,6 +9180,348 @@
         ],
         "description": "What made a routine fire."
       },
+      "RoutineKnob": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Free text, such as a label or channel name.",
+            "required": ["name", "label", "value", "type"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "What it is, for the owner, e.g. \"Label for money email\"."
+              },
+              "name": {
+                "$ref": "#/components/schemas/KnobName",
+                "description": "How the code reads it: `knobs.<name>`."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["text"]
+              },
+              "value": {
+                "type": "string",
+                "description": "Its value."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A number, optionally bounded.",
+            "required": ["name", "label", "value", "type"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "What it is, for the owner."
+              },
+              "max": {
+                "type": ["number", "null"],
+                "format": "double",
+                "description": "The largest value the owner may set."
+              },
+              "min": {
+                "type": ["number", "null"],
+                "format": "double",
+                "description": "The smallest value the owner may set."
+              },
+              "name": {
+                "$ref": "#/components/schemas/KnobName",
+                "description": "How the code reads it: `knobs.<name>`."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["number"]
+              },
+              "value": {
+                "type": "number",
+                "format": "double",
+                "description": "Its value."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "On or off.",
+            "required": ["name", "label", "value", "type"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "What it is, for the owner."
+              },
+              "name": {
+                "$ref": "#/components/schemas/KnobName",
+                "description": "How the code reads it: `knobs.<name>`."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["boolean"]
+              },
+              "value": {
+                "type": "boolean",
+                "description": "Its value."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One of a fixed list of options, such as a priority.",
+            "required": ["name", "label", "value", "options", "type"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "What it is, for the owner."
+              },
+              "name": {
+                "$ref": "#/components/schemas/KnobName",
+                "description": "How the code reads it: `knobs.<name>`."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Every option, in the order they are offered."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["choice"]
+              },
+              "value": {
+                "type": "string",
+                "description": "The chosen option."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A yes/no question the code asks AI with `macro.ai.decide`, so the\nowner can reword what AI decides.",
+            "required": ["name", "label", "value", "type"],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "The condition as a short clause that reads inside the step's\nsentence, e.g. \"it's about money\"."
+              },
+              "name": {
+                "$ref": "#/components/schemas/KnobName",
+                "description": "How the code reads it: `knobs.<name>`."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["question"]
+              },
+              "value": {
+                "type": "string",
+                "description": "The question AI is asked, e.g. \"Is this email about money:\ninvestors, fundraising or finance?\"."
+              }
+            }
+          }
+        ],
+        "description": "A value a code step reads as `knobs.<name>`, which its owner can change\nwithout the step being rewritten: the label it adds, a priority, a\nnumber of days, a question it asks AI. Its type is part of the step's\ntype-checked contract; its value is not, so changing it needs no check."
+      },
+      "RoutineModelId": {
+        "type": "string",
+        "description": "A nonblank model identifier. Runtime catalogs, not the scheduler, own availability."
+      },
+      "RoutineProgram": {
+        "type": "object",
+        "description": "What a routine does each time it runs.",
+        "required": ["steps"],
+        "properties": {
+          "dangerously_operate_as_user": {
+            "type": "boolean",
+            "description": "Code steps write as the owner, with no agent badge: their posts,\ncomments and emails appear written by the owner. Set only when the\nowner explicitly asked for the routine to act or send as them; by\ndefault code steps' writes are attributed to Macro's agent acting for\nthe owner. Agent (\"Ask AI\") steps keep their own agent attribution\neither way: an agent session speaking as a person is a different\nchange. A single agent task has no code steps, so it never applies."
+          },
+          "mcp_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentMcpServer"
+            },
+            "description": "Apps the routine requires, handed to its agent on top of the agent's\nown. The owner must have each one connected to save the routine and\nfor it to run."
+          },
+          "sdk": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SdkFingerprint",
+                "description": "The SDK its code steps were last type-checked against, recorded by\nthe service that checked them. A run on another SDK checks them again\nbefore running them."
+              }
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoutineStep"
+            },
+            "description": "Steps run in order. A failed step stops the run."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RoutineSnapshot": {
+        "type": "object",
+        "description": "A routine as someone else gets it: what a template and a marketplace\nlisting's version both store.",
+        "required": ["name", "description", "trigger", "task", "variables"],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/components/schemas/RoutineTask"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ActionTrigger"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVariable"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "RoutineStep": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CodeStep",
+                "description": "Run TypeScript against Macro's SDK, as the routine owner."
+              },
+              {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["code"]
+                  }
+                }
+              }
+            ],
+            "description": "Run TypeScript against Macro's SDK, as the routine owner."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentStep",
+                "description": "Hand the run to a model or agent with instructions."
+              },
+              {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["agent"]
+                  }
+                }
+              }
+            ],
+            "description": "Hand the run to a model or agent with instructions."
+          }
+        ],
+        "description": "One step of a routine."
+      },
+      "RoutineTask": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RoutineProgram",
+            "description": "Steps, run in order."
+          },
+          {
+            "$ref": "#/components/schemas/AgentTask",
+            "description": "A routine that is only an agent."
+          }
+        ],
+        "description": "A stored task's two forms, as the scheduler's API describes `task`:\n[`RoutineProgram::from_task`] reads them."
+      },
+      "RoutineTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["schedule", "timezone", "type"],
+            "properties": {
+              "schedule": {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["cron"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["filters", "type"],
+            "properties": {
+              "filters": {
+                "$ref": "#/components/schemas/EventFilters"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["events"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Fires once at `at`, or as soon as it is saved when `at` has passed.",
+            "required": ["at", "type"],
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["once"]
+              }
+            }
+          }
+        ],
+        "description": "An individual trigger in a routine's trigger list."
+      },
+      "RoutineTriggers": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/RoutineTrigger"
+        },
+        "description": "Bounded schedules and one combined set of event filters."
+      },
+      "RoutineUpdates": {
+        "type": "object",
+        "description": "What became of the installs a minor routine version reached.",
+        "required": ["updated", "detached", "failed"],
+        "properties": {
+          "detached": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Routines their person edited, now detached and left alone.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Routines that could not be updated this time.",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Routines updated to the new version.",
+            "minimum": 0
+          }
+        }
+      },
       "RunDocumentProgram": {
         "type": "object",
         "description": "Run one program of the build a page shows.",
@@ -8586,6 +9562,13 @@
             "description": "Named compute tier."
           }
         }
+      },
+      "Schedule": {
+        "type": "string"
+      },
+      "SdkFingerprint": {
+        "type": "string",
+        "description": "Identifies the SDK API code was type-checked against: its version and a\nhash of its declarations, e.g. `0.2.2+18cc1c19c35c`."
       },
       "SearchSuggestions": {
         "oneOf": [
@@ -8982,6 +9965,10 @@
           }
         }
       },
+      "StepId": {
+        "type": "string",
+        "description": "Names a step's output: a lowercase letter, then up to 31 lowercase\nletters, digits or underscores."
+      },
       "TaskSearchSuggestions": {
         "type": "object",
         "description": "Task facets match the shared search editor; assignee and creator are distinct.",
@@ -9047,6 +10034,72 @@
           }
         },
         "additionalProperties": false
+      },
+      "TemplateVariable": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A person mentioned in the instructions, by their user ID.",
+            "required": ["id", "label", "fill", "kind"],
+            "properties": {
+              "fill": {
+                "$ref": "#/components/schemas/VariableFill"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["user"]
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A document, channel or other item mentioned in the instructions.",
+            "required": ["id", "block_name", "label", "fill", "kind"],
+            "properties": {
+              "block_name": {
+                "type": "string",
+                "description": "The mention's block name, such as `channel` or `md`."
+              },
+              "fill": {
+                "$ref": "#/components/schemas/VariableFill"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["item"]
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The time zone of the routine's schedules.",
+            "required": ["timezone", "fill", "kind"],
+            "properties": {
+              "fill": {
+                "$ref": "#/components/schemas/VariableFill"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["time_zone"]
+              },
+              "timezone": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "A user-specific part of a shared routine."
       },
       "ToolActor": {
         "type": "string",
@@ -9372,6 +10425,11 @@
           }
         }
       },
+      "VariableFill": {
+        "type": "string",
+        "description": "How a variable is filled when someone activates the template.",
+        "enum": ["activator", "shared", "choice"]
+      },
       "Version": {
         "type": "object",
         "description": "A listing's version. An install follows minor versions by itself and\ntakes a major version only when its person asks.",
@@ -9497,7 +10555,7 @@
     },
     {
       "name": "marketplace",
-      "description": "Pages people publish for their team to install"
+      "description": "Pages and routines people publish for their team to install"
     }
   ]
 }

@@ -48,6 +48,7 @@ export const agentHarnessBacklog = [
   'getDocumentBuild',
   // The marketplace is a prototype: its routes may still change shape.
   'getInstalledListingBuild',
+  'getMarketplaceListingRoutine',
   'installMarketplaceListing',
   'listMarketplaceListings',
   'publishMarketplaceListing',

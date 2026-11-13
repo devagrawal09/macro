@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT v.major AS \"major!\", v.minor AS \"minor!\", v.html AS \"html!\"\n            FROM marketplace_install i\n            JOIN marketplace_listing l ON l.id = i.listing_id\n            CROSS JOIN LATERAL (\n                SELECT major, minor, html\n                FROM marketplace_listing_version\n                WHERE listing_id = i.listing_id AND major = i.major\n                ORDER BY minor DESC\n                LIMIT 1\n            ) v\n            WHERE i.listing_id = $1\n              AND i.user_id = $2\n              AND (l.team_id IS NULL OR l.team_id = $3)\n              AND l.kind = 'artifact'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "html!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "77d89b9c0cc23ff184180a4ed9b706d8f47f3e04eace11b91487a310b523ab06"
+}

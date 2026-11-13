@@ -10,9 +10,12 @@ use macro_user_id::user_id::MacroUserIdStr;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use scheduled_action::domain::templates::fill::RoutineFills;
+
 use crate::domain::models::{
-    AddedVersion, InstalledPage, Listing, ListingId, ListingKind, ListingScope, NewListing,
-    PublishedPage, Version, VersionBump,
+    AddedVersion, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine, Listing,
+    ListingContent, ListingId, ListingKind, ListingScope, NewListing, RoutineInstall,
+    RoutineVersion, TaskHash, Version, VersionBump,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -41,6 +44,9 @@ pub enum ListingRepoErr {
     /// A stored kind is not one this code knows.
     #[error("unknown listing kind stored: {0}")]
     UnknownKind(String),
+    /// A stored routine snapshot or fills don't read.
+    #[error("invalid routine stored for a listing: {0}")]
+    InvalidRoutine(#[from] serde_json::Error),
 }
 
 struct ListingRow {
@@ -48,7 +54,7 @@ struct ListingRow {
     kind: String,
     user_id: String,
     team_id: Option<Uuid>,
-    source_document_id: Uuid,
+    source_id: Uuid,
     title: String,
     description: String,
     removed_at: Option<DateTime<Utc>>,
@@ -57,6 +63,9 @@ struct ListingRow {
     latest_major: i32,
     latest_minor: i32,
     installed_major: Option<i32>,
+    installed_routine_id: Option<Uuid>,
+    detached: Option<bool>,
+    update_failed: Option<bool>,
     install_count: i64,
 }
 
@@ -78,7 +87,7 @@ impl TryFrom<ListingRow> for Listing {
             kind,
             scope,
             publisher,
-            source_document_id: row.source_document_id,
+            source_id: row.source_id,
             title: row.title,
             description: row.description,
             latest_version: Version {
@@ -86,6 +95,11 @@ impl TryFrom<ListingRow> for Listing {
                 minor: row.latest_minor,
             },
             installed_major: row.installed_major,
+            installed_routine: row.installed_routine_id.map(|routine_id| InstalledRoutine {
+                routine_id,
+                detached: row.detached.unwrap_or(false),
+                update_failed: row.update_failed.unwrap_or(false),
+            }),
             install_count: row.install_count,
             removed: row.removed_at.is_some(),
             created_at: row.created_at,
@@ -104,15 +118,15 @@ impl ListingRepo for PgListingRepo {
         let inserted = sqlx::query!(
             r#"
             INSERT INTO marketplace_listing
-                (id, kind, user_id, team_id, source_document_id, title, description)
+                (id, kind, user_id, team_id, source_id, title, description)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (source_document_id) WHERE removed_at IS NULL DO NOTHING
+            ON CONFLICT (kind, source_id) WHERE removed_at IS NULL DO NOTHING
             "#,
             listing.id.as_uuid(),
-            listing.kind.to_string(),
+            listing.content.kind().to_string(),
             listing.publisher.as_ref(),
             listing.team_id,
-            listing.source_document_id,
+            listing.source_id,
             listing.text.title,
             listing.text.description,
         )
@@ -122,18 +136,12 @@ impl ListingRepo for PgListingRepo {
             return Ok(false);
         }
 
-        sqlx::query!(
-            r#"
-            INSERT INTO marketplace_listing_version (listing_id, major, minor, source_hash, html)
-            VALUES ($1, $2, $3, $4, $5)
-            "#,
-            listing.id.as_uuid(),
-            Version::FIRST.major,
-            Version::FIRST.minor,
-            listing.page.source_hash.as_ref(),
-            listing.page.html,
+        insert_version(
+            &mut transaction,
+            listing.id,
+            Version::FIRST,
+            &listing.content,
         )
-        .execute(&mut *transaction)
         .await?;
 
         transaction.commit().await?;
@@ -155,7 +163,7 @@ impl ListingRepo for PgListingRepo {
                 l.kind,
                 l.user_id,
                 l.team_id,
-                l.source_document_id,
+                l.source_id,
                 l.title,
                 l.description,
                 l.removed_at,
@@ -164,6 +172,9 @@ impl ListingRepo for PgListingRepo {
                 v.major AS "latest_major!",
                 v.minor AS "latest_minor!",
                 i.major AS "installed_major?",
+                i.routine_id AS "installed_routine_id?",
+                (i.detached_at IS NOT NULL) AS "detached?",
+                (i.update_failed_at IS NOT NULL) AS "update_failed?",
                 (
                     SELECT count(*)
                     FROM marketplace_install c
@@ -199,7 +210,7 @@ impl ListingRepo for PgListingRepo {
         &self,
         id: ListingId,
         bump: VersionBump,
-        page: &PublishedPage,
+        content: &ListingContent,
     ) -> Result<AddedVersion, Self::Err> {
         let mut transaction = self.pool.begin().await?;
 
@@ -234,7 +245,7 @@ impl ListingRepo for PgListingRepo {
         let Some(newest) = newest else {
             return Ok(AddedVersion::Missing);
         };
-        if newest.source_hash == page.source_hash.as_ref() {
+        if newest.source_hash == content.source_hash().as_ref() {
             return Ok(AddedVersion::Unchanged);
         }
 
@@ -243,19 +254,7 @@ impl ListingRepo for PgListingRepo {
             minor: newest.minor,
         }
         .next(bump);
-        sqlx::query!(
-            r#"
-            INSERT INTO marketplace_listing_version (listing_id, major, minor, source_hash, html)
-            VALUES ($1, $2, $3, $4, $5)
-            "#,
-            id.as_uuid(),
-            next.major,
-            next.minor,
-            page.source_hash.as_ref(),
-            page.html,
-        )
-        .execute(&mut *transaction)
-        .await?;
+        insert_version(&mut transaction, id, next, content).await?;
         sqlx::query!(
             r#"UPDATE marketplace_listing SET updated_at = now() WHERE id = $1"#,
             id.as_uuid(),
@@ -265,6 +264,219 @@ impl ListingRepo for PgListingRepo {
 
         transaction.commit().await?;
         Ok(AddedVersion::Added(next))
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn routine_version(
+        &self,
+        id: ListingId,
+        major: Option<i32>,
+    ) -> Result<Option<RoutineVersion>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT major, minor, routine AS "routine!"
+            FROM marketplace_listing_version
+            WHERE listing_id = $1
+              AND kind = 'routine'
+              AND ($2::int IS NULL OR major = $2)
+            ORDER BY major DESC, minor DESC
+            LIMIT 1
+            "#,
+            id.as_uuid(),
+            major,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(RoutineVersion {
+                version: Version {
+                    major: row.major,
+                    minor: row.minor,
+                },
+                snapshot: serde_json::from_value(row.routine)?,
+            })
+        })
+        .transpose()
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+    ) -> Result<Option<RoutineInstall>, Self::Err> {
+        let row = sqlx::query!(
+            r#"
+            SELECT
+                major,
+                routine_minor AS "minor!",
+                routine_id AS "routine_id!",
+                routine_fills AS "fills!",
+                routine_task_hash AS "task_hash!"
+            FROM marketplace_install
+            WHERE listing_id = $1 AND user_id = $2 AND routine_id IS NOT NULL
+            "#,
+            id.as_uuid(),
+            user.as_ref(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(RoutineInstall {
+                version: Version {
+                    major: row.major,
+                    minor: row.minor,
+                },
+                routine_id: row.routine_id,
+                fills: serde_json::from_value(row.fills)?,
+                task_hash: TaskHash(row.task_hash),
+            })
+        })
+        .transpose()
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn save_routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        install: &RoutineInstall,
+    ) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO marketplace_install
+                (listing_id, user_id, major, routine_id, routine_minor, routine_fills,
+                 routine_task_hash)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (listing_id, user_id) DO UPDATE
+            SET major = EXCLUDED.major,
+                routine_id = EXCLUDED.routine_id,
+                routine_minor = EXCLUDED.routine_minor,
+                routine_fills = EXCLUDED.routine_fills,
+                routine_task_hash = EXCLUDED.routine_task_hash,
+                detached_at = NULL,
+                update_failed_at = NULL,
+                updated_at = now()
+            "#,
+            id.as_uuid(),
+            user.as_ref(),
+            install.version.major,
+            install.routine_id,
+            install.version.minor,
+            serde_json::to_value(&install.fills)?,
+            install.task_hash.0,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn installs_behind(
+        &self,
+        id: ListingId,
+        version: Version,
+    ) -> Result<Vec<FollowingInstall>, Self::Err> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                user_id,
+                major,
+                routine_minor AS "minor!",
+                routine_id AS "routine_id!",
+                routine_fills AS "fills!",
+                routine_task_hash AS "task_hash!"
+            FROM marketplace_install
+            WHERE listing_id = $1
+              AND major = $2
+              AND routine_minor < $3
+              AND routine_id IS NOT NULL
+              AND detached_at IS NULL
+            "#,
+            id.as_uuid(),
+            version.major,
+            version.minor,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let fills: RoutineFills = serde_json::from_value(row.fills)?;
+                Ok(FollowingInstall {
+                    user: MacroUserIdStr::try_from(row.user_id)
+                        .map_err(|_| ListingRepoErr::InvalidUserId)?,
+                    install: RoutineInstall {
+                        version: Version {
+                            major: row.major,
+                            minor: row.minor,
+                        },
+                        routine_id: row.routine_id,
+                        fills,
+                        task_hash: TaskHash(row.task_hash),
+                    },
+                })
+            })
+            .collect()
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn record_update(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        update: &InstallUpdate,
+    ) -> Result<(), Self::Err> {
+        match update {
+            InstallUpdate::Updated { version, task_hash } => {
+                sqlx::query!(
+                    r#"
+                    UPDATE marketplace_install
+                    SET routine_minor = $3,
+                        routine_task_hash = $4,
+                        update_failed_at = NULL,
+                        updated_at = now()
+                    WHERE listing_id = $1 AND user_id = $2 AND major = $5
+                    "#,
+                    id.as_uuid(),
+                    user.as_ref(),
+                    version.minor,
+                    task_hash.0,
+                    version.major,
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+            InstallUpdate::Detached => {
+                sqlx::query!(
+                    r#"
+                    UPDATE marketplace_install
+                    SET detached_at = now(), update_failed_at = NULL, updated_at = now()
+                    WHERE listing_id = $1 AND user_id = $2 AND detached_at IS NULL
+                    "#,
+                    id.as_uuid(),
+                    user.as_ref(),
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+            InstallUpdate::Failed => {
+                sqlx::query!(
+                    r#"
+                    UPDATE marketplace_install
+                    SET update_failed_at = now(), updated_at = now()
+                    WHERE listing_id = $1 AND user_id = $2
+                    "#,
+                    id.as_uuid(),
+                    user.as_ref(),
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+        Ok(())
     }
 
     #[tracing::instrument(err, skip_all)]
@@ -340,6 +552,7 @@ impl ListingRepo for PgListingRepo {
             WHERE i.listing_id = $1
               AND i.user_id = $2
               AND (l.team_id IS NULL OR l.team_id = $3)
+              AND l.kind = 'artifact'
             "#,
             id.as_uuid(),
             user.as_ref(),
@@ -356,4 +569,37 @@ impl ListingRepo for PgListingRepo {
             html: row.html,
         }))
     }
+}
+
+/// Store one version of a listing, its content in the column for its kind.
+async fn insert_version(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: ListingId,
+    version: Version,
+    content: &ListingContent,
+) -> Result<(), ListingRepoErr> {
+    let (html, routine) = match content {
+        ListingContent::Page(page) => (Some(page.html.as_str()), None),
+        ListingContent::Routine(routine) => {
+            (None, Some(serde_json::to_value(&routine.snapshot)?))
+        }
+    };
+
+    sqlx::query!(
+        r#"
+        INSERT INTO marketplace_listing_version
+            (listing_id, kind, major, minor, source_hash, html, routine)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+        id.as_uuid(),
+        content.kind().to_string(),
+        version.major,
+        version.minor,
+        content.source_hash().as_ref(),
+        html,
+        routine,
+    )
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

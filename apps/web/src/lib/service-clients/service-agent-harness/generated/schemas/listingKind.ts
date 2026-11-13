@@ -13,4 +13,5 @@ export type ListingKind = (typeof ListingKind)[keyof typeof ListingKind];
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export const ListingKind = {
   artifact: 'artifact',
+  routine: 'routine',
 } as const;

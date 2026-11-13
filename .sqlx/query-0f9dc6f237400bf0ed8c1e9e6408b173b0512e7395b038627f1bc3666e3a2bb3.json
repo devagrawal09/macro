@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT major, minor, routine AS \"routine!\"\n            FROM marketplace_listing_version\n            WHERE listing_id = $1\n              AND kind = 'routine'\n              AND ($2::int IS NULL OR major = $2)\n            ORDER BY major DESC, minor DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "routine!",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0f9dc6f237400bf0ed8c1e9e6408b173b0512e7395b038627f1bc3666e3a2bb3"
+}

@@ -7,12 +7,17 @@ use entity_access::domain::models::{
     EntityAccessReceipt, MemberTeamRole, OwnerAccessLevel, ViewAccessLevel,
 };
 use macro_user_id::user_id::MacroUserIdStr;
+use scheduled_action::domain::templates::{
+    RoutineSnapshot, TemplateVariable, fill::FilledRoutine,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingText, MarketplaceError,
-    NewListing, PublishedPage, VersionBump,
+    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
+    Listing, ListingContent, ListingId, ListingText, MarketplaceError, NewListing, PublishSource,
+    PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash,
+    Version, VersionBump,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -20,8 +25,8 @@ pub trait ListingRepo: Send + Sync + 'static {
     /// The error type returned by repository operations.
     type Err: std::error::Error + Send + Sync + 'static;
 
-    /// Store a listing with its first version. `false` when its document
-    /// already has a listing, and nothing is stored.
+    /// Store a listing with its first version. `false` when its source
+    /// already has a listing of its kind, and nothing is stored.
     fn create_listing(
         &self,
         listing: NewListing,
@@ -37,14 +42,53 @@ pub trait ListingRepo: Send + Sync + 'static {
         only: Option<ListingId>,
     ) -> impl Future<Output = Result<Vec<Listing>, Self::Err>> + Send;
 
-    /// Store `page` as the listing's next version, unless its newest version
-    /// already holds the same source.
+    /// Store `content` as the listing's next version, unless its newest
+    /// version already holds the same content.
     fn add_version(
         &self,
         id: ListingId,
         bump: VersionBump,
-        page: &PublishedPage,
+        content: &ListingContent,
     ) -> impl Future<Output = Result<AddedVersion, Self::Err>> + Send;
+
+    /// A routine listing's newest version, or the newest of `major`.
+    fn routine_version(
+        &self,
+        id: ListingId,
+        major: Option<i32>,
+    ) -> impl Future<Output = Result<Option<RoutineVersion>, Self::Err>> + Send;
+
+    /// `user`'s routine install, followed or detached.
+    fn routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+    ) -> impl Future<Output = Result<Option<RoutineInstall>, Self::Err>> + Send;
+
+    /// Install the routine listing for `user`, or replace their install,
+    /// following updates again.
+    fn save_routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        install: &RoutineInstall,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// Routine installs on `version`'s major, older than it, whose routine
+    /// still follows the listing.
+    fn installs_behind(
+        &self,
+        id: ListingId,
+        version: Version,
+    ) -> impl Future<Output = Result<Vec<FollowingInstall>, Self::Err>> + Send;
+
+    /// Record what became of updating `user`'s install.
+    fn record_update(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        update: &InstallUpdate,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Unlist a listing. Repeating it changes nothing.
     fn remove_listing(&self, id: ListingId) -> impl Future<Output = Result<(), Self::Err>> + Send;
@@ -98,6 +142,37 @@ pub trait Pages: Send + Sync + 'static {
     ) -> impl Future<Output = Result<UserExecutionReceipt, DocumentProgramError>> + Send;
 }
 
+/// Outbound port for routines: reading one to publish, and saving the copies
+/// installs make, each owned by the person who installed it.
+pub trait Routines: Send + Sync + 'static {
+    /// The routine the receipt names as its owner shares it. Only a routine
+    /// a person owns can be published.
+    fn snapshot(
+        &self,
+        routine: &EntityAccessReceipt<OwnerAccessLevel>,
+        description: &str,
+        variables: Vec<TemplateVariable>,
+    ) -> impl Future<Output = Result<RoutineSnapshot, MarketplaceError>> + Send;
+
+    /// Create `user`'s own routine.
+    fn create(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        routine: &FilledRoutine,
+        enabled: bool,
+    ) -> impl Future<Output = Result<RoutineCopy, MarketplaceError>> + Send;
+
+    /// Replace `user`'s routine's name, description, trigger and task. With
+    /// `unedited`, only while its task still hashes to it.
+    fn update(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        routine_id: Uuid,
+        routine: &FilledRoutine,
+        unedited: Option<&TaskHash>,
+    ) -> impl Future<Output = Result<RoutineUpdate, MarketplaceError>> + Send;
+}
+
 /// Outbound port for the marketplace's per-user rollout: a gate, never an
 /// authorization.
 pub trait Rollout: Send + Sync + 'static {
@@ -117,25 +192,35 @@ pub trait MarketplaceService: Send + Sync + 'static {
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
     ) -> impl Future<Output = Result<Vec<Listing>, MarketplaceError>> + Send;
 
-    /// Publish a document the caller owns to their team, as version 1.0.
+    /// Publish a document or routine the caller owns to their team, as
+    /// version 1.0.
     fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
-        document: EntityAccessReceipt<OwnerAccessLevel>,
+        source: PublishSource,
         text: ListingText,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
-    /// Publish the listing's document as its next version. Only its
-    /// publisher may.
+    /// Publish the listing's source as its next version. Only its publisher
+    /// may. A minor routine version updates the routines installed from it.
     fn publish_version(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
-        document: EntityAccessReceipt<OwnerAccessLevel>,
+        source: PublishSource,
         bump: VersionBump,
-    ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
+    ) -> impl Future<Output = Result<PublishedVersion, MarketplaceError>> + Send;
+
+    /// A routine listing's newest version, for someone deciding to install
+    /// it or take its newest major.
+    fn routine_version(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<RoutineVersion, MarketplaceError>> + Send;
 
     /// Unlist a listing. Its publisher or an admin of its team may.
     fn unlist(
@@ -146,15 +231,17 @@ pub trait MarketplaceService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), MarketplaceError>> + Send;
 
     /// Put the caller on the listing's newest major version: installs it, or
-    /// takes a major version they were waiting on.
+    /// takes a major version they were waiting on. A routine is filled in
+    /// as the caller's own from `request` and the fills stored before.
     fn install(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
+        request: InstallRequest,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
-    /// Remove the caller's install.
+    /// Remove the caller's install. A routine it created stays theirs.
     fn uninstall(
         &self,
         user: &MacroUserIdStr<'static>,

@@ -4,15 +4,16 @@
  * agent_harness_service
  * OpenAPI spec version: 0.1.0
  */
+import type { ListingSource } from './listingSource';
 
 /**
- * Publish a page to the caller's team.
+ * Publish a page or routine to the caller's team.
  */
 export interface PublishListing {
   /** What it does, in a few lines. */
   description?: string;
-  /** A stored HTML document the caller owns. */
-  documentId: string;
+  /** What it is published from. */
+  source: ListingSource;
   /** The listing's name. */
   title: string;
 }
