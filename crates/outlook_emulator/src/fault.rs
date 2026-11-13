@@ -268,9 +268,7 @@ impl FaultError {
                 "ServiceUnavailable",
                 "The service is temporarily unavailable. Please retry after some time.",
             ),
-            Self::GatewayTimeout | Self::AnswerLost => {
-                GraphError::server(504, "UnknownError", "")
-            }
+            Self::GatewayTimeout | Self::AnswerLost => GraphError::server(504, "UnknownError", ""),
             Self::Unauthorized => {
                 GraphError::unauthenticated("Lifetime validation failed, the token is expired.")
             }
