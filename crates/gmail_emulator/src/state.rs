@@ -568,6 +568,11 @@ impl State {
             FaultError::PreconditionFailed => {
                 ApiError::calendar(412, "conditionNotMet", "Precondition check failed.")
             }
+            FaultError::AnswerLost => ApiError::backend(
+                504,
+                "DEADLINE_EXCEEDED",
+                "Deadline expired before operation could complete.",
+            ),
         })
     }
 }

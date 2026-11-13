@@ -247,6 +247,9 @@ pub enum FaultError {
     InvalidOperation,
     /// 409 `Conflict`.
     Conflict,
+    /// The request takes effect, then 504 `UnknownError` is answered in
+    /// place of its result, as when Graph's answer is lost on the way back.
+    AnswerLost,
 }
 
 impl FaultError {
@@ -265,7 +268,9 @@ impl FaultError {
                 "ServiceUnavailable",
                 "The service is temporarily unavailable. Please retry after some time.",
             ),
-            Self::GatewayTimeout => GraphError::server(504, "UnknownError", ""),
+            Self::GatewayTimeout | Self::AnswerLost => {
+                GraphError::server(504, "UnknownError", "")
+            }
             Self::Unauthorized => {
                 GraphError::unauthenticated("Lifetime validation failed, the token is expired.")
             }

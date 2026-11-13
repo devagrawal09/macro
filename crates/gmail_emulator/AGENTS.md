@@ -114,7 +114,9 @@ a local stack, without Google accounts.
   per scope to grant; the `Location` header carries the code.
 - New mail: `POST /_emulator/mailboxes/{email}/messages` (`deliver`).
   Provider failure: `POST /_emulator/faults` (`inject_fault`) with a `route`
-  such as `messages.get` and an `error` such as `rate_limit`. Time:
+  such as `messages.get` and an `error` such as `rate_limit`; `answer_lost`
+  lets the request take effect and answers 504 in place of its result, as
+  when Google's answer is lost on the way back. Time:
   `POST /_emulator/clock/advance`. What it received: `GET /_emulator/requests`.
 - Add a Gmail endpoint: a `Route` variant with its quota units and its
   `gmail_scopes` in `src/fault.rs` → a handler through `gate::mailbox_request` in

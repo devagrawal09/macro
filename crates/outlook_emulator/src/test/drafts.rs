@@ -266,3 +266,28 @@ async fn a_large_attachment_uploads_in_ranges_and_resumes_from_the_servers_offse
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn a_send_whose_answer_is_lost_is_still_sent() {
+    let (emulator, api) = start(TWO_MAILBOXES).await;
+    let ada = token(&emulator, ADA);
+    let draft = api
+        .create_draft(&ada, &request("Plan", "<p>Friday</p>"))
+        .await
+        .unwrap();
+    emulator.inject_fault(Fault {
+        route: Some(Route::MessagesSend),
+        error: Some(FaultError::AnswerLost),
+        times: Some(1),
+        ..Fault::default()
+    });
+
+    let outcome = api.submit_draft(&ada, &draft.id).await.unwrap();
+
+    assert!(matches!(outcome, SubmissionOutcome::Unknown));
+    let sent = emulator.messages(ADA).unwrap();
+    let sent = sent.iter().find(|m| m.subject == "Plan").unwrap();
+    assert_eq!(sent.folder, "Sent Items");
+    let received = emulator.messages(BOB).unwrap();
+    assert_eq!(received.iter().filter(|m| m.subject == "Plan").count(), 1);
+}
