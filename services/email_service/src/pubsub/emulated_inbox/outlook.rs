@@ -13,6 +13,7 @@ use outlook_emulator::{Fault, FaultError, NewMessage, OutlookEmulator, Route, Se
 use sqlx::PgPool;
 use uuid::Uuid;
 
+mod changes;
 #[cfg(test)]
 mod specs;
 
