@@ -69,22 +69,25 @@ export function InstalledPageView(props: {
 
   return (
     <div class="flex size-full min-h-0 min-w-0 flex-col">
-      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-edge-muted px-3 py-2">
+      {/* One row at any width: the title gives way, and on a phone Back
+          keeps only its arrow. */}
+      <div class="flex shrink-0 items-center gap-2 border-b border-edge-muted px-3 py-2 mobile:gap-1.5 mobile:px-2">
         <Button
           variant="ghost"
           size="sm"
+          class="touch:min-h-11 touch:min-w-11"
           aria-label={t('marketplace.backToMarketplace')}
           onClick={() => props.onBack()}
         >
           <ArrowLeftIcon class="size-4" />
-          {t('common.back')}
+          <span class="mobile:hidden">{t('common.back')}</span>
         </Button>
-        <h2 class="min-w-0 truncate text-sm font-semibold text-ink">
+        <h2 class="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
           {props.listing.title}
         </h2>
         <Show when={installed()}>
           {(current) => (
-            <Badge variant="outline" size="xs">
+            <Badge variant="outline" size="xs" class="shrink-0">
               {versionLabel(current().version)}
             </Badge>
           )}
@@ -93,7 +96,7 @@ export function InstalledPageView(props: {
           <Button
             variant="ghost"
             size="sm"
-            class="ml-auto"
+            class="touch:min-h-11"
             disabled={props.busy}
             onClick={() => props.onUpdate()}
           >

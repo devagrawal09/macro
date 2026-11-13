@@ -1,3 +1,4 @@
+import { useMarketplaceFlag } from '@app/features/marketplace/use-marketplace-flag';
 import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { t } from '@app/lib/i18n';
 import settingsNavMessages from '@app/lib/i18n/locales/en/settings-nav';
@@ -17,6 +18,7 @@ import HardDrivesIcon from '@icon/system/regular/hard-drives.svg';
 import KeyIcon from '@icon/system/regular/key.svg';
 import KeyboardIcon from '@icon/system/regular/keyboard.svg';
 import PlugIcon from '@icon/system/regular/plug.svg';
+import MarketplaceIcon from '@icon/system/regular/puzzle-piece.svg';
 import BotIcon from '@icon/system/regular/robot.svg';
 import AgentIcon from '@icon/system/regular/sparkle.svg';
 import SwatchesIcon from '@icon/system/regular/swatches.svg';
@@ -166,6 +168,11 @@ export const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = [
         tab: 'Artifacts',
         icon: ArtifactIcon,
         keywords: ['html', 'pages', 'published', 'agent'],
+      }),
+      tabItem('tabMarketplace', {
+        tab: 'Marketplace',
+        icon: MarketplaceIcon,
+        keywords: ['install', 'publish', 'pages', 'html', 'team'],
       }),
       tabItem('tabCrm', {
         tab: 'CRM',
@@ -322,6 +329,7 @@ const SETTINGS_TAB_SLUGS: Record<SettingsTab, string> = {
   Agents: 'agents',
   Routines: 'routines',
   Artifacts: 'artifacts',
+  Marketplace: 'marketplace',
   Harness: 'runtimes',
   Bots: 'bots',
   Team: 'team',
@@ -369,6 +377,7 @@ export const useSettingsTabAvailable = () => {
   const botManagementFlag = useFeatureFlag(botManagement);
   const chatV3AgentsFlag = useFeatureFlag(enableChatV3Agents);
   const crmFlag = useFeatureFlag(enableCrm);
+  const marketplaceFlag = useMarketplaceFlag();
   const desktopAppFlag = useFeatureFlag(desktopApp);
   const hasAdminPanel = useHasPermission(PERMISSION_IDS.WRITE_ADMIN_PANEL);
 
@@ -424,6 +433,13 @@ export const useSettingsTabAvailable = () => {
       case 'Routines':
       case 'Artifacts':
         return chatV3AgentsFlag().enabled && isTouchDevice();
+      // The marketplace joins them there, behind its own rollout.
+      case 'Marketplace':
+        return (
+          chatV3AgentsFlag().enabled &&
+          marketplaceFlag().enabled &&
+          isTouchDevice()
+        );
       case 'Bots':
         return botManagementFlag().enabled;
       case 'Mobile':

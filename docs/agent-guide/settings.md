@@ -324,7 +324,9 @@ Left nav (feature and platform gates still apply):
   **Team · Members**. The team Slack export import and the GitHub App live in
   Integrations; `/app/settings/team-connections` opens Integrations.
 - **Blocks**: Email, Calendar, Agents, CRM. On touch devices, where the Agents
-  sidebar is hidden, **Routines** (`/app/settings/routines`) follows Agents.
+  sidebar is hidden, **Routines** (`/app/settings/routines`), **Artifacts**
+  (`/app/settings/artifacts`) and, within the marketplace rollout,
+  **Marketplace** (`/app/settings/marketplace`) follow Agents.
 - **Personal**: Account, Appearance, Notifications, Keyboard shortcuts, Usage, Billing, Desktop App, Mobile App.
 - **Workspace**: Tags, Integrations (email, accounts, team Slack export, AI apps and agent tools).
 - **Developer**: Machines, MCP server, API Keys, Account Managers, Bots.

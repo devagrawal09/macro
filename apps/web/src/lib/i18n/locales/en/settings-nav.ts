@@ -15,6 +15,7 @@ export default {
   tabAgents: 'Agents',
   tabRoutines: 'Routines',
   tabArtifacts: 'Artifacts',
+  tabMarketplace: 'Marketplace',
   tabCrm: 'CRM',
   tabAccount: 'Account',
   tabAppearance: 'Appearance',

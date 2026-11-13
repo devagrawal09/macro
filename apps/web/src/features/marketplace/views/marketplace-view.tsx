@@ -5,6 +5,7 @@ import {
   usePending,
 } from '@app/observability/flow';
 import { toast } from '@core/component/Toast/Toast';
+import { isTouchDevice } from '@core/mobile/isTouchDevice';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
 import { type Span, Telemetry } from '@macro-inc/observability';
@@ -160,6 +161,7 @@ export function MarketplaceView(props: {
           <div class="flex shrink-0 items-center px-4 pt-3 mobile:px-3">
             <Tabs
               aria-label={t('marketplace.tabsLabel')}
+              size={isTouchDevice() ? 'lg' : undefined}
               options={[
                 { value: 'browse' as const, label: t('marketplace.browse') },
                 {

@@ -265,7 +265,7 @@ the header back button returns to the previous screen, or Agents for a direct li
 Portrait and landscape touch layouts have no conversation side panel. **Changes** opens a full-width,
 unified diff with **Back to conversation**; returning preserves the unsent draft.
 
-The mobile conversation list omits the desktop **Agents**, **Routines**, **Artifacts** and **Connections** controls; Routines and Artifacts are under Settings on touch. Use the Agents composer or global create menu to start
+The mobile conversation list omits the desktop **Agents**, **Routines**, **Artifacts**, **Marketplace** and **Connections** controls; Routines, Artifacts and Marketplace are under Settings on touch. Use the Agents composer or global create menu to start
 a conversation. Returning to the list and reopening the composer preserves the
 draft, attachments, agent, model, repository, and branch. Tap the
 agent/model control once to open a bottom sheet with its search field focused,
@@ -509,7 +509,13 @@ the shimmer.
   publish, open an HTML page you own and choose **Publish to marketplace…**
   from its file menu (see
   [Program blocks in HTML previews](documents.md#program-blocks-in-html-previews)).
-  The touch Settings sheet has no Marketplace entry yet.
+  On touch, where the sidebar's tool links are hidden, the same page is
+  **Settings → Marketplace** (on phones **More views → Settings →
+  Marketplace**), after Artifacts and behind the same two flags. It keeps the
+  viewer in settings: **Open** shows the installed page in place, with
+  **Back** (just its arrow on a phone) returning to the lists. On touch the
+  tabs, card buttons, **More actions** (which opens by tap) and its rows are
+  44px.
 - Ask the agent to connect an MCP server by URL (for example "connect the MCP
   server at https://mcp.example.com/mcp"). It calls **ConnectMcpServer**, which
   adds a public `https` server to Connections and renders a **Connected MCP

@@ -72,6 +72,7 @@ export function ListingCard(props: {
               <Button
                 variant="primary"
                 size="sm"
+                class="touch:min-h-11"
                 disabled={props.busy}
                 onClick={() => props.onInstall()}
               >
@@ -83,6 +84,7 @@ export function ListingCard(props: {
               <Button
                 variant="ghost"
                 size="sm"
+                class="touch:min-h-11"
                 disabled={props.busy}
                 onClick={() => props.onUpdate()}
               >
@@ -94,6 +96,7 @@ export function ListingCard(props: {
             <Button
               variant="secondary"
               size="sm"
+              class="touch:min-h-11"
               onClick={() => props.onOpen()}
             >
               {t('marketplace.open')}
@@ -104,6 +107,7 @@ export function ListingCard(props: {
               <Dropdown.Trigger
                 variant="ghost"
                 size="icon-sm"
+                class="touch:min-h-11 touch:min-w-11"
                 disabled={props.busy}
                 aria-label={t('marketplace.moreActions', {
                   title: props.listing.title,
@@ -114,13 +118,16 @@ export function ListingCard(props: {
               <Dropdown.Content class="min-w-36 max-w-64">
                 <Dropdown.Group>
                   <Show when={installed()}>
-                    <Dropdown.Item onSelect={() => props.onUninstall()}>
+                    <Dropdown.Item
+                      class="touch:min-h-11"
+                      onSelect={() => props.onUninstall()}
+                    >
                       {t('marketplace.uninstall')}
                     </Dropdown.Item>
                   </Show>
                   <Show when={unlistable()}>
                     <Dropdown.Item
-                      class="text-failure-ink"
+                      class="text-failure-ink touch:min-h-11"
                       onSelect={() => props.onUnlist()}
                     >
                       {t('marketplace.unlist')}

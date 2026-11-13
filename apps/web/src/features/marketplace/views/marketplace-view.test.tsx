@@ -5,13 +5,17 @@ import {
   screen,
   within,
 } from '@solidjs/testing-library';
+import userEvent from '@testing-library/user-event';
 import { createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MarketplaceSource } from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
 import { MarketplaceView } from './marketplace-view';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const listing = (overrides: Partial<Listing>): Listing => ({
   id: 'listing',
@@ -113,6 +117,28 @@ describe('Marketplace', () => {
       within(behind).getByRole('button', { name: 'Update to v2' })
     );
     expect(source.install).toHaveBeenCalledWith('dashboard', expect.anything());
+  });
+
+  it('opens a card’s More actions menu with a tap', async () => {
+    // jsdom has no scrollTo, which opening the menu reaches.
+    vi.stubGlobal('scrollTo', vi.fn());
+    const source = fakeSource(() => [
+      listing({ id: 'dashboard', installedMajor: 1 }),
+    ]);
+    renderMarketplace(source);
+
+    const trigger = screen.getByRole('button', {
+      name: 'More actions for Launch dashboard',
+    });
+    await userEvent.pointer({ keys: '[TouchA]', target: trigger });
+
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Uninstall' })
+    );
+    expect(source.uninstall).toHaveBeenCalledWith(
+      'dashboard',
+      expect.anything()
+    );
   });
 
   it('lists only installed pages under Installed', () => {

@@ -1,3 +1,4 @@
+import { SettingsPage } from '@app/features/settings/primitives';
 import { t } from '@app/lib/i18n';
 import { useUserId } from '@core/context/user';
 import { idToDisplayName } from '@core/user';
@@ -25,6 +26,22 @@ function Marketplace() {
       isTeamAdmin={isTeamAdmin}
       publisherName={idToDisplayName}
     />
+  );
+}
+
+/**
+ * Settings → Marketplace: the touch entry to the page the Agents sidebar
+ * links on desktop. The tab shows only within the marketplace's rollout, and
+ * an installed page opens in place, so nothing here leaves settings.
+ */
+export function MarketplaceSettings() {
+  return (
+    <SettingsPage
+      title={t('settingsNav.tabMarketplace')}
+      bodyClass="[--mobile-content-inset-top:0px]"
+    >
+      <Marketplace />
+    </SettingsPage>
   );
 }
 
