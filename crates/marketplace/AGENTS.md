@@ -43,7 +43,10 @@ minor versions update until they edit it.
 
 ## Checks
 
-- `cargo test -p marketplace` (`SQLX_OFFLINE` unset).
+- `cargo test -p marketplace` (`SQLX_OFFLINE` unset). The
+  `scheduled_routines` tests run the adapter over the real scheduler service
+  and Postgres, proving an install's task hash survives storage and a no-op
+  update.
 
 ## Gotchas
 
@@ -71,8 +74,10 @@ minor versions update until they edit it.
   request awaits (dropping the request can't leave a routine updated and its
   install unrecorded, which would read as an edit). A routine whose task no
   longer hashes alike was edited: the install is detached (`detached_at`) and
-  the routine left alone; a deleted one detaches too. A failed update sets
-  `update_failed_at`, is logged, and fails nothing else. Nothing retries it
+  the routine left alone. A failed update sets `update_failed_at`, is logged,
+  and fails nothing else; a routine that can't be found (deleted, or a
+  passing access error) is such a failure, never a detach, so a deleted one
+  keeps failing until its person uninstalls or installs again. Nothing retries it
   on a timer: the next minor version retries every install still behind,
   and so does the person taking the listing again.
 - The update goes through `ScheduledActionService::update_action` with an

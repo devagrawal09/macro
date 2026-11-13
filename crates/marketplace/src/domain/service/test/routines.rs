@@ -365,6 +365,37 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
 }
 
 #[tokio::test]
+async fn a_deleted_routine_records_a_failure_and_stays_attached() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+    routines.delete(bens);
+
+    let published = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    let for_ben = service
+        .listings(&user(BEN), Some(&member(BEN, ACME, TeamRole::Member)))
+        .await
+        .expect("listings load");
+
+    assert_eq!(published.updates.failed, 1);
+    assert_eq!(published.updates.detached, 0);
+    assert!(
+        for_ben[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| { routine.update_failed && !routine.detached })
+    );
+}
+
+#[tokio::test]
 async fn a_major_version_asks_for_new_fills_before_it_updates() {
     let (service, _, routines) = marketplace_with_routines();
     let listing = published_digest(&service, &routines).await;

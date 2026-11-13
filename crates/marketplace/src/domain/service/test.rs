@@ -474,6 +474,11 @@ impl FakeRoutines {
             .task = task;
     }
 
+    /// The person deletes their routine.
+    fn delete(&self, id: Uuid) {
+        self.saved.lock().unwrap().remove(&id);
+    }
+
     fn fail(&self, id: Uuid) {
         self.failing.lock().unwrap().push(id);
     }

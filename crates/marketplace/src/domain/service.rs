@@ -361,9 +361,20 @@ async fn update_install<Listings: ListingRepo, Ro: Routines>(
         Err(missing) => Err(MarketplaceError::MissingFills(missing.0)),
     };
 
+    // Only an edit detaches. A routine that can't be found is a failure, not
+    // a decision of its person's: it may be a passing access error, and a
+    // routine deleted for good keeps failing until its person uninstalls or
+    // installs again, which makes a new one.
     let update = match saved {
         Ok(RoutineUpdate::Updated(task_hash)) => InstallUpdate::Updated { version, task_hash },
-        Ok(RoutineUpdate::Edited | RoutineUpdate::Gone) => InstallUpdate::Detached,
+        Ok(RoutineUpdate::Edited) => InstallUpdate::Detached,
+        Ok(RoutineUpdate::Gone) => {
+            tracing::warn!(
+                routine_id = %install.routine_id,
+                "an installed routine to update was not found"
+            );
+            InstallUpdate::Failed
+        }
         Err(error) => {
             tracing::warn!(
                 error = %error,
