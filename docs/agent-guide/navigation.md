@@ -1517,6 +1517,35 @@ template**, and **Activate for me** (hidden for the author). Mentions of
 routines that aren't shared show no card. On phones both dialogs open as
 bottom sheets.
 
+### Routines in the marketplace
+
+With `enable-marketplace` and `enable-html-code-mode` both on (on by default in
+dev), a routine you own has **Publish to marketplace…** in its **Routine
+actions** menu (after **Share**). It opens the same dialog as an HTML page's
+publish: the first time **Publish to marketplace** with **Title** and
+**Description**, publishing the saved routine to your team as `v1.0`; after
+that **Publish an update** with **Minor update** / **Major update**. The
+routine's references are marked as **Share** marks them (your own mentions
+and the schedules' time zone fill in as whoever installs it). The server
+decides a routine update's kind: one that changes its variables, required
+apps, kinds of trigger or code-step knobs is published as a major update
+whatever was chosen, and the toast reads **Published name v2.0 as a major
+update**. A minor update's toast says how many installed routines it updated.
+
+Teammates find it under **Agents → Marketplace** (`/app/marketplace`) as a
+card with a **Routine** badge (pages show **Artifact**). **Install** opens
+**Install name**, the template activation dialog with the marketplace's
+labels: decide **Keep it** / **Leave out** for each reference it asks about,
+then **Install** creates your own routine, switched off, on your time zone.
+**Open** goes to that routine (`/app/routines/<uuid>`). A minor update
+rewrites your routine (name, description, trigger and steps, filled in again
+from your choices) unless you edited it since; then the card reads **You
+edited this routine, so updates are paused.** and it is left alone. When an
+update couldn't be applied the card says so; the next update tries again.
+**Update to v2** takes a major update, filled in from your earlier choices,
+asking only about references the new version added. **Uninstall** asks
+first: your routine stays yours, it just stops getting updates.
+
 **Runs** shows outcome, duration, and firing time. History loads fifty
 rows at a time; **Load more runs** reveals older records. Accessible run rows
 open the agent session created by that run. Selecting a model uses the same

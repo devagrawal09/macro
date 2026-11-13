@@ -449,7 +449,12 @@ Phases you will see:
   `marketplace.installed_page` flow joins with a `marketplace.installed_build`
   phase. Install, update, uninstall, unlist, publish and publish-version are
   unclassed `marketplace.<action>` spans (always exported) with
-  `marketplace.listing_id`, and their HTTP requests below them.
+  `marketplace.listing_id`, and their HTTP requests below them. Publishing
+  adds `marketplace.kind` and `marketplace.forced_major`; a routine update
+  that had to ask for new fills adds `marketplace.missing_fills`. On the
+  server, `publish_version` records `bump` and `routines_updated`,
+  `routines_detached` and `routines_failed`, and `install` the `routine_id`
+  it created or refilled.
 - Channel tabs: `channel.tab` contains the selected `channel.<tab>.view` phase,
   for routed and block channels alike.
 - Command-K: `quick_access.open` starts at the hotkey and joins the

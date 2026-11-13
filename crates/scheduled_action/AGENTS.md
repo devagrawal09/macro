@@ -166,6 +166,13 @@ each run.
   `src/inbound/event_run_worker.rs`: the three inbound adapters.
 - `src/domain/templates.rs` + `src/inbound/template_router.rs`: sharing a
   routine as a template and activating it as someone else's routine.
+  `RoutineSnapshot::of` builds what is shared (name, description, trigger,
+  task without `dangerously_operate_as_user`, variables), for templates and
+  marketplace listings alike. `templates/fill.rs` fills a snapshot in for
+  a person on the server (their mentions, left-out references as text,
+  schedules on their zone), the port of the web's `core/template.ts`, which
+  the marketplace uses; `templates/interface.rs` reads what taking it asks
+  of a person, which decides a marketplace version's bump.
 - `services/agent_harness_service/src/scheduling.rs`: the sole runtime host;
   this crate has no deployed binary.
 
@@ -183,7 +190,9 @@ each run.
   require the caller's `enable-routine-sharing` PostHog flag. Missing flags,
   missing configuration, and failed evaluations return 404. Owner unsharing
   stays available. Activating creates the caller's own routine with `template_id`
-  pointing back. Filling variables happens in the client.
+  pointing back. Filling variables for activation happens in the client; the
+  marketplace fills on the server with `templates/fill.rs`, so keep the two
+  alike.
 - Not here: the target being run (an agent turn, a routine's tool logic) →
   `crates/agent_session`, `ai_tools`; Jev condition evaluation → `crates/jev`.
 
@@ -193,7 +202,8 @@ each run.
   `documents`, `github` (delivery fact and installation claims only),
   `macro_event_broker`/`macro_event_topics` (Kafka), `macro_db_client`.
 - Used by: the web app's automations/routines UI and agent tooling, through
-  the gateway.
+  the gateway; `crates/marketplace` (its template data types, and its
+  service for routine installs).
 
 ## Recipes
 

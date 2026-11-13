@@ -489,7 +489,9 @@ the shimmer.
   settings sheet and opens the document.
 - With `enable-marketplace` and `enable-html-code-mode` both on (on by default
   in dev), the tool links add **Marketplace** after Artifacts, at
-  `/app/marketplace`: the HTML pages people published to the viewer's team.
+  `/app/marketplace`: the HTML pages and routines people published to the
+  viewer's team, each card badged **Artifact** or **Routine** (routines: see
+  [Routines in the marketplace](navigation.md#routines-in-the-marketplace)).
   Copied links, reload, and browser Back/Forward restore it like Artifacts;
   code opens it with `openAgentsPage(layout, 'marketplace')`. With either flag
   off the link is hidden and a direct visit says the marketplace isn't
