@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT i.user_id\n            FROM marketplace_install i\n            JOIN marketplace_listing l ON l.id = i.listing_id\n            WHERE i.listing_id = $1\n              AND ($2::int IS NULL OR i.major = $2)\n              AND (\n                  l.team_id IS NULL\n                  OR EXISTS (\n                      SELECT 1\n                      FROM team_user t\n                      WHERE t.team_id = l.team_id AND t.user_id = i.user_id\n                  )\n              )\n            ORDER BY i.updated_at DESC, i.user_id\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "008c9b2630b114bbc9f41476e0e44e4bf9329955fcb1dc9ebaeac5118fb9c715"
+}

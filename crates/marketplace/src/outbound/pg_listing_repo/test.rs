@@ -66,6 +66,18 @@ async fn insert_team(pool: &PgPool, owner: &str) -> Uuid {
     team
 }
 
+/// Make `user` a member of `team`.
+async fn join_team(pool: &PgPool, team: Uuid, user: &str) {
+    sqlx::query!(
+        r#"INSERT INTO team_user (user_id, team_id, team_role) VALUES ($1, $2, 'member')"#,
+        user,
+        team,
+    )
+    .execute(pool)
+    .await
+    .expect("team member should insert");
+}
+
 /// Ada's board, published to `team` from a new document.
 fn board(team: Uuid) -> NewListing {
     NewListing {
@@ -315,4 +327,33 @@ async fn deleting_a_user_removes_their_installs_and_listings(pool: PgPool) {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, adas.id);
     assert_eq!(installs, 0);
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn installers_are_team_members_on_the_major_newest_install_first(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    join_team(&pool, acme, BEN).await;
+    join_team(&pool, acme, CARA).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = board(acme);
+    repo.create_listing(listing.clone()).await.unwrap();
+
+    repo.install_latest(listing.id, &user(BEN)).await.unwrap();
+    repo.add_version(listing.id, VersionBump::Major, &page("<h1>Board 2.0</h1>"))
+        .await
+        .unwrap();
+    repo.install_latest(listing.id, &user(CARA)).await.unwrap();
+    // Ada owns the team but has no member row: like someone who left, she
+    // can't open the listing, so she isn't told of it.
+    repo.install_latest(listing.id, &user(ADA)).await.unwrap();
+
+    let on_second_major = repo.installers(listing.id, Some(2), 10).await.unwrap();
+    let on_any_major = repo.installers(listing.id, None, 10).await.unwrap();
+    let bounded = repo.installers(listing.id, None, 1).await.unwrap();
+
+    assert_eq!(on_second_major, vec![user(CARA)]);
+    assert_eq!(on_any_major, vec![user(CARA), user(BEN)]);
+    assert_eq!(bounded, vec![user(CARA)]);
 }

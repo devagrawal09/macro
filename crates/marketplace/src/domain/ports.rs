@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingText, MarketplaceError,
-    NewListing, PublishedPage, VersionBump,
+    NewListing, PublishedPage, PublishedVersion, VersionBump,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -72,6 +72,29 @@ pub trait ListingRepo: Send + Sync + 'static {
         user: &MacroUserIdStr<'_>,
         team: Option<Uuid>,
     ) -> impl Future<Output = Result<Option<InstalledPage>, Self::Err>> + Send;
+
+    /// Up to `limit` people who installed the listing and may still see it,
+    /// most recently installed first: only those on `major` when given.
+    fn installers(
+        &self,
+        id: ListingId,
+        major: Option<i32>,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<MacroUserIdStr<'static>>, Self::Err>> + Send;
+}
+
+/// Outbound port that tells people's open clients a version was published.
+pub trait VersionNotifier: Send + Sync + 'static {
+    /// The error type returned when a notification can't be sent.
+    type Err: std::error::Error + Send + Sync + 'static;
+
+    /// Tell `installers` of `version`. Best effort: a person with no open
+    /// client hears nothing.
+    fn notify(
+        &self,
+        version: PublishedVersion,
+        installers: &[MacroUserIdStr<'static>],
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 }
 
 /// Outbound port for reading, building and running HTML pages.
@@ -127,7 +150,7 @@ pub trait MarketplaceService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
     /// Publish the listing's document as its next version. Only its
-    /// publisher may.
+    /// publisher may. Its installers' open clients are told, best effort.
     fn publish_version(
         &self,
         user: &MacroUserIdStr<'static>,

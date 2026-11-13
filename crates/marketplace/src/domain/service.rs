@@ -16,30 +16,83 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingKind, ListingText,
-    MarketplaceError, NewListing, PublishedPage, VersionBump,
+    MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing, PublishedPage, PublishedVersion, Version,
+    VersionBump,
 };
-use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout};
+use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, VersionNotifier};
 
-/// The marketplace service over its repository, page builder and rollout.
-pub struct MarketplaceServiceImpl<Listings, P, R> {
+/// The marketplace service over its repository, page builder, rollout and
+/// version notifier.
+pub struct MarketplaceServiceImpl<Listings, P, R, N> {
     listings: Listings,
     pages: Arc<P>,
     rollout: R,
+    notifier: N,
 }
 
-impl<Listings, P, R> MarketplaceServiceImpl<Listings, P, R>
+impl<Listings, P, R, N> MarketplaceServiceImpl<Listings, P, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     R: Rollout,
+    N: VersionNotifier,
 {
-    /// Bind the repository, the page builder and the rollout.
-    pub fn new(listings: Listings, pages: Arc<P>, rollout: R) -> Self {
+    /// Bind the repository, the page builder, the rollout and the notifier.
+    pub fn new(listings: Listings, pages: Arc<P>, rollout: R, notifier: N) -> Self {
         Self {
             listings,
             pages,
             rollout,
+            notifier,
         }
+    }
+
+    /// Tell the installers a new version concerns, so their open pages and
+    /// lists refetch: those on its major for a minor version, which their
+    /// pages show at once, and everyone for a major one, which they may take.
+    /// The version is already stored, so a failure here is only logged.
+    #[tracing::instrument(
+        skip_all,
+        fields(listing_id = %id, recipient_count = tracing::field::Empty, truncated = tracing::field::Empty)
+    )]
+    async fn notify_installers(&self, id: ListingId, version: Version, bump: VersionBump) {
+        let major = match bump {
+            VersionBump::Minor => Some(version.major),
+            VersionBump::Major => None,
+        };
+        // One more than the bound, to tell a listing at the bound from one
+        // past it.
+        let Ok(mut installers) = self
+            .listings
+            .installers(id, major, MAX_NOTIFIED_INSTALLS.saturating_add(1))
+            .await
+            .inspect_err(|error| {
+                tracing::error!(error = ?error, "failed to read a new version's installers");
+            })
+        else {
+            return;
+        };
+
+        let truncated = installers.len() > usize::from(MAX_NOTIFIED_INSTALLS);
+        installers.truncate(usize::from(MAX_NOTIFIED_INSTALLS));
+        let span = tracing::Span::current();
+        span.record("recipient_count", installers.len());
+        span.record("truncated", truncated);
+        if installers.is_empty() {
+            return;
+        }
+
+        let published = PublishedVersion {
+            listing_id: id,
+            version,
+        };
+        let _ = self
+            .notifier
+            .notify(published, &installers)
+            .await
+            .inspect_err(|error| {
+                tracing::error!(error = ?error, "failed to notify a new version's installers");
+            });
     }
 
     /// A caller outside the rollout sees no marketplace at all.
@@ -158,11 +211,12 @@ fn internal<E: std::error::Error + Send + Sync + 'static>(error: E) -> Marketpla
     MarketplaceError::Internal(rootcause::Report::new(error).into_dynamic())
 }
 
-impl<Listings, P, R> MarketplaceService for MarketplaceServiceImpl<Listings, P, R>
+impl<Listings, P, R, N> MarketplaceService for MarketplaceServiceImpl<Listings, P, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     R: Rollout,
+    N: VersionNotifier,
 {
     #[tracing::instrument(err, skip_all, fields(team_id = tracing::field::Empty))]
     async fn listings(
@@ -257,7 +311,10 @@ where
             .await
             .map_err(internal)?;
         match added {
-            AddedVersion::Added(_) => self.listing(user, team, id).await,
+            AddedVersion::Added(version) => {
+                self.notify_installers(id, version, bump).await;
+                self.listing(user, team, id).await
+            }
             AddedVersion::Unchanged => Err(MarketplaceError::Unchanged),
             AddedVersion::Missing => Err(MarketplaceError::NotFound),
         }

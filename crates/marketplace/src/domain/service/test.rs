@@ -19,9 +19,9 @@ use uuid::Uuid;
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
     AddedVersion, InstalledPage, Listing, ListingId, ListingScope, ListingText, MarketplaceError,
-    NewListing, PublishedPage, Version, VersionBump,
+    NewListing, PublishedPage, PublishedVersion, Version, VersionBump,
 };
-use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout};
+use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, VersionNotifier};
 
 const ADA: &str = "macro|ada@example.com";
 const BEN: &str = "macro|ben@example.com";
@@ -219,6 +219,61 @@ impl ListingRepo for FakeListings {
                 html: page.html.clone(),
             }))
     }
+
+    async fn installers(
+        &self,
+        id: ListingId,
+        major: Option<i32>,
+        limit: u16,
+    ) -> Result<Vec<MacroUserIdStr<'static>>, Self::Err> {
+        let stored = self.0.lock().unwrap();
+        let Some(entry) = stored.iter().find(|entry| entry.listing.id == id) else {
+            return Ok(Vec::new());
+        };
+
+        let mut installers: Vec<MacroUserIdStr<'static>> = entry
+            .installs
+            .iter()
+            .filter(|(_, installed)| major.is_none_or(|major| major == **installed))
+            .map(|(user, _)| MacroUserIdStr::try_from(user.clone()).expect("a stored user id"))
+            .collect();
+        installers.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        installers.truncate(usize::from(limit));
+        Ok(installers)
+    }
+}
+
+/// Every notification sent, as the version and its installers' ids; or a
+/// failure for each, when `failing`.
+#[derive(Default)]
+struct FakeNotifier {
+    sent: Mutex<Vec<(PublishedVersion, Vec<String>)>>,
+    failing: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("fake notifier failed")]
+struct FakeNotifyErr;
+
+impl VersionNotifier for Arc<FakeNotifier> {
+    type Err = FakeNotifyErr;
+
+    async fn notify(
+        &self,
+        version: PublishedVersion,
+        installers: &[MacroUserIdStr<'static>],
+    ) -> Result<(), Self::Err> {
+        if self.failing {
+            return Err(FakeNotifyErr);
+        }
+
+        let users = installers
+            .iter()
+            .map(|user| user.as_ref().to_owned())
+            .collect();
+        self.sent.lock().unwrap().push((version, users));
+        Ok(())
+    }
 }
 
 /// Documents by id; a source containing `broken` doesn't build.
@@ -276,16 +331,23 @@ impl Rollout for FakeRollout {
     }
 }
 
-type Service = MarketplaceServiceImpl<FakeListings, FakePages, FakeRollout>;
+type Service = MarketplaceServiceImpl<FakeListings, FakePages, FakeRollout, Arc<FakeNotifier>>;
 
 fn marketplace() -> (Service, Arc<FakePages>) {
+    let (service, pages, _) = notifying_marketplace(FakeNotifier::default());
+    (service, pages)
+}
+
+fn notifying_marketplace(notifier: FakeNotifier) -> (Service, Arc<FakePages>, Arc<FakeNotifier>) {
     let pages = Arc::new(FakePages::default());
+    let notifier = Arc::new(notifier);
     let service = MarketplaceServiceImpl::new(
         FakeListings::default(),
         Arc::clone(&pages),
         FakeRollout(true),
+        Arc::clone(&notifier),
     );
-    (service, pages)
+    (service, pages, notifier)
 }
 
 /// Ada, a member of Acme, publishes her board.
@@ -567,6 +629,7 @@ async fn nobody_outside_the_rollout_sees_the_marketplace() {
         FakeListings::default(),
         Arc::new(FakePages::default()),
         FakeRollout(false),
+        Arc::new(FakeNotifier::default()),
     );
 
     let listings = service
@@ -574,4 +637,102 @@ async fn nobody_outside_the_rollout_sees_the_marketplace() {
         .await;
 
     assert!(matches!(listings, Err(MarketplaceError::NotFound)));
+}
+
+#[tokio::test]
+async fn a_minor_version_notifies_its_major_and_a_major_version_notifies_everyone() {
+    let (service, pages, notifier) = notifying_marketplace(FakeNotifier::default());
+    let listing = published_board(&service, &pages).await;
+    let ada = member(ADA, ACME, TeamRole::Member);
+    let ben = member(BEN, ACME, TeamRole::Member);
+    let cam = member(CAM, ACME, TeamRole::Member);
+    service
+        .install(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("Ben installs 1.0");
+
+    pages.save(BOARD, "<h1>Board, rebuilt</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Major,
+        )
+        .await
+        .expect("a major version publishes");
+    service
+        .install(&user(CAM), Some(&cam), listing.id)
+        .await
+        .expect("Cam installs 2.0");
+
+    pages.save(BOARD, "<h1>Board, rebuilt and tidied</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+        )
+        .await
+        .expect("a minor version publishes");
+
+    let sent = notifier.sent.lock().unwrap().clone();
+    assert_eq!(
+        sent,
+        vec![
+            // Ben, on 1, hears of 2.0 so he may take it.
+            (
+                PublishedVersion {
+                    listing_id: listing.id,
+                    version: Version { major: 2, minor: 0 },
+                },
+                vec![BEN.to_owned()],
+            ),
+            // Only Cam is on 2, so only his page changes.
+            (
+                PublishedVersion {
+                    listing_id: listing.id,
+                    version: Version { major: 2, minor: 1 },
+                },
+                vec![CAM.to_owned()],
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_version_publishes_when_its_notification_fails() {
+    let (service, pages, _) = notifying_marketplace(FakeNotifier {
+        failing: true,
+        ..FakeNotifier::default()
+    });
+    let listing = published_board(&service, &pages).await;
+    let ada = member(ADA, ACME, TeamRole::Member);
+    let ben = member(BEN, ACME, TeamRole::Member);
+    service
+        .install(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("a teammate installs it");
+
+    pages.save(BOARD, "<h1>Board, tidied</h1>");
+    let published = service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+        )
+        .await
+        .expect("the version publishes anyway");
+    let shown = service
+        .installed_build(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("the install builds");
+
+    assert_eq!(published.latest_version, Version { major: 1, minor: 1 });
+    assert_eq!(shown.version, Version { major: 1, minor: 1 });
 }

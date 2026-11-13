@@ -356,4 +356,51 @@ impl ListingRepo for PgListingRepo {
             html: row.html,
         }))
     }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn installers(
+        &self,
+        id: ListingId,
+        major: Option<i32>,
+        limit: u16,
+    ) -> Result<Vec<MacroUserIdStr<'static>>, Self::Err> {
+        // Someone who left the listing's team keeps their install row but
+        // can no longer open it, so they aren't told of its versions.
+        let users = sqlx::query_scalar!(
+            r#"
+            SELECT i.user_id
+            FROM marketplace_install i
+            JOIN marketplace_listing l ON l.id = i.listing_id
+            WHERE i.listing_id = $1
+              AND ($2::int IS NULL OR i.major = $2)
+              AND (
+                  l.team_id IS NULL
+                  OR EXISTS (
+                      SELECT 1
+                      FROM team_user t
+                      WHERE t.team_id = l.team_id AND t.user_id = i.user_id
+                  )
+              )
+            ORDER BY i.updated_at DESC, i.user_id
+            LIMIT $3
+            "#,
+            id.as_uuid(),
+            major,
+            i64::from(limit),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        // One unreadable id never keeps the others from hearing of it.
+        Ok(users
+            .into_iter()
+            .filter_map(|user| {
+                MacroUserIdStr::try_from(user)
+                    .inspect_err(|error| {
+                        tracing::warn!(error = ?error, "skipped an installer with an invalid id");
+                    })
+                    .ok()
+            })
+            .collect())
+    }
 }

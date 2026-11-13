@@ -18,6 +18,15 @@ pub const MAX_TITLE_CHARS: usize = 120;
 /// Longest description a listing takes, in characters.
 pub const MAX_DESCRIPTION_CHARS: usize = 1000;
 
+/// The connection gateway message that tells installers a version was
+/// published, shared with the web app's websocket handler.
+pub const LISTING_VERSION_MESSAGE_TYPE: &str = "marketplace_listing_version";
+
+/// Most installers one new version notifies. A listing with more installs
+/// notifies its most recently installed ones; the rest pick the version up on
+/// their next run or when their window regains focus.
+pub const MAX_NOTIFIED_INSTALLS: u16 = 1000;
+
 /// Identifies a listing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(transparent)]
@@ -237,6 +246,17 @@ pub enum AddedVersion {
     Unchanged,
     /// The listing is gone or unlisted.
     Missing,
+}
+
+/// A version just published, as its installers hear of it: no content, only
+/// what to refetch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedVersion {
+    /// The listing.
+    pub listing_id: ListingId,
+    /// Its new version.
+    pub version: Version,
 }
 
 /// The page a person's install shows: the newest minor version of the major
