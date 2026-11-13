@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ListingList,
   ListingsFilter,
+  MarketplaceDocuments,
   MarketplaceRoutines,
   MarketplaceSource,
 } from '../context/marketplace-source';
@@ -19,9 +20,13 @@ import type { Listing } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { MarketplaceView } from './marketplace-view';
 
-// jsdom has no scrollTo, which opening and closing a dialog or menu reaches.
+// jsdom has no scrollTo, which opening and closing a dialog or menu reaches,
+// nor CSS.escape, which a menu closed by unmounting reaches to return focus.
 beforeEach(() => {
   vi.stubGlobal('scrollTo', vi.fn());
+  vi.stubGlobal('CSS', {
+    escape: (value: string) => value.replace(/[^\w-]/g, (char) => `\\${char}`),
+  });
 });
 
 afterEach(() => {
@@ -71,6 +76,10 @@ function fakeSource(
     pin: vi.fn(async (id: string, pinned: boolean) =>
       listing({ id, installedMajor: 1, pinned })
     ),
+    copy: vi.fn(async (id: string) => ({
+      kind: 'artifact' as const,
+      id: `copy-of-${id}`,
+    })),
     ...overrides,
   };
 }
@@ -102,13 +111,15 @@ function fakeRoutines(
 
 function renderMarketplace(
   source: MarketplaceSource,
-  routines: MarketplaceRoutines = fakeRoutines()
+  routines: MarketplaceRoutines = fakeRoutines(),
+  documents: MarketplaceDocuments = { open: vi.fn() }
 ) {
   render(() => <ImperativeDialogHost />);
   render(() => (
     <MarketplaceView
       source={source}
       routines={routines}
+      documents={documents}
       userId="macro|grace@example.com"
       isTeamAdmin={() => false}
       publisherName={() => 'Ada Lovelace'}
@@ -335,6 +346,40 @@ describe('Marketplace', () => {
     );
   });
 
+  it('copies an installed page into a new document and opens it', async () => {
+    const source = fakeSource(() => [
+      listing({ id: 'dashboard', installedMajor: 1 }),
+    ]);
+    const documents = { open: vi.fn() };
+    renderMarketplace(source, fakeRoutines(), documents);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Make a copy' })
+    );
+    await vi.waitFor(() =>
+      expect(documents.open).toHaveBeenCalledWith('copy-of-dashboard')
+    );
+    expect(source.copy).toHaveBeenCalledWith('dashboard', expect.anything());
+  });
+
+  it('says which listing a listing is based on', () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        basedOn: { id: 'origin', title: 'Team board' },
+      }),
+    ]);
+    renderMarketplace(source);
+
+    const card = screen.getByRole('article', {
+      name: 'Marketplace page: Launch dashboard',
+    });
+    expect(within(card).getByText('Based on Team board')).toBeTruthy();
+  });
+
   it('lists the viewer’s installs under Installed', () => {
     const dashboard = listing({ id: 'dashboard' });
     const notes = listing({
@@ -529,6 +574,70 @@ describe('Marketplace', () => {
         );
       }
     );
+
+    it.each([
+      ['Make my own', 1],
+      ['Cancel', 0],
+    ] as const)(
+      'asks before making an installed routine one’s own: %s',
+      async (choice, copies) => {
+        const source = fakeSource(() => [
+          digest({
+            installedMajor: 1,
+            installedRoutine: {
+              routineId: 'routine-1',
+              detached: false,
+              updateFailed: false,
+            },
+          }),
+        ]);
+        renderMarketplace(source);
+
+        await userEvent.click(
+          screen.getByRole('button', { name: 'More actions for Weekly digest' })
+        );
+        expect(
+          screen.queryByRole('menuitem', { name: 'Make a copy' })
+        ).toBeNull();
+        await userEvent.click(
+          await screen.findByRole('menuitem', { name: 'Make my own' })
+        );
+        const confirm = await screen.findByRole('dialog', {
+          name: 'Make “Weekly digest” your own?',
+        });
+        fireEvent.click(within(confirm).getByRole('button', { name: choice }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        await vi.waitFor(() =>
+          expect(source.copy).toHaveBeenCalledTimes(copies)
+        );
+      }
+    );
+
+    it('offers no Make my own or Pin for a routine already detached', async () => {
+      const source = fakeSource(() => [
+        digest({
+          installedMajor: 1,
+          installedVersion: { major: 1, minor: 0 },
+          installedRoutine: {
+            routineId: 'routine-1',
+            detached: true,
+            updateFailed: false,
+          },
+        }),
+      ]);
+      renderMarketplace(source);
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'More actions for Weekly digest' })
+      );
+      expect(
+        await screen.findByRole('menuitem', { name: 'Uninstall' })
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole('menuitem', { name: 'Make my own' })
+      ).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: /Pin to/ })).toBeNull();
+    });
 
     it('asks only for what a new major added, then takes it', async () => {
       const board = {

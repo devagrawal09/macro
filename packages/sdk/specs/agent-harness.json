@@ -4391,6 +4391,63 @@
         }
       }
     },
+    "/marketplace/listings/{id}/install/copy": {
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Make the caller's own copy of what they installed, recording the listing\nand version it came from. An artifact becomes a new HTML document owned\nby the caller, holding the version their install shows; the install\nstays. A routine install is detached: the routine stays the caller's and\ngets no more updates. Publishing the copy later says it is based on this\nlisting.",
+        "operationId": "copy_marketplace_install",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingCopy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/marketplace/listings/{id}/install/pin": {
       "put": {
         "tags": ["marketplace"],
@@ -8141,6 +8198,17 @@
           "updatedAt"
         ],
         "properties": {
+          "basedOn": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ListingOrigin",
+                "description": "The listing its source was copied from, when the person asking may\nsee that listing."
+              }
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -8226,6 +8294,22 @@
           }
         }
       },
+      "ListingCopy": {
+        "type": "object",
+        "description": "What making one's own copy of an install made.",
+        "required": ["kind", "id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The new document, or the routine now the caller's own."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ListingKind",
+            "description": "What it is: a document for an artifact, a routine for a routine."
+          }
+        }
+      },
       "ListingId": {
         "type": "string",
         "format": "uuid",
@@ -8235,6 +8319,21 @@
         "type": "string",
         "description": "What a listing publishes.",
         "enum": ["artifact", "routine"]
+      },
+      "ListingOrigin": {
+        "type": "object",
+        "description": "The listing another one's source was copied from.",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ListingId",
+            "description": "Its id."
+          },
+          "title": {
+            "type": "string",
+            "description": "Its title."
+          }
+        }
       },
       "ListingRoutine": {
         "type": "object",

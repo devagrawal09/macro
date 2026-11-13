@@ -18,6 +18,7 @@ import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
 import { UpdateChanges, updateLabel } from '../components/update-changes';
 import type {
+  MarketplaceDocuments,
   MarketplaceRoutines,
   MarketplaceSource,
 } from '../context/marketplace-source';
@@ -49,6 +50,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function MarketplaceView(props: {
   source: MarketplaceSource;
   routines: MarketplaceRoutines;
+  documents: MarketplaceDocuments;
   userId: string | undefined;
   /** Whether the viewer is an admin of that team. */
   isTeamAdmin: (teamId: string) => boolean;
@@ -282,6 +284,45 @@ export function MarketplaceView(props: {
           }
     );
   };
+  /**
+   * Make the viewer's own copy: a page becomes a new document, which opens;
+   * a routine is detached from the listing, which is asked first.
+   */
+  const copy = async (listing: Listing) => {
+    if (listing.kind === 'routine') {
+      const confirmed = await confirmDialog({
+        title: t('marketplace.makeOwnTitle', { title: listing.title }),
+        body: t('marketplace.makeOwnBody'),
+        confirmLabel: t('marketplace.makeOwn'),
+      });
+      if (!confirmed) return;
+
+      await act(
+        'marketplace.copy',
+        listing,
+        (span) => props.source.copy(listing.id, span),
+        {
+          done: t('marketplace.madeOwnToast', { title: listing.title }),
+          failed: t('marketplace.makeOwnFailed', { title: listing.title }),
+        }
+      );
+      return;
+    }
+
+    await act(
+      'marketplace.copy',
+      listing,
+      async (span) => {
+        const made = await props.source.copy(listing.id, span);
+        props.documents.open(made.id);
+        return made;
+      },
+      {
+        done: t('marketplace.copiedToast', { title: listing.title }),
+        failed: t('marketplace.copyFailed', { title: listing.title }),
+      }
+    );
+  };
   const unlist = async (listing: Listing) => {
     const confirmed = await confirmDialog({
       title: t('marketplace.unlistConfirmTitle', { title: listing.title }),
@@ -375,6 +416,7 @@ export function MarketplaceView(props: {
                   onPin={(pinned) =>
                     fireAndForget(pin(listing(), pinned), 'marketplace')
                   }
+                  onCopy={() => fireAndForget(copy(listing()), 'marketplace')}
                 />
               )}
             </ListingGrid>

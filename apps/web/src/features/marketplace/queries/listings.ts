@@ -11,6 +11,7 @@ import {
   type PublishListingVersion,
 } from '@service-agent-harness/client';
 import type {
+  ListingCopy,
   ListMarketplaceListingsParams,
   MarketplaceListings,
   PublishedVersion,
@@ -234,6 +235,25 @@ export function usePinListingMutation(
   }));
 }
 
+/**
+ * Makes the viewer's own copy of what they installed: a new document of a
+ * page, or their routine detached from the listing, which its card then
+ * shows.
+ */
+export function useCopyListingMutation(
+  callbacks?: MutationCallbacks<ListingCopy, Error, ListingAction>
+) {
+  return useMutation(() => ({
+    mutationFn: (args: ListingAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.copyListingInstall(args.listingId)
+        )
+      ),
+    ...withCallbacks({ onSuccess: () => invalidateListings() }, callbacks),
+  }));
+}
+
 export function useUnlistListingMutation(
   callbacks?: MutationCallbacks<void, Error, ListingAction>
 ) {
@@ -391,6 +411,7 @@ export function createMarketplaceSource(
   const uninstall = useUninstallListingMutation();
   const unlist = useUnlistListingMutation();
   const pin = usePinListingMutation();
+  const copy = useCopyListingMutation();
 
   return {
     list: (filter) => createListingList(filter, enabled),
@@ -403,5 +424,7 @@ export function createMarketplaceSource(
     versions: fetchListingVersions,
     pin: (listingId, pinned, parentSpan) =>
       pin.mutateAsync({ listingId, pinned, parentSpan }),
+    copy: (listingId, parentSpan) =>
+      copy.mutateAsync({ listingId, parentSpan }),
   };
 }

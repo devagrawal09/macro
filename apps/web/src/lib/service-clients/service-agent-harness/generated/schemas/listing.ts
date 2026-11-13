@@ -4,6 +4,7 @@
  * agent_harness_service
  * OpenAPI spec version: 0.1.0
  */
+import type { ListingBasedOn } from './listingBasedOn';
 import type { ListingId } from './listingId';
 import type { ListingInstalledMajor } from './listingInstalledMajor';
 import type { ListingInstalledRoutine } from './listingInstalledRoutine';
@@ -16,6 +17,7 @@ import type { Version } from './version';
  * A listing, as the person asking sees it.
  */
 export interface Listing {
+  basedOn?: ListingBasedOn;
   /** When it was first published. */
   createdAt: string;
   /** What it does, in a few lines. */

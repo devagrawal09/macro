@@ -37,6 +37,11 @@ export function ListingDetailsDialog(props: {
               <p>
                 {t('marketplace.byPublisher', { name: props.publisherName })}
               </p>
+              <Show when={props.listing.basedOn}>
+                {(origin) => (
+                  <p>{t('marketplace.basedOn', { title: origin().title })}</p>
+                )}
+              </Show>
               <Show when={props.listing.description}>
                 <p class="mt-1 whitespace-pre-line">
                   {props.listing.description}

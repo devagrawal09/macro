@@ -31,6 +31,8 @@ export function ListingCard(props: {
   onDetails(): void;
   /** Pin the install to the version it has, or unpin it. */
   onPin(pinned: boolean): void;
+  /** Make the viewer's own copy of what they installed. */
+  onCopy(): void;
 }) {
   const installed = () => isInstalled(props.listing);
   // A routine its person edited gets no updates to hold back.
@@ -38,6 +40,15 @@ export function ListingCard(props: {
     installed() &&
     !isPinned(props.listing) &&
     installedRoutineState(props.listing) !== 'detached';
+  // A page copies into a document any time; a routine becomes one's own
+  // once, which detaches it.
+  const copyLabel = () => {
+    if (!installed()) return undefined;
+    if (props.listing.kind === 'artifact') return t('marketplace.makeCopy');
+    return installedRoutineState(props.listing) === 'detached'
+      ? undefined
+      : t('marketplace.makeOwn');
+  };
   const unlistable = () => props.canUnlist && !props.listing.removed;
 
   return (
@@ -83,6 +94,13 @@ export function ListingCard(props: {
         <span class="truncate text-xs text-ink-extra-muted">
           {t('marketplace.byPublisher', { name: props.publisherName })}
         </span>
+        <Show when={props.listing.basedOn}>
+          {(origin) => (
+            <span class="truncate text-xs text-ink-extra-muted">
+              {t('marketplace.basedOn', { title: origin().title })}
+            </span>
+          )}
+        </Show>
         <Show
           when={
             newerThanPinned(props.listing) && props.listing.installedVersion
@@ -186,6 +204,16 @@ export function ListingCard(props: {
                   >
                     {t('marketplace.unpin')}
                   </Dropdown.Item>
+                </Show>
+                <Show when={copyLabel()}>
+                  {(label) => (
+                    <Dropdown.Item
+                      class="touch:min-h-11"
+                      onSelect={() => props.onCopy()}
+                    >
+                      {label()}
+                    </Dropdown.Item>
+                  )}
                 </Show>
                 <Show when={installed()}>
                   <Dropdown.Item

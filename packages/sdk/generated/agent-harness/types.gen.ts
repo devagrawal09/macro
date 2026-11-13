@@ -2426,6 +2426,7 @@ export type LinkedTaskResponse = {
  * A listing, as the person asking sees it.
  */
 export type Listing = {
+    basedOn?: null | ListingOrigin;
     /**
      * When it was first published.
      */
@@ -2489,6 +2490,20 @@ export type Listing = {
 };
 
 /**
+ * What making one's own copy of an install made.
+ */
+export type ListingCopy = {
+    /**
+     * The new document, or the routine now the caller's own.
+     */
+    id: string;
+    /**
+     * What it is: a document for an artifact, a routine for a routine.
+     */
+    kind: ListingKind;
+};
+
+/**
  * Identifies a listing.
  */
 export type ListingId = string;
@@ -2497,6 +2512,20 @@ export type ListingId = string;
  * What a listing publishes.
  */
 export type ListingKind = 'artifact' | 'routine';
+
+/**
+ * The listing another one's source was copied from.
+ */
+export type ListingOrigin = {
+    /**
+     * Its id.
+     */
+    id: ListingId;
+    /**
+     * Its title.
+     */
+    title: string;
+};
 
 /**
  * A routine listing's newest version.
@@ -6065,6 +6094,33 @@ export type RunInstalledListingProgramResponses = {
 };
 
 export type RunInstalledListingProgramResponse = RunInstalledListingProgramResponses[keyof RunInstalledListingProgramResponses];
+
+export type CopyMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/copy';
+};
+
+export type CopyMarketplaceInstallErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type CopyMarketplaceInstallError = CopyMarketplaceInstallErrors[keyof CopyMarketplaceInstallErrors];
+
+export type CopyMarketplaceInstallResponses = {
+    201: ListingCopy;
+};
+
+export type CopyMarketplaceInstallResponse = CopyMarketplaceInstallResponses[keyof CopyMarketplaceInstallResponses];
 
 export type UnpinMarketplaceInstallData = {
     body?: never;

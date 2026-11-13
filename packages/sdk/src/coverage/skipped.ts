@@ -47,6 +47,7 @@ export const agentHarnessBacklog = [
   // A stored HTML page's build, which fits the documents namespace.
   'getDocumentBuild',
   // The marketplace is a prototype: its routes may still change shape.
+  'copyMarketplaceInstall',
   'getInstalledListingBuild',
   'getMarketplaceListingRoutine',
   'installMarketplaceListing',

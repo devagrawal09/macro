@@ -58,6 +58,7 @@ import type {
   LinkTaskRequest,
   ListAgentRepositoryBranchesParams,
   Listing,
+  ListingCopy,
   ListingRoutine,
   ListingVersions,
   ListMarketplaceListingsParams,
@@ -5197,6 +5198,81 @@ export const runInstalledListingProgram = async (
     status: res.status,
     headers: res.headers,
   } as runInstalledListingProgramResponse;
+};
+
+/**
+ * @summary Make the caller's own copy of what they installed, recording the listing
+and version it came from. An artifact becomes a new HTML document owned
+by the caller, holding the version their install shows; the install
+stays. A routine install is detached: the routine stays the caller's and
+gets no more updates. Publishing the copy later says it is based on this
+listing.
+ */
+export type copyMarketplaceInstallResponse201 = {
+  data: ListingCopy;
+  status: 201;
+};
+
+export type copyMarketplaceInstallResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type copyMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type copyMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type copyMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type copyMarketplaceInstallResponseSuccess =
+  copyMarketplaceInstallResponse201 & {
+    headers: Headers;
+  };
+export type copyMarketplaceInstallResponseError = (
+  | copyMarketplaceInstallResponse400
+  | copyMarketplaceInstallResponse401
+  | copyMarketplaceInstallResponse404
+  | copyMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type copyMarketplaceInstallResponse =
+  | copyMarketplaceInstallResponseSuccess
+  | copyMarketplaceInstallResponseError;
+
+export const getCopyMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/copy`;
+};
+
+export const copyMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<copyMarketplaceInstallResponse> => {
+  const res = await fetch(getCopyMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: copyMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as copyMarketplaceInstallResponse;
 };
 
 /**

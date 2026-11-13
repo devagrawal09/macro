@@ -31,6 +31,7 @@ import type {
   InstalledListingBuild,
   InstallListing,
   Listing,
+  ListingCopy,
   ListingRoutine,
   ListingVersions,
   ListMarketplaceListingsParams,
@@ -690,6 +691,17 @@ export const agentHarnessServiceClient = {
     return fetchWithToken<ListingRoutine>(
       `${agentHarnessHost}/marketplace/listings/${listingId}/routine`,
       { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /**
+   * Make the caller's own copy of what they installed: a new HTML document
+   * of a page's version, or their routine detached from the listing.
+   */
+  copyListingInstall(listingId: string) {
+    return fetchWithToken<ListingCopy>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install/copy`,
+      { method: 'POST', errorResponseHandler: marketplaceError }
     );
   },
 
