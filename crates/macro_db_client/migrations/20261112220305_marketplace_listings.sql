@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS marketplace_listing (
     description TEXT NOT NULL,
     -- Unlisted: hidden from browsing, still served to those who installed it.
     removed_at TIMESTAMPTZ,
+    -- The listing its source was copied from, when its source is a recorded
+    -- marketplace copy. Cleared when that listing is deleted.
+    derived_from_listing_id UUID REFERENCES marketplace_listing (id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- The target of each version's (listing_id, kind) key.
@@ -40,6 +43,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS marketplace_listing_source_idx
 CREATE INDEX IF NOT EXISTS marketplace_listing_team_id_idx
     ON marketplace_listing (team_id)
     WHERE removed_at IS NULL;
+
+-- Deleting a listing clears the lineage of those derived from it.
+CREATE INDEX IF NOT EXISTS marketplace_listing_derived_from_idx
+    ON marketplace_listing (derived_from_listing_id)
+    WHERE derived_from_listing_id IS NOT NULL;
 
 -- One published snapshot. Its content never changes; only a global version's
 -- review does, once.
@@ -63,6 +71,11 @@ CREATE TABLE IF NOT EXISTS marketplace_listing_version (
     html TEXT,
     -- A routine's snapshot: name, description, trigger, task and variables.
     routine JSONB,
+    -- What the publisher says changed, for installers to read.
+    changelog TEXT CHECK (char_length(changelog) <= 2000),
+    -- A routine version the server made major because its interface changed,
+    -- whatever bump was asked.
+    forced_major BOOLEAN NOT NULL DEFAULT false,
     review_state TEXT NOT NULL DEFAULT 'approved'
         CHECK (review_state IN ('pending', 'approved', 'rejected')),
     -- Who approved or rejected a global version. NULL for a team version,
@@ -93,7 +106,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS marketplace_listing_version_pending_idx
     ON marketplace_listing_version (listing_id)
     WHERE review_state = 'pending';
 
--- A person's install of a listing: the major version they are on.
+-- A person's install of a listing: the major version they are on, and the
+-- minor when they pinned it.
 --
 -- A routine install also keeps the routine it created, the version that
 -- routine was last filled in from, the person's fills and the hash of its
@@ -121,6 +135,10 @@ CREATE TABLE IF NOT EXISTS marketplace_install (
     detached_at TIMESTAMPTZ,
     -- The last update failed; the next minor version tries again.
     update_failed_at TIMESTAMPTZ,
+    -- The person pinned the install to this minor of its major: a page keeps
+    -- showing it and a routine gets no automatic updates. Taking a version
+    -- or unpinning clears it.
+    pinned_minor INT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (listing_id, user_id),
@@ -134,3 +152,27 @@ CREATE TABLE IF NOT EXISTS marketplace_install (
 
 CREATE INDEX IF NOT EXISTS marketplace_install_user_id_idx
     ON marketplace_install (user_id);
+
+-- A copy a person made of what they installed: a new document from an
+-- artifact's version, or their installed routine made their own. Publishing
+-- a copy records the listing it came from as the new listing's
+-- `derived_from_listing_id`.
+CREATE TABLE IF NOT EXISTS marketplace_copy (
+    kind TEXT NOT NULL CHECK (kind IN ('artifact', 'routine')),
+    -- The new document, or the routine made one's own. A plain pointer: it
+    -- is the person's to delete.
+    copy_id UUID NOT NULL,
+    listing_id UUID NOT NULL REFERENCES marketplace_listing (id) ON DELETE CASCADE,
+    -- The version copied.
+    major INT NOT NULL,
+    minor INT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (kind, copy_id)
+);
+
+CREATE INDEX IF NOT EXISTS marketplace_copy_listing_id_idx
+    ON marketplace_copy (listing_id);
+
+CREATE INDEX IF NOT EXISTS marketplace_copy_user_id_idx
+    ON marketplace_copy (user_id);

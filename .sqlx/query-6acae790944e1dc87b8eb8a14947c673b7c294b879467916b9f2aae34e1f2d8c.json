@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT major, minor, changelog, forced_major, review_state, created_at\n            FROM marketplace_listing_version\n            WHERE listing_id = $1\n              AND (\n                  review_state = 'approved'\n                  OR ($2::bool AND review_state = 'pending')\n              )\n            ORDER BY major DESC, minor DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "changelog",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "forced_major",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "review_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6acae790944e1dc87b8eb8a14947c673b7c294b879467916b9f2aae34e1f2d8c"
+}

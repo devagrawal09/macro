@@ -85,6 +85,7 @@ async fn published_digest(service: &Service, routines: &FakeRoutines) -> Listing
                 description: "Sums up the week".to_owned(),
             },
             PublishScope::Team,
+            Changelog::default(),
         )
         .await
         .expect("the digest publishes")
@@ -107,6 +108,7 @@ async fn publish_instructions(
             listing,
             routine_source(ADA, variables),
             bump,
+            Changelog::default(),
         )
         .await
         .expect("the version publishes")
@@ -152,6 +154,7 @@ async fn a_routine_publishes_as_one_point_zero_with_its_snapshot() {
             routine_source(BEN, Vec::new()),
             text("Someone else's digest"),
             PublishScope::Team,
+            Changelog::default(),
         )
         .await;
 
@@ -220,6 +223,7 @@ async fn installing_fills_in_the_routine_as_the_persons_own() {
             routine_source(ADA, vec![zone(), board(VariableFill::Choice)]),
             text("Weekly digest"),
             PublishScope::Team,
+            Changelog::default(),
         )
         .await
         .expect("the digest publishes");
@@ -573,5 +577,211 @@ async fn a_major_version_asks_for_new_fills_before_it_updates() {
             "timezone": "America/New_York",
         }))
         .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_history_says_which_routine_version_the_server_made_major() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+
+    // Asked as a minor, a new variable makes it 2.0.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION}"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Minor,
+    )
+    .await;
+    // Asked as a major, a major is no surprise.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION} briefly"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Major,
+    )
+    .await;
+    let history = service
+        .versions(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            listing.id,
+        )
+        .await
+        .expect("a teammate reads the history");
+
+    let forced: Vec<(Version, bool)> = history
+        .iter()
+        .map(|entry| (entry.version, entry.forced_major))
+        .collect();
+    assert_eq!(
+        forced,
+        vec![
+            (Version { major: 3, minor: 0 }, false),
+            (Version { major: 2, minor: 0 }, true),
+            (Version::FIRST, false),
+        ]
+    );
+}
+
+async fn set_pinned(
+    service: &Service,
+    id: &'static str,
+    listing: ListingId,
+    pinned: bool,
+) -> Result<Listing, MarketplaceError> {
+    service
+        .set_pinned(
+            &user(id),
+            Some(&member(id, ACME, TeamRole::Member)),
+            listing,
+            pinned,
+        )
+        .await
+}
+
+#[tokio::test]
+async fn a_pinned_routine_skips_automatic_updates_and_unpinning_catches_up() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+    let cams = installed_id(&install(&service, CAM, listing.id).await);
+
+    let pinned = set_pinned(&service, BEN, listing.id, true)
+        .await
+        .expect("Ben pins his install");
+    let published = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    let while_pinned = routines.saved(bens);
+    let unpinned = set_pinned(&service, BEN, listing.id, false)
+        .await
+        .expect("Ben unpins his install");
+    let caught_up = routines.saved(bens);
+
+    assert!(pinned.pinned);
+    assert_eq!(pinned.installed_version, Some(Version::FIRST));
+    // Only Cam, who didn't pin, was updated with the version.
+    assert_eq!(published.updates.updated, 1);
+    assert_eq!(
+        instructions(&routines.saved(cams)),
+        json!("Sum up the week in three lines")
+    );
+    assert_eq!(instructions(&while_pinned), json!("Sum up the week"));
+    assert!(!unpinned.pinned);
+    assert_eq!(
+        unpinned.installed_version,
+        Some(Version { major: 1, minor: 1 })
+    );
+    assert_eq!(
+        instructions(&caught_up),
+        json!("Sum up the week in three lines")
+    );
+    assert_eq!(caught_up.revision, 2);
+}
+
+#[tokio::test]
+async fn unpinning_an_edited_routine_detaches_it_and_leaves_it_alone() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+    set_pinned(&service, BEN, listing.id, true)
+        .await
+        .expect("Ben pins his install");
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+
+    let edited = json!({ "steps": [{ "type": "agent", "instructions": "Mine now" }] });
+    routines.edit(bens, edited.clone());
+    let unpinned = set_pinned(&service, BEN, listing.id, false)
+        .await
+        .expect("Ben unpins his install");
+    let pinning_again = set_pinned(&service, BEN, listing.id, true).await;
+
+    let routine = unpinned.installed_routine.expect("an installed routine");
+    assert!(routine.detached);
+    assert_eq!(routines.saved(bens).routine.task, edited);
+    assert!(matches!(pinning_again, Err(MarketplaceError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn making_a_routine_ones_own_detaches_it_and_its_listing_says_where_it_came_from() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let ben = member(BEN, ACME, TeamRole::Member);
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+
+    let copy = service
+        .copy(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("Ben makes the routine his own");
+    let published = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    let after = service
+        .listings(&user(BEN), Some(&ben), first_page(ListingsShown::Installed))
+        .await
+        .expect("listings load")
+        .page
+        .listings;
+
+    // Ben publishes his own routine: its listing is based on the digest.
+    routines.save_source(BEN, bens, digest("Ben's digest"));
+    let his = service
+        .publish(
+            &user(BEN),
+            Some(&ben),
+            PublishSource::Routine {
+                routine: routine_receipt(BEN, bens),
+                variables: Vec::new(),
+            },
+            text("Ben's digest"),
+            PublishScope::Team,
+            Changelog::default(),
+        )
+        .await
+        .expect("Ben publishes his routine");
+
+    assert_eq!(copy.kind, ListingKind::Routine);
+    assert_eq!(copy.id, bens);
+    assert_eq!(published.updates.updated, 0);
+    assert_eq!(
+        instructions(&routines.saved(bens)),
+        json!("Sum up the week")
+    );
+    let routine = after[0]
+        .installed_routine
+        .as_ref()
+        .expect("an installed routine");
+    assert!(routine.detached);
+    assert_eq!(
+        his.based_on,
+        Some(ListingOrigin {
+            id: listing.id,
+            title: "Weekly digest".to_owned(),
+        })
     );
 }

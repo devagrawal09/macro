@@ -15,10 +15,10 @@ use uuid::Uuid;
 
 use super::PgListingRepo;
 use crate::domain::models::{
-    AddedVersion, Audience, FollowingInstall, InstallUpdate, InstalledRoutine, Listing,
-    ListingContent, ListingCursor, ListingId, ListingKind, ListingQuery, ListingScope, ListingText,
-    ListingsShown, NewListing, PublishedPage, PublishedRoutine, ReviewDecision, ReviewState,
-    RoutineInstall, TaskHash, Version, VersionBump,
+    AddedVersion, Audience, Changelog, FollowingInstall, InstallUpdate, InstalledRoutine, Listing,
+    ListingContent, ListingCursor, ListingId, ListingKind, ListingOrigin, ListingQuery,
+    ListingScope, ListingText, ListingsShown, NewCopy, NewListing, PublishedPage, PublishedRoutine,
+    ReviewDecision, ReviewState, RoutineInstall, TaskHash, Version, VersionBump, VersionNotes,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -159,6 +159,8 @@ fn board(team: Uuid) -> NewListing {
         },
         content: page("<h1>Board</h1>"),
         review: ReviewState::Approved,
+        changelog: Changelog::default(),
+        derived_from: None,
     }
 }
 
@@ -175,6 +177,8 @@ fn digest(team: Uuid) -> NewListing {
         },
         content: routine("Weekly digest"),
         review: ReviewState::Approved,
+        changelog: Changelog::default(),
+        derived_from: None,
     }
 }
 
@@ -244,6 +248,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             VersionBump::Minor,
             &page("<h1>Board</h1>"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -253,6 +258,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             VersionBump::Minor,
             &page("<h1>Board 2</h1>"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -262,6 +268,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             VersionBump::Major,
             &page("<h1>Board 3</h1>"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -271,6 +278,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             VersionBump::Minor,
             &page("<h1>Board 4</h1>"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -280,6 +288,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             VersionBump::Minor,
             &page("<h1>Nothing</h1>"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -294,6 +303,65 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
     );
     assert_eq!(missing, AddedVersion::Missing);
     assert_eq!(listed[0].latest_version, Version { major: 2, minor: 1 });
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_history_keeps_each_versions_changelog_newest_first(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = NewListing {
+        changelog: Changelog::new(Some("First cut")).unwrap(),
+        ..digest(acme)
+    };
+    repo.create_listing(listing.clone()).await.unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Major,
+        &routine("Weekly digest, with a board"),
+        ReviewState::Approved,
+        &VersionNotes {
+            changelog: Changelog::new(Some("Asks for a board")).unwrap(),
+            forced_major: true,
+        },
+    )
+    .await
+    .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &routine("Weekly digest, tidied"),
+        ReviewState::Approved,
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+
+    let history = repo.versions(listing.id, false).await.unwrap();
+    let unknown = repo.versions(ListingId::generate(), false).await.unwrap();
+
+    let summary: Vec<(Version, Option<&str>, bool)> = history
+        .iter()
+        .map(|entry| {
+            (
+                entry.version,
+                entry.changelog.as_deref(),
+                entry.forced_major,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (Version { major: 2, minor: 1 }, None, false),
+            (
+                Version { major: 2, minor: 0 },
+                Some("Asks for a board"),
+                true
+            ),
+            (Version::FIRST, Some("First cut"), false),
+        ]
+    );
+    assert!(unknown.is_empty());
 }
 
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
@@ -315,6 +383,7 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
         VersionBump::Minor,
         &page("<h1>Board 1.1</h1>"),
         ReviewState::Approved,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -323,6 +392,7 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
         VersionBump::Major,
         &page("<h1>Board 2.0</h1>"),
         ReviewState::Approved,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -351,10 +421,18 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
     assert_eq!(on_first_major.html, "<h1>Board 1.1</h1>");
     assert_eq!(from_another_team, None);
     assert_eq!(waiting[0].installed_major, Some(1));
+    assert_eq!(
+        waiting[0].installed_version,
+        Some(Version { major: 1, minor: 1 })
+    );
     assert_eq!(waiting[0].latest_version, Version { major: 2, minor: 0 });
     assert_eq!(on_second_major.version, Version { major: 2, minor: 0 });
     assert_eq!(on_second_major.html, "<h1>Board 2.0</h1>");
     assert_eq!(moved[0].installed_major, Some(2));
+    assert_eq!(
+        moved[0].installed_version,
+        Some(Version { major: 2, minor: 0 })
+    );
     assert_eq!(moved[0].install_count, 1);
 }
 
@@ -744,6 +822,7 @@ async fn a_routine_version_stores_its_snapshot_and_no_page(pool: PgPool) {
             VersionBump::Minor,
             &routine("Weekly digest"),
             ReviewState::Approved,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -752,6 +831,7 @@ async fn a_routine_version_stores_its_snapshot_and_no_page(pool: PgPool) {
         VersionBump::Minor,
         &routine("Weekly digest 1.1"),
         ReviewState::Approved,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -760,6 +840,7 @@ async fn a_routine_version_stores_its_snapshot_and_no_page(pool: PgPool) {
         VersionBump::Major,
         &routine("Weekly digest 2"),
         ReviewState::Approved,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -1061,6 +1142,7 @@ async fn installers_are_team_members_on_the_major_newest_install_first(pool: PgP
         VersionBump::Major,
         &page("<h1>Board 2.0</h1>"),
         ReviewState::Approved,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -1164,6 +1246,7 @@ async fn approving_makes_a_version_live_and_records_its_reviewer(pool: PgPool) {
             VersionBump::Minor,
             &page("<h1>Board 1.1</h1>"),
             ReviewState::Pending,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -1173,6 +1256,7 @@ async fn approving_makes_a_version_live_and_records_its_reviewer(pool: PgPool) {
             VersionBump::Minor,
             &page("<h1>Board 1.2</h1>"),
             ReviewState::Pending,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -1227,6 +1311,7 @@ async fn a_rejected_version_keeps_its_reason_and_frees_its_number(pool: PgPool) 
         VersionBump::Minor,
         &page("<h1>Board 1.1</h1>"),
         ReviewState::Pending,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -1253,6 +1338,7 @@ async fn a_rejected_version_keeps_its_reason_and_frees_its_number(pool: PgPool) 
             VersionBump::Minor,
             &page("<h1>Board 1.1, fixed</h1>"),
             ReviewState::Pending,
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -1305,6 +1391,7 @@ async fn a_routine_version_and_installs_read_approved_versions_only(pool: PgPool
         VersionBump::Major,
         &routine("Weekly digest 2"),
         ReviewState::Pending,
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
@@ -1323,4 +1410,393 @@ async fn a_routine_version_and_installs_read_approved_versions_only(pool: PgPool
     assert!(before.is_none());
     assert_eq!(newest.version, Version::FIRST);
     assert_eq!(installed.installed_major, Some(1));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_pin_holds_a_page_on_its_minor_and_keeps_a_routine_from_updates(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    let repo = PgListingRepo::new(pool);
+    let page_listing = board(acme);
+    let routine_listing = digest(acme);
+    repo.create_listing(page_listing.clone()).await.unwrap();
+    repo.create_listing(routine_listing.clone()).await.unwrap();
+    let not_installed = repo
+        .set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+
+    // Ben pins his page on 1.0; a minor version follows.
+    repo.install_latest(page_listing.id, &user(BEN))
+        .await
+        .unwrap();
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    repo.add_version(
+        page_listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1</h1>"),
+        ReviewState::Approved,
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+    // Pinning again keeps the pin on 1.0.
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    let pinned_page = repo
+        .installed_page(page_listing.id, &user(BEN), Some(acme))
+        .await
+        .unwrap()
+        .expect("the install has a page");
+    let pinned_listing = repo
+        .listing(&user(BEN), member(Some(acme)), page_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+    repo.set_pinned(page_listing.id, &user(BEN), false)
+        .await
+        .unwrap();
+    let unpinned_page = repo
+        .installed_page(page_listing.id, &user(BEN), Some(acme))
+        .await
+        .unwrap()
+        .expect("the install has a page");
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    repo.install_latest(page_listing.id, &user(BEN))
+        .await
+        .unwrap();
+    let after_taking = repo
+        .listing(&user(BEN), member(Some(acme)), page_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+
+    // Ben pins his routine; Cara doesn't, so only she is behind.
+    repo.save_routine_install(
+        routine_listing.id,
+        &user(BEN),
+        &install(0, Uuid::now_v7(), "ben"),
+    )
+    .await
+    .unwrap();
+    repo.save_routine_install(
+        routine_listing.id,
+        &user(CARA),
+        &install(0, Uuid::now_v7(), "cara"),
+    )
+    .await
+    .unwrap();
+    repo.set_pinned(routine_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    let behind = repo
+        .installs_behind(routine_listing.id, Version { major: 1, minor: 1 })
+        .await
+        .unwrap();
+    let pinned_routine = repo
+        .listing(&user(BEN), member(Some(acme)), routine_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+
+    assert!(!not_installed);
+    assert_eq!(pinned_page.version, Version::FIRST);
+    assert!(pinned_page.pinned);
+    assert!(pinned_listing.pinned);
+    assert_eq!(pinned_listing.installed_version, Some(Version::FIRST));
+    assert_eq!(unpinned_page.version, Version { major: 1, minor: 1 });
+    assert!(!unpinned_page.pinned);
+    assert!(!after_taking.pinned, "taking a version unpins");
+    let behind: Vec<String> = behind
+        .into_iter()
+        .map(|following| following.user.as_ref().to_owned())
+        .collect();
+    assert_eq!(behind, vec![CARA.to_owned()]);
+    assert!(pinned_routine.pinned);
+    assert_eq!(pinned_routine.installed_version, Some(Version::FIRST));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_listing_from_a_copy_is_based_on_its_origin_where_the_origin_is_seen(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    join_team(&pool, acme, BEN).await;
+    join_team(&pool, acme, CARA).await;
+    let other = insert_team(&pool, OTHER_OWNER).await;
+    let repo = PgListingRepo::new(pool);
+    let origin = board(acme);
+    repo.create_listing(origin.clone()).await.unwrap();
+    repo.install_latest(origin.id, &user(BEN)).await.unwrap();
+
+    // Ben copies the board into a document of his own, twice recorded.
+    let document = Uuid::now_v7();
+    let copy = NewCopy {
+        kind: ListingKind::Artifact,
+        copy_id: document,
+        listing_id: origin.id,
+        version: Version::FIRST,
+        user: user(BEN),
+    };
+    repo.record_copy(&copy).await.unwrap();
+    repo.record_copy(&copy).await.unwrap();
+    let copied_from = repo
+        .copied_from(ListingKind::Artifact, document)
+        .await
+        .unwrap();
+    let not_a_routine = repo
+        .copied_from(ListingKind::Routine, document)
+        .await
+        .unwrap();
+    let not_a_copy = repo
+        .copied_from(ListingKind::Artifact, Uuid::now_v7())
+        .await
+        .unwrap();
+
+    // He publishes it to Acme, and to another team that can't see the board.
+    let bens = NewListing {
+        publisher: user(BEN),
+        source_id: document,
+        derived_from: copied_from,
+        text: ListingText {
+            title: "Ben's board".to_owned(),
+            description: String::new(),
+        },
+        ..board(acme)
+    };
+    let elsewhere = NewListing {
+        id: ListingId::generate(),
+        team_id: Some(other),
+        source_id: Uuid::now_v7(),
+        ..bens.clone()
+    };
+    repo.create_listing(bens.clone()).await.unwrap();
+    repo.create_listing(elsewhere.clone()).await.unwrap();
+    let seen_by = |viewer: &'static str, team: Uuid, id: ListingId| {
+        let repo = repo.clone();
+        async move {
+            repo.listing(&user(viewer), member(Some(team)), id)
+                .await
+                .unwrap()
+                .expect("the listing is seen")
+                .based_on
+        }
+    };
+    let for_cara = seen_by(CARA, acme, bens.id).await;
+    let for_other_team = seen_by(OTHER_OWNER, other, elsewhere.id).await;
+
+    // Unlisted, the board stays seen only by Ben, who installed it.
+    repo.remove_listing(origin.id).await.unwrap();
+    let for_cara_after_unlisting = seen_by(CARA, acme, bens.id).await;
+    let for_ben_after_unlisting = seen_by(BEN, acme, bens.id).await;
+
+    let board_origin = Some(ListingOrigin {
+        id: origin.id,
+        title: "Board".to_owned(),
+    });
+    assert_eq!(copied_from, Some(origin.id));
+    assert_eq!(not_a_routine, None);
+    assert_eq!(not_a_copy, None);
+    assert_eq!(for_cara, board_origin);
+    assert_eq!(for_other_team, None);
+    assert_eq!(for_cara_after_unlisting, None);
+    assert_eq!(for_ben_after_unlisting, board_origin);
+}
+
+// How review meets version history, pins and lineage.
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_history_lists_approved_versions_and_the_pending_one_only_when_asked(pool: PgPool) {
+    insert_user(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = global_board();
+    repo.create_listing(listing.clone()).await.unwrap();
+    repo.decide_review(
+        listing.id,
+        Version::FIRST,
+        &user(BEN),
+        &ReviewDecision::Approve,
+    )
+    .await
+    .unwrap();
+    // 1.1 is rejected; the next version takes its number and waits.
+    let notes = |text: &str| VersionNotes {
+        changelog: Changelog::new(Some(text)).unwrap(),
+        forced_major: false,
+    };
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1</h1>"),
+        ReviewState::Pending,
+        &notes("Rejected"),
+    )
+    .await
+    .unwrap();
+    let v1_1 = Version { major: 1, minor: 1 };
+    repo.decide_review(
+        listing.id,
+        v1_1,
+        &user(BEN),
+        &ReviewDecision::Reject { reason: None },
+    )
+    .await
+    .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1, again</h1>"),
+        ReviewState::Pending,
+        &notes("Waiting"),
+    )
+    .await
+    .unwrap();
+
+    let approved = repo.versions(listing.id, false).await.unwrap();
+    let with_pending = repo.versions(listing.id, true).await.unwrap();
+
+    let read = |versions: Vec<crate::domain::models::ListingVersion>| {
+        versions
+            .into_iter()
+            .map(|version| (version.version, version.review, version.changelog))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        read(approved),
+        vec![(Version::FIRST, ReviewState::Approved, None)]
+    );
+    assert_eq!(
+        read(with_pending),
+        vec![
+            (v1_1, ReviewState::Pending, Some("Waiting".to_owned())),
+            (Version::FIRST, ReviewState::Approved, None),
+        ]
+    );
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_pin_and_an_installed_version_never_name_a_pending_minor(pool: PgPool) {
+    insert_user(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = global_board();
+    repo.create_listing(listing.clone()).await.unwrap();
+    repo.decide_review(
+        listing.id,
+        Version::FIRST,
+        &user(BEN),
+        &ReviewDecision::Approve,
+    )
+    .await
+    .unwrap();
+    repo.install_latest(listing.id, &user(BEN)).await.unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1</h1>"),
+        ReviewState::Pending,
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+
+    let before_pin = repo
+        .listing(&user(BEN), publisher(), listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees it");
+    repo.set_pinned(listing.id, &user(BEN), true).await.unwrap();
+    let pinned = repo
+        .installed_page(listing.id, &user(BEN), None)
+        .await
+        .unwrap()
+        .expect("the pinned page");
+    let v1_1 = Version { major: 1, minor: 1 };
+    repo.decide_review(listing.id, v1_1, &user(ADA), &ReviewDecision::Approve)
+        .await
+        .unwrap();
+    let still_pinned = repo
+        .installed_page(listing.id, &user(BEN), None)
+        .await
+        .unwrap()
+        .expect("the pinned page");
+    repo.set_pinned(listing.id, &user(BEN), false)
+        .await
+        .unwrap();
+    let unpinned = repo
+        .installed_page(listing.id, &user(BEN), None)
+        .await
+        .unwrap()
+        .expect("the page");
+
+    // Even a publisher, who sees 1.1 waiting, has 1.0 installed.
+    assert_eq!(before_pin.pending_version, Some(v1_1));
+    assert_eq!(before_pin.installed_version, Some(Version::FIRST));
+    assert_eq!((pinned.version, pinned.pinned), (Version::FIRST, true));
+    assert_eq!(still_pinned.version, Version::FIRST);
+    assert_eq!((unpinned.version, unpinned.pinned), (v1_1, false));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn lineage_hides_a_global_origin_with_no_approved_version(pool: PgPool) {
+    insert_user(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool);
+    // The origin waits for its first approval.
+    let origin = global_board();
+    repo.create_listing(origin.clone()).await.unwrap();
+    // A global listing derived from it, already approved.
+    let derived = NewListing {
+        id: ListingId::generate(),
+        source_id: Uuid::now_v7(),
+        derived_from: Some(origin.id),
+        text: ListingText {
+            title: "Ben's board".to_owned(),
+            description: String::new(),
+        },
+        ..global_board()
+    };
+    repo.create_listing(derived.clone()).await.unwrap();
+    repo.decide_review(
+        derived.id,
+        Version::FIRST,
+        &user(ADA),
+        &ReviewDecision::Approve,
+    )
+    .await
+    .unwrap();
+    let based_on = |audience: Audience| {
+        let repo = repo.clone();
+        async move {
+            repo.listing(&user(OTHER_OWNER), audience, derived.id)
+                .await
+                .unwrap()
+                .expect("the derived listing is seen")
+                .based_on
+                .map(|origin| origin.id)
+        }
+    };
+
+    let for_member = based_on(member(None)).await;
+    let for_publisher = based_on(publisher()).await;
+    repo.decide_review(
+        origin.id,
+        Version::FIRST,
+        &user(BEN),
+        &ReviewDecision::Approve,
+    )
+    .await
+    .unwrap();
+    let once_approved = based_on(member(None)).await;
+
+    assert_eq!(for_member, None);
+    assert_eq!(for_publisher, Some(origin.id));
+    assert_eq!(once_approved, Some(origin.id));
 }

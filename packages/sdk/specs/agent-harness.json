@@ -4286,7 +4286,7 @@
     "/marketplace/listings/{id}/install/build": {
       "get": {
         "tags": ["marketplace"],
-        "summary": "Build the page the caller's install shows: the newest minor version of\nthe major they are on.",
+        "summary": "Build the page the caller's install shows: the newest minor version of\nthe major they are on, or the version they pinned.",
         "operationId": "get_installed_listing_build",
         "parameters": [
           {
@@ -4391,6 +4391,165 @@
         }
       }
     },
+    "/marketplace/listings/{id}/install/copy": {
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Make the caller's own copy of what they installed, recording the listing\nand version it came from. An artifact becomes a new HTML document owned\nby the caller, holding the version their install shows; the install\nstays. A routine install is detached: the routine stays the caller's and\ngets no more updates. Publishing the copy later says it is based on this\nlisting.",
+        "operationId": "copy_marketplace_install",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingCopy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/listings/{id}/install/pin": {
+      "put": {
+        "tags": ["marketplace"],
+        "summary": "Pin the caller's install to the version it has: a page keeps showing it\nand a routine gets no automatic updates. Taking a version with\n`PUT .../install` unpins it. `400` means a routine the caller edited or\nmade their own, which gets no updates to hold back.",
+        "operationId": "pin_marketplace_install",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "tags": ["marketplace"],
+        "summary": "Unpin the caller's install: it moves to the newest minor version of its\nmajor. A routine is updated to it unless its person edited it, which\ndetaches it as an automatic update would.",
+        "operationId": "unpin_marketplace_install",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing the caller installed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/marketplace/listings/{id}/routine": {
       "get": {
         "tags": ["marketplace"],
@@ -4432,6 +4591,44 @@
       }
     },
     "/marketplace/listings/{id}/versions": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "The listing's versions, newest first: each one's changelog, when it was\npublished, and whether the server made a routine version major. Anyone\nwho sees the listing sees its approved versions; Macro's publishers also\nsee the one waiting for review, as `review: pending`.",
+        "operationId": "list_marketplace_listing_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingVersions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      },
       "post": {
         "tags": ["marketplace"],
         "summary": "Publish the listing's source as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. A routine whose variables, required apps,\ntrigger kinds or knobs changed takes a major version whatever was asked,\nand the answer says which bump applied. A minor routine version updates\neach installed routine its person hasn't edited, after the version is\nstored. A global listing's version waits for review (`review: pending`)\nand reaches nobody until approved. `409` means nothing changed, or another\nversion is still waiting for review.",
@@ -8016,11 +8213,15 @@
       "InstalledListingBuild": {
         "type": "object",
         "description": "The build of the page an install shows.",
-        "required": ["version", "page"],
+        "required": ["version", "pinned", "page"],
         "properties": {
           "page": {
             "$ref": "#/components/schemas/DocumentBuildResponse",
             "description": "The page to render, or why it doesn't build."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "The caller pinned their install to `version`: a newer minor version\ndoesn't replace the page."
           },
           "plainHtml": {
             "type": ["string", "null"],
@@ -8028,7 +8229,7 @@
           },
           "version": {
             "$ref": "#/components/schemas/Version",
-            "description": "The version built: the newest minor of the major the caller is on."
+            "description": "The version built: the newest minor of the major the caller is on,\nor the one they pinned."
           }
         }
       },
@@ -8185,12 +8386,24 @@
           "title",
           "description",
           "latestVersion",
+          "pinned",
           "installCount",
           "removed",
           "createdAt",
           "updatedAt"
         ],
         "properties": {
+          "basedOn": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ListingOrigin",
+                "description": "The listing its source was copied from, when the person asking may\nsee that listing."
+              }
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -8225,6 +8438,17 @@
               }
             ]
           },
+          "installedVersion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Version",
+                "description": "The version the person asking has: the one their page shows, or the\none their routine was last filled in from."
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/ListingKind",
             "description": "What it publishes."
@@ -8243,6 +8467,10 @@
                 "description": "The version waiting for review, shown only to Macro's publishers."
               }
             ]
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "The person asking pinned their install to `installed_version`: newer\nminor versions don't reach it until they unpin or update."
           },
           "publisher": {
             "type": "string",
@@ -8272,6 +8500,22 @@
           }
         }
       },
+      "ListingCopy": {
+        "type": "object",
+        "description": "What making one's own copy of an install made.",
+        "required": ["kind", "id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The new document, or the routine now the caller's own."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ListingKind",
+            "description": "What it is: a document for an artifact, a routine for a routine."
+          }
+        }
+      },
       "ListingId": {
         "type": "string",
         "format": "uuid",
@@ -8281,6 +8525,21 @@
         "type": "string",
         "description": "What a listing publishes.",
         "enum": ["artifact", "routine"]
+      },
+      "ListingOrigin": {
+        "type": "object",
+        "description": "The listing another one's source was copied from.",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ListingId",
+            "description": "Its id."
+          },
+          "title": {
+            "type": "string",
+            "description": "Its title."
+          }
+        }
       },
       "ListingRoutine": {
         "type": "object",
@@ -8372,6 +8631,48 @@
           }
         ],
         "description": "What a listing is published from."
+      },
+      "ListingVersion": {
+        "type": "object",
+        "description": "One version in a listing's history.",
+        "required": ["version", "forcedMajor", "review", "createdAt"],
+        "properties": {
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What its publisher said changed; absent when they said nothing."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was published."
+          },
+          "forcedMajor": {
+            "type": "boolean",
+            "description": "A routine version the server made major because what installs rely\non changed, whatever bump was asked."
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReviewState",
+            "description": "`approved`, or `pending` for the version waiting for review, which\nonly Macro's publishers see. Rejected versions are never listed."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "Its version."
+          }
+        }
+      },
+      "ListingVersions": {
+        "type": "object",
+        "description": "A listing's versions.",
+        "required": ["versions"],
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListingVersion"
+            },
+            "description": "Every version, newest first."
+          }
+        }
       },
       "LoadAgentModelsRequest": {
         "type": "object",
@@ -8916,6 +9217,10 @@
         "description": "Publish a page or routine to the caller's team.",
         "required": ["source", "title"],
         "properties": {
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What version 1.0 says about itself, at most 2000 characters."
+          },
           "description": {
             "type": "string",
             "description": "What it does, in a few lines."
@@ -8942,6 +9247,10 @@
           "bump": {
             "$ref": "#/components/schemas/VersionBump",
             "description": "Whether installs get it at once (`minor`) or wait (`major`). A\nroutine that asks something new of its installs takes a major\nversion whatever is asked."
+          },
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What changed, for installers to read: at most 2000 characters."
           },
           "source": {
             "$ref": "#/components/schemas/ListingSource",

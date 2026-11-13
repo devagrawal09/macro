@@ -31,7 +31,9 @@ import type {
   InstalledListingBuild,
   InstallListing,
   Listing,
+  ListingCopy,
   ListingRoutine,
+  ListingVersions,
   ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
@@ -655,6 +657,17 @@ export const agentHarnessServiceClient = {
     );
   },
 
+  /**
+   * A listing's versions, newest first, with what each one changed. Anyone
+   * who sees the listing sees them.
+   */
+  listMarketplaceListingVersions(listingId: string, signal?: AbortSignal) {
+    return fetchWithToken<ListingVersions>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/versions`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
   /** Unlist a listing: its publisher or a team admin. Installs keep it. */
   unlistListing(listingId: string) {
     return fetchWithToken<Record<string, never>>(
@@ -687,6 +700,31 @@ export const agentHarnessServiceClient = {
     return fetchWithToken<ListingRoutine>(
       `${agentHarnessHost}/marketplace/listings/${listingId}/routine`,
       { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /**
+   * Make the caller's own copy of what they installed: a new HTML document
+   * of a page's version, or their routine detached from the listing.
+   */
+  copyListingInstall(listingId: string) {
+    return fetchWithToken<ListingCopy>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install/copy`,
+      { method: 'POST', errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /**
+   * Pin the caller's install to the version it has, or unpin it, which
+   * moves it to the newest minor of its major.
+   */
+  setListingPinned(listingId: string, pinned: boolean) {
+    return fetchWithToken<Listing>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install/pin`,
+      {
+        method: pinned ? 'PUT' : 'DELETE',
+        errorResponseHandler: marketplaceError,
+      }
     );
   },
 

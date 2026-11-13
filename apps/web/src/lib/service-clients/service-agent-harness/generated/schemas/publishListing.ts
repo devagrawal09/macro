@@ -6,12 +6,15 @@
  */
 
 import type { ListingSource } from './listingSource';
+import type { PublishListingChangelog } from './publishListingChangelog';
 import type { PublishScope } from './publishScope';
 
 /**
  * Publish a page or routine to the caller's team.
  */
 export interface PublishListing {
+  /** What version 1.0 says about itself, at most 2000 characters. */
+  changelog?: PublishListingChangelog;
   /** What it does, in a few lines. */
   description?: string;
   /** Who sees it: the caller's team (the default), or everyone once

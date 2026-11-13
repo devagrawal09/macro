@@ -189,6 +189,7 @@ pub fn sdk_endpoints() -> anyhow::Result<SdkEndpoints> {
 
 pub mod connected_apps;
 pub mod document_sources;
+pub mod marketplace_documents;
 pub mod reviews;
 pub mod rollout;
 pub mod ui_commands;

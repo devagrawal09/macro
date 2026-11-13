@@ -58,7 +58,9 @@ import type {
   LinkTaskRequest,
   ListAgentRepositoryBranchesParams,
   Listing,
+  ListingCopy,
   ListingRoutine,
+  ListingVersions,
   ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
@@ -5037,7 +5039,7 @@ export const uninstallMarketplaceListing = async (
 
 /**
  * @summary Build the page the caller's install shows: the newest minor version of
-the major they are on.
+the major they are on, or the version they pinned.
  */
 export type getInstalledListingBuildResponse200 = {
   data: InstalledListingBuild;
@@ -5205,6 +5207,220 @@ export const runInstalledListingProgram = async (
 };
 
 /**
+ * @summary Make the caller's own copy of what they installed, recording the listing
+and version it came from. An artifact becomes a new HTML document owned
+by the caller, holding the version their install shows; the install
+stays. A routine install is detached: the routine stays the caller's and
+gets no more updates. Publishing the copy later says it is based on this
+listing.
+ */
+export type copyMarketplaceInstallResponse201 = {
+  data: ListingCopy;
+  status: 201;
+};
+
+export type copyMarketplaceInstallResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type copyMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type copyMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type copyMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type copyMarketplaceInstallResponseSuccess =
+  copyMarketplaceInstallResponse201 & {
+    headers: Headers;
+  };
+export type copyMarketplaceInstallResponseError = (
+  | copyMarketplaceInstallResponse400
+  | copyMarketplaceInstallResponse401
+  | copyMarketplaceInstallResponse404
+  | copyMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type copyMarketplaceInstallResponse =
+  | copyMarketplaceInstallResponseSuccess
+  | copyMarketplaceInstallResponseError;
+
+export const getCopyMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/copy`;
+};
+
+export const copyMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<copyMarketplaceInstallResponse> => {
+  const res = await fetch(getCopyMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'POST',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: copyMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as copyMarketplaceInstallResponse;
+};
+
+/**
+ * @summary Pin the caller's install to the version it has: a page keeps showing it
+and a routine gets no automatic updates. Taking a version with
+`PUT .../install` unpins it. `400` means a routine the caller edited or
+made their own, which gets no updates to hold back.
+ */
+export type pinMarketplaceInstallResponse200 = {
+  data: Listing;
+  status: 200;
+};
+
+export type pinMarketplaceInstallResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type pinMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type pinMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type pinMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type pinMarketplaceInstallResponseSuccess =
+  pinMarketplaceInstallResponse200 & {
+    headers: Headers;
+  };
+export type pinMarketplaceInstallResponseError = (
+  | pinMarketplaceInstallResponse400
+  | pinMarketplaceInstallResponse401
+  | pinMarketplaceInstallResponse404
+  | pinMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type pinMarketplaceInstallResponse =
+  | pinMarketplaceInstallResponseSuccess
+  | pinMarketplaceInstallResponseError;
+
+export const getPinMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/pin`;
+};
+
+export const pinMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<pinMarketplaceInstallResponse> => {
+  const res = await fetch(getPinMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'PUT',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: pinMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as pinMarketplaceInstallResponse;
+};
+
+/**
+ * @summary Unpin the caller's install: it moves to the newest minor version of its
+major. A routine is updated to it unless its person edited it, which
+detaches it as an automatic update would.
+ */
+export type unpinMarketplaceInstallResponse200 = {
+  data: Listing;
+  status: 200;
+};
+
+export type unpinMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type unpinMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type unpinMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type unpinMarketplaceInstallResponseSuccess =
+  unpinMarketplaceInstallResponse200 & {
+    headers: Headers;
+  };
+export type unpinMarketplaceInstallResponseError = (
+  | unpinMarketplaceInstallResponse401
+  | unpinMarketplaceInstallResponse404
+  | unpinMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type unpinMarketplaceInstallResponse =
+  | unpinMarketplaceInstallResponseSuccess
+  | unpinMarketplaceInstallResponseError;
+
+export const getUnpinMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/pin`;
+};
+
+export const unpinMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<unpinMarketplaceInstallResponse> => {
+  const res = await fetch(getUnpinMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'DELETE',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: unpinMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as unpinMarketplaceInstallResponse;
+};
+
+/**
  * @summary A routine listing's newest version, to fill in before installing it or
 taking its newest major.
  */
@@ -5267,6 +5483,73 @@ export const getMarketplaceListingRoutine = async (
     status: res.status,
     headers: res.headers,
   } as getMarketplaceListingRoutineResponse;
+};
+
+/**
+ * @summary The listing's versions, newest first: each one's changelog, when it was
+published, and whether the server made a routine version major. Anyone
+who sees the listing sees its approved versions; Macro's publishers also
+see the one waiting for review, as `review: pending`.
+ */
+export type listMarketplaceListingVersionsResponse200 = {
+  data: ListingVersions;
+  status: 200;
+};
+
+export type listMarketplaceListingVersionsResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type listMarketplaceListingVersionsResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type listMarketplaceListingVersionsResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type listMarketplaceListingVersionsResponseSuccess =
+  listMarketplaceListingVersionsResponse200 & {
+    headers: Headers;
+  };
+export type listMarketplaceListingVersionsResponseError = (
+  | listMarketplaceListingVersionsResponse401
+  | listMarketplaceListingVersionsResponse404
+  | listMarketplaceListingVersionsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listMarketplaceListingVersionsResponse =
+  | listMarketplaceListingVersionsResponseSuccess
+  | listMarketplaceListingVersionsResponseError;
+
+export const getListMarketplaceListingVersionsUrl = (id: string) => {
+  return `/marketplace/listings/${id}/versions`;
+};
+
+export const listMarketplaceListingVersions = async (
+  id: string,
+  options?: RequestInit
+): Promise<listMarketplaceListingVersionsResponse> => {
+  const res = await fetch(getListMarketplaceListingVersionsUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listMarketplaceListingVersionsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listMarketplaceListingVersionsResponse;
 };
 
 /**

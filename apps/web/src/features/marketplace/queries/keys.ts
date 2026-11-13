@@ -18,4 +18,8 @@ export const marketplaceKeys = createQueryKeys('marketplace', {
   review: (listingId: string) => ({
     queryKey: [listingId],
   }),
+  /** A listing's version history. */
+  versions: (listingId: string) => ({
+    queryKey: [listingId],
+  }),
 });

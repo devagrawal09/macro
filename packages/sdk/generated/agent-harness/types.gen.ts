@@ -2319,11 +2319,17 @@ export type InstalledListingBuild = {
      */
     page: DocumentBuildResponse;
     /**
+     * The caller pinned their install to `version`: a newer minor version
+     * doesn't replace the page.
+     */
+    pinned: boolean;
+    /**
      * The version's source, when `page` is plain and is shown as it is.
      */
     plainHtml?: string | null;
     /**
-     * The version built: the newest minor of the major the caller is on.
+     * The version built: the newest minor of the major the caller is on,
+     * or the one they pinned.
      */
     version: Version;
 };
@@ -2448,6 +2454,7 @@ export type LinkedTaskResponse = {
  * A listing, as the person asking sees it.
  */
 export type Listing = {
+    basedOn?: null | ListingOrigin;
     /**
      * When it was first published.
      */
@@ -2469,6 +2476,7 @@ export type Listing = {
      */
     installedMajor?: number | null;
     installedRoutine?: null | InstalledRoutine;
+    installedVersion?: null | Version;
     /**
      * What it publishes.
      */
@@ -2479,6 +2487,11 @@ export type Listing = {
      */
     latestVersion: Version;
     pendingVersion?: null | Version;
+    /**
+     * The person asking pinned their install to `installed_version`: newer
+     * minor versions don't reach it until they unpin or update.
+     */
+    pinned: boolean;
     /**
      * Who published it.
      */
@@ -2507,6 +2520,20 @@ export type Listing = {
 };
 
 /**
+ * What making one's own copy of an install made.
+ */
+export type ListingCopy = {
+    /**
+     * The new document, or the routine now the caller's own.
+     */
+    id: string;
+    /**
+     * What it is: a document for an artifact, a routine for a routine.
+     */
+    kind: ListingKind;
+};
+
+/**
  * Identifies a listing.
  */
 export type ListingId = string;
@@ -2515,6 +2542,20 @@ export type ListingId = string;
  * What a listing publishes.
  */
 export type ListingKind = 'artifact' | 'routine';
+
+/**
+ * The listing another one's source was copied from.
+ */
+export type ListingOrigin = {
+    /**
+     * Its id.
+     */
+    id: ListingId;
+    /**
+     * Its title.
+     */
+    title: string;
+};
 
 /**
  * A routine listing's newest version.
@@ -2562,6 +2603,44 @@ export type ListingSource = {
      * Its user-specific parts, marked as when sharing it as a template.
      */
     variables?: Array<TemplateVariable>;
+};
+
+/**
+ * One version in a listing's history.
+ */
+export type ListingVersion = {
+    /**
+     * What its publisher said changed; absent when they said nothing.
+     */
+    changelog?: string | null;
+    /**
+     * When it was published.
+     */
+    createdAt: string;
+    /**
+     * A routine version the server made major because what installs rely
+     * on changed, whatever bump was asked.
+     */
+    forcedMajor: boolean;
+    /**
+     * `approved`, or `pending` for the version waiting for review, which
+     * only Macro's publishers see. Rejected versions are never listed.
+     */
+    review: ReviewState;
+    /**
+     * Its version.
+     */
+    version: Version;
+};
+
+/**
+ * A listing's versions.
+ */
+export type ListingVersions = {
+    /**
+     * Every version, newest first.
+     */
+    versions: Array<ListingVersion>;
 };
 
 /**
@@ -2950,6 +3029,10 @@ export type PropertySelector = {
  */
 export type PublishListing = {
     /**
+     * What version 1.0 says about itself, at most 2000 characters.
+     */
+    changelog?: string | null;
+    /**
      * What it does, in a few lines.
      */
     description?: string;
@@ -2978,6 +3061,10 @@ export type PublishListingVersion = {
      * version whatever is asked.
      */
     bump: VersionBump;
+    /**
+     * What changed, for installers to read: at most 2000 characters.
+     */
+    changelog?: string | null;
     /**
      * What the listing was published from.
      */
@@ -6187,6 +6274,86 @@ export type RunInstalledListingProgramResponses = {
 
 export type RunInstalledListingProgramResponse = RunInstalledListingProgramResponses[keyof RunInstalledListingProgramResponses];
 
+export type CopyMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/copy';
+};
+
+export type CopyMarketplaceInstallErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type CopyMarketplaceInstallError = CopyMarketplaceInstallErrors[keyof CopyMarketplaceInstallErrors];
+
+export type CopyMarketplaceInstallResponses = {
+    201: ListingCopy;
+};
+
+export type CopyMarketplaceInstallResponse = CopyMarketplaceInstallResponses[keyof CopyMarketplaceInstallResponses];
+
+export type UnpinMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/pin';
+};
+
+export type UnpinMarketplaceInstallErrors = {
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type UnpinMarketplaceInstallError = UnpinMarketplaceInstallErrors[keyof UnpinMarketplaceInstallErrors];
+
+export type UnpinMarketplaceInstallResponses = {
+    200: Listing;
+};
+
+export type UnpinMarketplaceInstallResponse = UnpinMarketplaceInstallResponses[keyof UnpinMarketplaceInstallResponses];
+
+export type PinMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/pin';
+};
+
+export type PinMarketplaceInstallErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type PinMarketplaceInstallError = PinMarketplaceInstallErrors[keyof PinMarketplaceInstallErrors];
+
+export type PinMarketplaceInstallResponses = {
+    200: Listing;
+};
+
+export type PinMarketplaceInstallResponse = PinMarketplaceInstallResponses[keyof PinMarketplaceInstallResponses];
+
 export type GetMarketplaceListingRoutineData = {
     body?: never;
     path: {
@@ -6210,6 +6377,30 @@ export type GetMarketplaceListingRoutineResponses = {
 };
 
 export type GetMarketplaceListingRoutineResponse = GetMarketplaceListingRoutineResponses[keyof GetMarketplaceListingRoutineResponses];
+
+export type ListMarketplaceListingVersionsData = {
+    body?: never;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/versions';
+};
+
+export type ListMarketplaceListingVersionsErrors = {
+    401: unknown;
+    404: unknown;
+    500: unknown;
+};
+
+export type ListMarketplaceListingVersionsResponses = {
+    200: ListingVersions;
+};
+
+export type ListMarketplaceListingVersionsResponse = ListMarketplaceListingVersionsResponses[keyof ListMarketplaceListingVersionsResponses];
 
 export type PublishMarketplaceListingVersionData = {
     body: PublishListingVersion;

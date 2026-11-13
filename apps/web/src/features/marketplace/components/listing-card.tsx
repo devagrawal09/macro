@@ -6,10 +6,13 @@ import {
   hasApprovedVersion,
   installedRoutineState,
   isInstalled,
+  isPinned,
   type Listing,
+  newerThanPinned,
   updateAvailable,
   versionLabel,
 } from '../core/listing';
+import { updateLabel } from './update-changes';
 
 /** One marketplace listing: what it is, who published it, and what to do with it. */
 export function ListingCard(props: {
@@ -25,8 +28,28 @@ export function ListingCard(props: {
   onUpdate(): void;
   onUninstall(): void;
   onUnlist(): void;
+  /** Show its details and version history. */
+  onDetails(): void;
+  /** Pin the install to the version it has, or unpin it. */
+  onPin(pinned: boolean): void;
+  /** Make the viewer's own copy of what they installed. */
+  onCopy(): void;
 }) {
   const installed = () => isInstalled(props.listing);
+  // A routine its person edited gets no updates to hold back.
+  const pinnable = () =>
+    installed() &&
+    !isPinned(props.listing) &&
+    installedRoutineState(props.listing) !== 'detached';
+  // A page copies into a document any time; a routine becomes one's own
+  // once, which detaches it.
+  const copyLabel = () => {
+    if (!installed()) return undefined;
+    if (props.listing.kind === 'artifact') return t('marketplace.makeCopy');
+    return installedRoutineState(props.listing) === 'detached'
+      ? undefined
+      : t('marketplace.makeOwn');
+  };
   const unlistable = () => props.canUnlist && !props.listing.removed;
 
   return (
@@ -67,6 +90,11 @@ export function ListingCard(props: {
               </Badge>
             )}
           </Show>
+          <Show when={isPinned(props.listing)}>
+            <Badge variant="ghost" size="xs">
+              {t('marketplace.pinned')}
+            </Badge>
+          </Show>
         </Card.Metadata>
         <Card.Title>{props.listing.title}</Card.Title>
         <Show when={props.listing.description}>
@@ -77,6 +105,27 @@ export function ListingCard(props: {
         <span class="truncate text-xs text-ink-extra-muted">
           {t('marketplace.byPublisher', { name: props.publisherName })}
         </span>
+        <Show when={props.listing.basedOn}>
+          {(origin) => (
+            <span class="truncate text-xs text-ink-extra-muted">
+              {t('marketplace.basedOn', { title: origin().title })}
+            </span>
+          )}
+        </Show>
+        <Show
+          when={
+            newerThanPinned(props.listing) && props.listing.installedVersion
+          }
+        >
+          {(installed) => (
+            <p role="status" class="text-xs text-ink-muted">
+              {t('marketplace.pinnedNewer', {
+                pinned: versionLabel(installed()),
+                version: versionLabel(props.listing.latestVersion),
+              })}
+            </p>
+          )}
+        </Show>
         <Show when={installedRoutineState(props.listing) === 'detached'}>
           <p role="status" class="text-xs text-ink-muted">
             {t('marketplace.routineDetached')}
@@ -117,9 +166,7 @@ export function ListingCard(props: {
                 disabled={props.busy}
                 onClick={() => props.onUpdate()}
               >
-                {t('marketplace.updateTo', {
-                  major: props.listing.latestVersion.major,
-                })}
+                {updateLabel(props.listing)}
               </Button>
             </Show>
             <Button
@@ -131,41 +178,75 @@ export function ListingCard(props: {
               {t('marketplace.open')}
             </Button>
           </Show>
-          <Show when={installed() || unlistable()}>
-            <Dropdown placement="bottom-end">
-              <Dropdown.Trigger
-                variant="ghost"
-                size="icon-sm"
-                class="touch:min-h-11 touch:min-w-11"
-                disabled={props.busy}
-                aria-label={t('marketplace.moreActions', {
-                  title: props.listing.title,
-                })}
-              >
-                <DotsIcon class="size-4" />
-              </Dropdown.Trigger>
-              <Dropdown.Content class="min-w-36 max-w-64">
-                <Dropdown.Group>
-                  <Show when={installed()}>
+          <Dropdown placement="bottom-end">
+            <Dropdown.Trigger
+              variant="ghost"
+              size="icon-sm"
+              class="touch:min-h-11 touch:min-w-11"
+              disabled={props.busy}
+              aria-label={t('marketplace.moreActions', {
+                title: props.listing.title,
+              })}
+            >
+              <DotsIcon class="size-4" />
+            </Dropdown.Trigger>
+            <Dropdown.Content class="min-w-36 max-w-64">
+              <Dropdown.Group>
+                <Dropdown.Item
+                  class="touch:min-h-11"
+                  onSelect={() => props.onDetails()}
+                >
+                  {t('marketplace.versionHistory')}
+                </Dropdown.Item>
+                <Show when={pinnable() && props.listing.installedVersion}>
+                  {(version) => (
                     <Dropdown.Item
                       class="touch:min-h-11"
-                      onSelect={() => props.onUninstall()}
+                      onSelect={() => props.onPin(true)}
                     >
-                      {t('marketplace.uninstall')}
+                      {t('marketplace.pinTo', {
+                        version: versionLabel(version()),
+                      })}
                     </Dropdown.Item>
-                  </Show>
-                  <Show when={unlistable()}>
+                  )}
+                </Show>
+                <Show when={isPinned(props.listing)}>
+                  <Dropdown.Item
+                    class="touch:min-h-11"
+                    onSelect={() => props.onPin(false)}
+                  >
+                    {t('marketplace.unpin')}
+                  </Dropdown.Item>
+                </Show>
+                <Show when={copyLabel()}>
+                  {(label) => (
                     <Dropdown.Item
-                      class="text-failure-ink touch:min-h-11"
-                      onSelect={() => props.onUnlist()}
+                      class="touch:min-h-11"
+                      onSelect={() => props.onCopy()}
                     >
-                      {t('marketplace.unlist')}
+                      {label()}
                     </Dropdown.Item>
-                  </Show>
-                </Dropdown.Group>
-              </Dropdown.Content>
-            </Dropdown>
-          </Show>
+                  )}
+                </Show>
+                <Show when={installed()}>
+                  <Dropdown.Item
+                    class="touch:min-h-11"
+                    onSelect={() => props.onUninstall()}
+                  >
+                    {t('marketplace.uninstall')}
+                  </Dropdown.Item>
+                </Show>
+                <Show when={unlistable()}>
+                  <Dropdown.Item
+                    class="text-failure-ink touch:min-h-11"
+                    onSelect={() => props.onUnlist()}
+                  >
+                    {t('marketplace.unlist')}
+                  </Dropdown.Item>
+                </Show>
+              </Dropdown.Group>
+            </Dropdown.Content>
+          </Dropdown>
         </Card.Actions>
       </Card.Footer>
     </Card>

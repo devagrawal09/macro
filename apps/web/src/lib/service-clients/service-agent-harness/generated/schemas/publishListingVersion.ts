@@ -6,6 +6,7 @@
  */
 
 import type { ListingSource } from './listingSource';
+import type { PublishListingVersionChangelog } from './publishListingVersionChangelog';
 import type { VersionBump } from './versionBump';
 
 /**
@@ -16,6 +17,8 @@ export interface PublishListingVersion {
 routine that asks something new of its installs takes a major
 version whatever is asked. */
   bump: VersionBump;
+  /** What changed, for installers to read: at most 2000 characters. */
+  changelog?: PublishListingVersionChangelog;
   /** What the listing was published from. */
   source: ListingSource;
 }

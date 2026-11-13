@@ -47,17 +47,21 @@ export const agentHarnessBacklog = [
   // A stored HTML page's build, which fits the documents namespace.
   'getDocumentBuild',
   // The marketplace is a prototype: its routes may still change shape.
+  'copyMarketplaceInstall',
   'getInstalledListingBuild',
   'getMarketplaceListingRoutine',
   'getMarketplaceVersionReview',
   'installMarketplaceListing',
+  'listMarketplaceListingVersions',
   'listMarketplaceListings',
   'listMarketplacePendingVersions',
+  'pinMarketplaceInstall',
   'publishMarketplaceListing',
   'publishMarketplaceListingVersion',
   'reviewMarketplaceVersion',
   'uninstallMarketplaceListing',
   'unlistMarketplaceListing',
+  'unpinMarketplaceInstall',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
 export const authExcluded = [

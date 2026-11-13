@@ -11,6 +11,7 @@ import {
   type PublishListingVersion,
 } from '@service-agent-harness/client';
 import type {
+  ListingCopy,
   ListMarketplaceListingsParams,
   MarketplaceListings,
   PublishedVersion,
@@ -27,7 +28,7 @@ import type {
   ListingsFilter,
   MarketplaceSource,
 } from '../context/marketplace-source';
-import type { Listing, ListingKind } from '../core/listing';
+import type { Listing, ListingKind, ListingVersion } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { marketplaceKeys } from './keys';
 import { createPendingList, useReviewVersionMutation } from './review';
@@ -36,6 +37,9 @@ export type { PublishListingErrorCode };
 
 /** An action on one listing, sent in the trace of the span that started it. */
 export type ListingAction = { listingId: string; parentSpan?: TraceContext };
+
+/** Pinning or unpinning an install. */
+export type PinAction = ListingAction & { pinned: boolean };
 
 /** An install, with a routine's fills when it is one. */
 export type InstallAction = ListingAction & { request?: InstallListing };
@@ -197,6 +201,60 @@ export function useUninstallListingMutation(
   }));
 }
 
+/**
+ * Pins the viewer's install to the version it has, or unpins it, which
+ * moves it to the newest minor of its major (and updates a routine).
+ */
+export function usePinListingMutation(
+  callbacks?: MutationCallbacks<Listing, Error, PinAction>
+) {
+  return useMutation(() => ({
+    mutationFn: (args: PinAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.setListingPinned(
+            args.listingId,
+            args.pinned
+          )
+        )
+      ),
+    ...withCallbacks(
+      {
+        onSuccess: async (listing) => {
+          setListing(listing);
+          // Unpinning moves an open page to the newest minor.
+          await Promise.all([
+            invalidateListings(),
+            queryClient.invalidateQueries({
+              queryKey: marketplaceKeys.installedBuild(listing.id).queryKey,
+            }),
+          ]);
+        },
+      },
+      callbacks
+    ),
+  }));
+}
+
+/**
+ * Makes the viewer's own copy of what they installed: a new document of a
+ * page, or their routine detached from the listing, which its card then
+ * shows.
+ */
+export function useCopyListingMutation(
+  callbacks?: MutationCallbacks<ListingCopy, Error, ListingAction>
+) {
+  return useMutation(() => ({
+    mutationFn: (args: ListingAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.copyListingInstall(args.listingId)
+        )
+      ),
+    ...withCallbacks({ onSuccess: () => invalidateListings() }, callbacks),
+  }));
+}
+
 export function useUnlistListingMutation(
   callbacks?: MutationCallbacks<void, Error, ListingAction>
 ) {
@@ -272,6 +330,28 @@ export async function fetchListingRoutine(listingId: string) {
         )
       ),
   });
+}
+
+/**
+ * A listing's versions, newest first, with what each changed. Fetched when
+ * asked, by the details dialog or an update's confirmation, and always
+ * fetched fresh: a version may have just been published.
+ */
+export async function fetchListingVersions(
+  listingId: string
+): Promise<readonly ListingVersion[]> {
+  const { versions } = await queryClient.fetchQuery({
+    queryKey: marketplaceKeys.versions(listingId).queryKey,
+    staleTime: 0,
+    queryFn: ({ signal }) =>
+      throwOnErr(() =>
+        agentHarnessServiceClient.listMarketplaceListingVersions(
+          listingId,
+          signal
+        )
+      ),
+  });
+  return versions;
 }
 
 /** Publishes a listing's source, as it is stored now, as its next version. */
@@ -353,6 +433,8 @@ export function createMarketplaceSource(
   const uninstall = useUninstallListingMutation();
   const unlist = useUnlistListingMutation();
   const review = useReviewVersionMutation();
+  const pin = usePinListingMutation();
+  const copy = useCopyListingMutation();
 
   return {
     list: (filter) => createListingList(filter, enabled),
@@ -366,5 +448,10 @@ export function createMarketplaceSource(
       createPendingList(() => enabled() && pendingEnabled()),
     review: (listingId, request, parentSpan) =>
       review.mutateAsync({ listingId, request, parentSpan }),
+    versions: fetchListingVersions,
+    pin: (listingId, pinned, parentSpan) =>
+      pin.mutateAsync({ listingId, pinned, parentSpan }),
+    copy: (listingId, parentSpan) =>
+      copy.mutateAsync({ listingId, parentSpan }),
   };
 }

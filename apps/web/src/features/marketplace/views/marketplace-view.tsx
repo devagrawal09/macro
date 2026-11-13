@@ -17,7 +17,9 @@ import { confirmDialog, Tabs } from '@ui';
 import { createSignal, Match, Show, Switch } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
+import { UpdateChanges, updateLabel } from '../components/update-changes';
 import type {
+  MarketplaceDocuments,
   MarketplaceRoutines,
   MarketplaceSource,
 } from '../context/marketplace-source';
@@ -28,10 +30,12 @@ import {
   listingTeamId,
   type MarketplaceTab,
   versionLabel,
+  versionsBetween,
 } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { createMarketplaceList } from '../primitives/marketplace-list';
 import { InstalledPageView } from './installed-page-view';
+import { ListingDetailsDialog } from './listing-details-dialog';
 import { ReviewList } from './review-list';
 import { ReviewPreviewView } from './review-preview-view';
 
@@ -51,6 +55,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 export function MarketplaceView(props: {
   source: MarketplaceSource;
   routines: MarketplaceRoutines;
+  documents: MarketplaceDocuments;
   userId: string | undefined;
   /** Whether the viewer is an admin of that team. */
   isTeamAdmin: (teamId: string) => boolean;
@@ -66,6 +71,11 @@ export function MarketplaceView(props: {
   );
   const [openId, setOpenId] = createSignal<string>();
   const [reviewing, setReviewing] = createSignal<PendingVersion>();
+  const [detailsId, setDetailsId] = createSignal<string>();
+  const detailsListing = () => {
+    const id = detailsId();
+    return list.listings().find((listing) => listing.id === id);
+  };
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
   const list = props.source.list(() => ({
     installed: chosenTab() === 'installed',
@@ -193,28 +203,39 @@ export function MarketplaceView(props: {
       }
     );
   /**
-   * A routine its person edited is refilled from the new major, replacing
-   * their edits: ask first.
+   * Ask before updating, showing what the versions between the viewer's and
+   * the newest changed. A routine its person edited is refilled from the new
+   * major, replacing their edits, which the question says too.
    */
-  const confirmReplacingEdits = (listing: Listing) =>
-    confirmDialog({
-      title: t('marketplace.updateEditedTitle', {
+  const confirmUpdate = async (listing: Listing) => {
+    const target = listing.latestVersion;
+    const history = await catchToResult(() =>
+      props.source.versions(listing.id)
+    );
+    const changes = history.isOk()
+      ? versionsBetween(
+          history.value,
+          listing.installedVersion ?? undefined,
+          target
+        )
+      : undefined;
+    const replacesEdits = Boolean(listing.installedRoutine?.detached);
+
+    return confirmDialog({
+      title: t('marketplace.updateConfirmTitle', {
         title: listing.title,
-        version: versionLabel(listing.latestVersion),
+        version: versionLabel(target),
       }),
-      body: t('marketplace.updateEditedBody'),
-      confirmLabel: t('marketplace.updateTo', {
-        major: listing.latestVersion.major,
-      }),
-      tone: 'danger',
+      body: <UpdateChanges changes={changes} replacesEdits={replacesEdits} />,
+      confirmLabel: updateLabel(listing),
+      tone: replacesEdits ? 'danger' : undefined,
     });
+  };
 
   // Installing again moves the install to the newest major.
   const update = async (listing: Listing) => {
-    if (listing.installedRoutine?.detached) {
-      const confirmed = await confirmReplacingEdits(listing);
-      if (!confirmed) return;
-    }
+    const confirmed = await confirmUpdate(listing);
+    if (!confirmed) return;
 
     await act(
       'marketplace.update',
@@ -250,6 +271,67 @@ export function MarketplaceView(props: {
       {
         done: t('marketplace.uninstalledToast', { title: listing.title }),
         failed: t('marketplace.uninstallFailed', { title: listing.title }),
+      }
+    );
+  };
+  const pin = (listing: Listing, pinned: boolean) => {
+    const version = versionLabel(
+      listing.installedVersion ?? listing.latestVersion
+    );
+    return act(
+      pinned ? 'marketplace.pin' : 'marketplace.unpin',
+      listing,
+      (span) => props.source.pin(listing.id, pinned, span),
+      pinned
+        ? {
+            done: t('marketplace.pinnedToast', {
+              title: listing.title,
+              version,
+            }),
+            failed: t('marketplace.pinFailed', { title: listing.title }),
+          }
+        : {
+            done: t('marketplace.unpinnedToast', { title: listing.title }),
+            failed: t('marketplace.unpinFailed', { title: listing.title }),
+          }
+    );
+  };
+  /**
+   * Make the viewer's own copy: a page becomes a new document, which opens;
+   * a routine is detached from the listing, which is asked first.
+   */
+  const copy = async (listing: Listing) => {
+    if (listing.kind === 'routine') {
+      const confirmed = await confirmDialog({
+        title: t('marketplace.makeOwnTitle', { title: listing.title }),
+        body: t('marketplace.makeOwnBody'),
+        confirmLabel: t('marketplace.makeOwn'),
+      });
+      if (!confirmed) return;
+
+      await act(
+        'marketplace.copy',
+        listing,
+        (span) => props.source.copy(listing.id, span),
+        {
+          done: t('marketplace.madeOwnToast', { title: listing.title }),
+          failed: t('marketplace.makeOwnFailed', { title: listing.title }),
+        }
+      );
+      return;
+    }
+
+    await act(
+      'marketplace.copy',
+      listing,
+      async (span) => {
+        const made = await props.source.copy(listing.id, span);
+        props.documents.open(made.id);
+        return made;
+      },
+      {
+        done: t('marketplace.copiedToast', { title: listing.title }),
+        failed: t('marketplace.copyFailed', { title: listing.title }),
       }
     );
   };
@@ -395,6 +477,11 @@ export function MarketplaceView(props: {
                   onUnlist={() =>
                     fireAndForget(unlist(listing()), 'marketplace')
                   }
+                  onDetails={() => setDetailsId(listing().id)}
+                  onPin={(pinned) =>
+                    fireAndForget(pin(listing(), pinned), 'marketplace')
+                  }
+                  onCopy={() => fireAndForget(copy(listing()), 'marketplace')}
                 />
               )}
             </ListingGrid>
@@ -415,6 +502,18 @@ export function MarketplaceView(props: {
           />
         </Show>
       </div>
+      <Show when={detailsListing()}>
+        {(listing) => (
+          <ListingDetailsDialog
+            listing={listing()}
+            publisherName={props.publisherName(listing().publisher)}
+            versions={props.source.versions}
+            onOpenChange={(open) => {
+              if (!open) setDetailsId(undefined);
+            }}
+          />
+        )}
+      </Show>
     </div>
   );
 

@@ -513,9 +513,29 @@ the shimmer.
   and a major update waits behind a quiet **Update to v2** button on the card
   and the open page, which appears live too. To verify, open an installed
   page in one browser, publish a minor version as its publisher in another,
-  and watch the page swap without interacting with it. The card's **More actions** menu has **Uninstall**, and for the
+  and watch the page swap without interacting with it. **Update to v2**
+  first asks **Update “title” to v2.0?**, listing what changed in each
+  version between the viewer's and the newest (version, date, and the
+  publisher's **What changed** note, or "Its publisher didn’t say what
+  changed."). The card's **More actions** menu has **Version history** (a
+  dialog with the listing's description and every version's note, newest
+  first, from `GET /marketplace/listings/{id}/versions`; a routine version
+  the server made major is badged **Made major**; Macro's publishers also
+  see a version still in review, badged **Waiting for review**, which
+  nobody else sees and which **Update to v2** never lists), **Pin to v1.2** for an
+  install (the version it has) or **Unpin**, **Make a copy** for an
+  installed page (a new HTML document of the version shown, owned by the
+  viewer, which opens in a split; the install stays), **Uninstall**, and for the
   publisher or a team admin **Unlist** (confirmed; people who installed the
-  page keep it). An installed page is not a document: it is the marketplace's
+  page keep it). A pinned install shows a **Pinned** badge (also beside the
+  open page's version) and keeps that exact version: a minor update doesn't
+  reach it and its open page doesn't reload, but the card says **Pinned to
+  v1.0. v1.1 is available.** and offers **Update to v1.1**, which takes the
+  newest version and unpins. **Unpin** moves it to the newest approved
+  minor of its major; approving a Macro listing's minor version doesn't
+  update a pinned routine or reload a pinned page. A listing published from such a copy reads **Based on <title>**
+  on its card and in Version history, for viewers who can see the original
+  listing (nothing otherwise). An installed page is not a document: it is the marketplace's
   own build of the published version, and its programs run as the viewer. To
   publish, open an HTML page you own and choose **Publish to marketplace…**
   from its file menu (see
@@ -2830,6 +2850,13 @@ everyone, and each such version waits for a second member's approval:
   Approving sends the minor routine updates and live version messages
   installers would have had on publish; rejecting a new listing's first
   version unlists it, so its source can be published again.
+- Review and history: a version's **What changed** note and **Made major**
+  badge travel with it through review. Version history shows other people
+  approved versions only; publishers also see the pending one, badged
+  **Waiting for review**. A rejected version leaves the history. Approving a
+  minor version skips pinned installs, and a copy is always of the approved
+  version the install shows. **Based on** names a Macro listing still
+  waiting for its first approval only to publishers.
 - **Preview** (`GET /marketplace/review/{id}`) replaces the tabs, with
   **Back**. A page shows "Programs are turned off while you review", its
   **Programs** ids, the **Page** rendered with every run refused, and its

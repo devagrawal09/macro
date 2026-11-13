@@ -1524,7 +1524,8 @@ dev), a routine you own has **Publish to marketplace…** in its **Routine
 actions** menu (after **Share**). It opens the same dialog as an HTML page's
 publish: the first time **Publish to marketplace** with **Title** and
 **Description**, publishing the saved routine to your team as `v1.0`; after
-that **Publish an update** with **Minor update** / **Major update**. The
+that **Publish an update** with **Minor update** / **Major update**. Both
+have an optional **What changed** note for installers. The
 routine's references are marked as **Share** marks them (your own mentions
 and the schedules' time zone fill in as whoever installs it). The server
 decides a routine update's kind: one that changes its variables, required
@@ -1550,7 +1551,15 @@ asking only about references the new version added; when you had edited the
 routine it first asks **Update “name” to v2.0?**, saying your edits will be
 replaced. A second **Install** while the first is still creating the routine
 fails with a toast instead of creating a second routine. **Uninstall** asks
-first: your routine stays yours, it just stops getting updates.
+first: your routine stays yours, it just stops getting updates. **Pin to
+v1.2** in **More actions** holds your routine on its version: minor updates
+skip it (**Pinned** badge, and the card offers the newer version as
+**Update to v1.3**). **Unpin** applies the newest minor of your major at
+once, unless you edited the routine, which pauses its updates as an
+automatic update would. An edited routine has no **Pin**. **Make my own**
+asks **Make “name” your own?**, then detaches your routine as an edit would:
+it stays as it is and stops getting updates. Publishing that routine later
+makes a listing that reads **Based on <title>**.
 
 **Runs** shows outcome, duration, and firing time. History loads fifty
 rows at a time; **Load more runs** reveals older records. Accessible run rows

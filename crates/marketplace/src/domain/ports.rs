@@ -12,12 +12,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, Audience, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
-    InstalledPage, Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText,
-    MarketplaceError, NewListing, PendingReview, PendingVersion, PublishScope, PublishSource,
-    PublishedVersion, ReviewDecision, ReviewOutcome, ReviewPreview, ReviewState, RoutineCopy,
-    RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump, VersionNotice,
-    ViewerListings,
+    AddedVersion, Audience, Changelog, FollowingInstall, InstallRequest, InstallUpdate,
+    InstalledBuild, InstalledPage, Listing, ListingContent, ListingCopy, ListingId, ListingKind,
+    ListingPage, ListingQuery, ListingText, ListingVersion, MarketplaceError, NewCopy, NewListing,
+    PendingReview, PendingVersion, PublishScope, PublishSource, PublishedVersion, ReviewDecision,
+    ReviewOutcome, ReviewPreview, ReviewState, RoutineCopy, RoutineInstall, RoutineUpdate,
+    RoutineVersion, TaskHash, Version, VersionBump, VersionNotes, VersionNotice, ViewerListings,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -51,16 +51,27 @@ pub trait ListingRepo: Send + Sync + 'static {
         query: &ListingQuery,
     ) -> impl Future<Output = Result<ListingPage, Self::Err>> + Send;
 
-    /// Store `content` as the listing's next version in `review`, numbered
-    /// after its newest version not rejected, unless that version already
-    /// holds the same content or another version waits for review.
+    /// Store `content` as the listing's next version in `review`, with its
+    /// notes, numbered after its newest version not rejected, unless that
+    /// version already holds the same content or another version waits for
+    /// review.
     fn add_version(
         &self,
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
         review: ReviewState,
+        notes: &VersionNotes,
     ) -> impl Future<Output = Result<AddedVersion, Self::Err>> + Send;
+
+    /// The listing's versions, newest first, without their content: the
+    /// approved ones, and the one waiting for review when `include_pending`.
+    /// Rejected versions are never listed.
+    fn versions(
+        &self,
+        id: ListingId,
+        include_pending: bool,
+    ) -> impl Future<Output = Result<Vec<ListingVersion>, Self::Err>> + Send;
 
     /// Up to `limit` versions waiting for review, oldest first.
     fn pending_versions(
@@ -119,7 +130,7 @@ pub trait ListingRepo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Install the routine listing for `user`, or replace their install,
-    /// following updates again. Ends a claim.
+    /// following updates again, unpinned. Ends a claim.
     fn save_routine_install(
         &self,
         id: ListingId,
@@ -128,7 +139,7 @@ pub trait ListingRepo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Routine installs on `version`'s major, older than it, whose routine
-    /// still follows the listing.
+    /// still follows the listing: not detached, not pinned.
     fn installs_behind(
         &self,
         id: ListingId,
@@ -143,11 +154,31 @@ pub trait ListingRepo: Send + Sync + 'static {
         update: &InstallUpdate,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Pin `user`'s install to the version it has, or unpin it. Pinning a
+    /// pinned install keeps its pin. `false` when they have no install.
+    fn set_pinned(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        pinned: bool,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Record a copy a person made. Recording it again changes nothing.
+    fn record_copy(&self, copy: &NewCopy) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The listing the document or routine `copy_id` was copied from, when
+    /// it is a recorded copy of that kind.
+    fn copied_from(
+        &self,
+        kind: ListingKind,
+        copy_id: Uuid,
+    ) -> impl Future<Output = Result<Option<ListingId>, Self::Err>> + Send;
+
     /// Unlist a listing. Repeating it changes nothing.
     fn remove_listing(&self, id: ListingId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Put `user` on the listing's newest approved major version: installs
-    /// it, or moves their install.
+    /// it, or moves their install, unpinning it.
     fn install_latest(
         &self,
         id: ListingId,
@@ -161,9 +192,9 @@ pub trait ListingRepo: Send + Sync + 'static {
         user: &MacroUserIdStr<'_>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// The page `user`'s install shows, the newest approved minor of their
-    /// major, when they installed the listing and a member of `team` may see
-    /// it.
+    /// The page `user`'s install shows, when they installed the listing and a
+    /// member of `team` may see it: the newest approved minor of its major,
+    /// or the one it is pinned to.
     fn installed_page(
         &self,
         id: ListingId,
@@ -219,6 +250,18 @@ pub trait Pages: Send + Sync + 'static {
     ) -> impl Future<Output = Result<UserExecutionReceipt, DocumentProgramError>> + Send;
 }
 
+/// Outbound port for documents a person keeps as their own.
+pub trait Documents: Send + Sync + 'static {
+    /// Create an HTML document named `name`, owned by `user`, holding
+    /// `html`. Answers its id.
+    fn create_html(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        name: &str,
+        html: &str,
+    ) -> impl Future<Output = Result<Uuid, MarketplaceError>> + Send;
+}
+
 /// Outbound port for routines: reading one to publish, and saving the copies
 /// installs make, each owned by the person who installed it.
 pub trait Routines: Send + Sync + 'static {
@@ -271,10 +314,10 @@ pub trait MarketplaceService: Send + Sync + 'static {
         query: ListingQuery,
     ) -> impl Future<Output = Result<ViewerListings, MarketplaceError>> + Send;
 
-    /// Publish a document or routine the caller owns, as version 1.0: to
-    /// their team at once, or to everyone once another member of Macro's
-    /// publisher team approves it. Only that team's members publish to
-    /// everyone.
+    /// Publish a document or routine the caller owns, as version 1.0 saying
+    /// `changelog`: to their team at once, or to everyone once another
+    /// member of Macro's publisher team approves it. Only that team's members
+    /// publish to everyone.
     fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -282,6 +325,7 @@ pub trait MarketplaceService: Send + Sync + 'static {
         source: PublishSource,
         text: ListingText,
         scope: PublishScope,
+        changelog: Changelog,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
     /// Publish the listing's source as its next version. Only its publisher
@@ -296,7 +340,18 @@ pub trait MarketplaceService: Send + Sync + 'static {
         id: ListingId,
         source: PublishSource,
         bump: VersionBump,
+        changelog: Changelog,
     ) -> impl Future<Output = Result<PublishedVersion, MarketplaceError>> + Send;
+
+    /// The listing's versions, newest first, to whoever may see it: the
+    /// approved ones, and for Macro's publishers the one waiting for review,
+    /// marked as pending.
+    fn versions(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<Vec<ListingVersion>, MarketplaceError>> + Send;
 
     /// A routine listing's newest approved version, for someone deciding to
     /// install it or take its newest major.
@@ -325,6 +380,29 @@ pub trait MarketplaceService: Send + Sync + 'static {
         id: ListingId,
         request: InstallRequest,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
+
+    /// Pin the caller's install to the version it has, so newer minor
+    /// versions don't reach it, or unpin it. Unpinning a routine install
+    /// brings its routine to the newest minor of its major, unless its person
+    /// edited it, which detaches it as an automatic update would.
+    fn set_pinned(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+        pinned: bool,
+    ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
+
+    /// Make the caller's own copy of what they installed, and record where
+    /// it came from. An artifact becomes a new HTML document of the version
+    /// their install shows, and the install stays. A routine install is
+    /// detached: the routine is theirs and gets no more updates.
+    fn copy(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<ListingCopy, MarketplaceError>> + Send;
 
     /// Remove the caller's install. A routine it created stays theirs.
     fn uninstall(

@@ -14,8 +14,12 @@ import type { Version } from './version';
 export interface InstalledListingBuild {
   /** The page to render, or why it doesn't build. */
   page: DocumentBuildResponse;
+  /** The caller pinned their install to `version`: a newer minor version
+doesn't replace the page. */
+  pinned: boolean;
   /** The version's source, when `page` is plain and is shown as it is. */
   plainHtml?: InstalledListingBuildPlainHtml;
-  /** The version built: the newest minor of the major the caller is on. */
+  /** The version built: the newest minor of the major the caller is on,
+or the one they pinned. */
   version: Version;
 }

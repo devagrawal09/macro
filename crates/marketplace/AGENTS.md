@@ -16,13 +16,16 @@ minor versions update until they edit it.
 - `src/domain/models.rs`: `Listing`, `Version`, `ListingContent`,
   `RoutineInstall`, `MarketplaceError`.
 - `src/outbound/pg_listing_repo.rs`: the `marketplace_listing`,
-  `marketplace_listing_version` and `marketplace_install` tables.
+  `marketplace_listing_version`, `marketplace_install` and
+  `marketplace_copy` tables.
 - `src/outbound/scheduled_routines.rs`: the `Routines` port over
   `scheduled_action`'s service: reading a routine to publish, and creating
   and updating installs' copies as their person, under its checks.
 - `src/outbound/document_pages.rs`: the `Pages` port over `agent_code_mode`'s
   `DocumentPrograms`, so a published page builds and runs like a stored HTML
   document, under the same limits.
+- `Documents` (in `src/domain/ports.rs`): creating the HTML document a
+  copy makes; its adapter lives in the harness.
 - `src/outbound/conn_gateway_notifier.rs`: the `VersionNotifier` port, which
   sends installers' open clients `marketplace_listing_version` through the
   connection gateway.
@@ -31,7 +34,7 @@ minor versions update until they edit it.
 
 ## Scope
 
-- Owns: the three `marketplace_*` tables and the marketplace routes.
+- Owns: the four `marketplace_*` tables and the marketplace routes.
 - Not here: building and running pages → `crates/agent_code_mode`; a
   routine's snapshot, filling it in and its interface →
   `scheduled_action`'s `domain/templates` (`RoutineSnapshot`,
@@ -146,6 +149,43 @@ minor versions update until they edit it.
   never user ids.
 - Publishing refuses a page that doesn't build, so an install never shows
   one. A routine listing has no page: `installed_page` reads artifacts only.
+- Every version keeps its publisher's `changelog` (`Changelog`: trimmed,
+  blank is none, at most `MAX_CHANGELOG_CHARS` 2000, also a CHECK) and, for a
+  routine, `forced_major` when `routine_bump` overrode a minor (compared
+  with the newest approved snapshot). Both live on the version row, so a
+  global version keeps them through review.
+  `GET /marketplace/listings/{id}/versions` answers them newest first, without
+  content, to whoever sees the listing: approved versions only, plus for a
+  global publisher (`Audience::global_publisher`, the rule that shows
+  `pending_version`) the pending one with `review: pending`. Rejected
+  versions never appear (their numbers may be reused). The web app's
+  "Update to vN" range (`versionsBetween`) keeps approved versions only. A
+  listing's `installedVersion` is the routine's `routine_minor`, or the newest
+  approved minor of a page install's major.
+- An install can be pinned (`pinned_minor`, `PUT`/`DELETE
+  .../install/pin`) to the version it has, always an approved one:
+  `installed_page` builds that minor, `installs_behind` skips a pinned
+  routine (so an approval's `go_live` passes it by), and installers still
+  get version notifications, an approval's included (the web app refreshes
+  lists, not a pinned page). Unpinning catches up to the newest APPROVED
+  minor: a page reads it, a routine runs `update_install` once on its own
+  task (`catch_up_routine`, over the approved-only `routine_version`), with
+  the same edit/detach rules. Taking a version (`install_latest`,
+  `save_routine_install`) unpins. A detached routine can't be pinned.
+- `POST .../install/copy` makes the caller's own copy. A page install
+  becomes a new HTML document through the `Documents` port (the harness's
+  `code_mode/marketplace_documents.rs` uploads it with the documents
+  crate's in-process `DocumentUploadService`, as `POST /documents/upload`
+  does); the install stays. A routine install is detached
+  (`InstallUpdate::Detached`). `marketplace_copy` records each copy (kind
+  + copy id, listing, version, user); a page's failed record is only
+  logged, since the document exists, while a routine's is recorded before
+  it detaches. Publishing a source that is a recorded copy of its kind sets
+  `derived_from_listing_id`; `Listing.based_on` names that listing only to a
+  viewer who may see it, by the same rule as `ListingRepo::listing`,
+  including review: a global origin with no approved version is named only
+  to global publishers. A page copy holds the version the install shows,
+  which is approved.
 - Every route answers `404` outside the rollout: `enable-marketplace` and
   `enable-html-code-mode` together, since listings are pages with programs.
   Runs refuse an agent's or a program's token, like a document's.
@@ -160,8 +200,10 @@ minor versions update until they edit it.
   one-listing lookup (`ListingRepo::listing`) sees listed and installed
   listings alike.
 - Deleting a user cascades: their installs go, and so do the listings they
-  published, with everyone's installs of them. Routines installs made stay
-  (their own cleanup deletes the user's routines).
+  published, with everyone's installs of them, and their copies' records.
+  Routines installs made stay (their own cleanup deletes the user's
+  routines), and so do copied documents. A listing derived from a deleted
+  one loses its `derived_from_listing_id`.
 
 ## Related
 

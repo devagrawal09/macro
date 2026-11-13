@@ -7,6 +7,7 @@ import {
 import { SettingsPage } from '@app/features/settings/primitives';
 import { t } from '@app/lib/i18n';
 import { useSplitLayout } from '@components/app/split-layout/layout';
+import { fileTypeToBlockName } from '@core/constant/allBlocks';
 import { useSettingsState } from '@core/constant/SettingsState';
 import { useUserId } from '@core/context/user';
 import { isMobile } from '@core/mobile/isMobile';
@@ -17,6 +18,7 @@ import { EmptyStatePanel } from '@ui';
 import { getOwner, Match, Switch } from 'solid-js';
 import { ListingsSkeleton } from './components/listing-grid';
 import type {
+  MarketplaceDocuments,
   MarketplaceRoutines,
   RoutineFillRequest,
 } from './context/marketplace-source';
@@ -81,19 +83,43 @@ function createMarketplaceRoutines(onOpened?: () => void): MarketplaceRoutines {
   };
 }
 
-function Marketplace(props: { onRoutineOpened?: () => void }) {
+/**
+ * A document a copy made opens in a split, like any document, after which
+ * `onOpened` runs.
+ */
+function createMarketplaceDocuments(
+  onOpened?: () => void
+): MarketplaceDocuments {
+  const layout = useSplitLayout();
+
+  return {
+    open: (documentId) => {
+      layout
+        .replaceOrInsertSplit({
+          type: fileTypeToBlockName('html'),
+          id: documentId,
+        })
+        ?.activate();
+      onOpened?.();
+    },
+  };
+}
+
+function Marketplace(props: { onOpenedElsewhere?: () => void }) {
   const flag = useMarketplaceFlag();
   const userId = useUserId();
   const isTeamAdmin = useIsTeamAdmin();
   const source = createMarketplaceSource(
     () => flag().enabled && Boolean(userId())
   );
-  const routines = createMarketplaceRoutines(props.onRoutineOpened);
+  const routines = createMarketplaceRoutines(props.onOpenedElsewhere);
+  const documents = createMarketplaceDocuments(props.onOpenedElsewhere);
 
   return (
     <MarketplaceView
       source={source}
       routines={routines}
+      documents={documents}
       userId={userId()}
       isTeamAdmin={isTeamAdmin}
       publisherName={idToDisplayName}
@@ -105,8 +131,8 @@ function Marketplace(props: { onRoutineOpened?: () => void }) {
  * Settings → Marketplace: the touch entry to the page the Agents sidebar
  * links on desktop. The tab shows only within the marketplace's rollout, and
  * an installed page opens in place. An installed routine opens in Agents →
- * Routines, which takes the settings split's place; on a phone settings is
- * a sheet over it, so it closes.
+ * Routines, and a page's copy opens as a document, each taking the settings
+ * split's place; on a phone settings is a sheet over it, so it closes.
  */
 export function MarketplaceSettings() {
   const settings = useSettingsState();
@@ -117,7 +143,7 @@ export function MarketplaceSettings() {
       bodyClass="[--mobile-content-inset-top:0px]"
     >
       <Marketplace
-        onRoutineOpened={() => {
+        onOpenedElsewhere={() => {
           if (isMobile()) settings.closeSettings();
         }}
       />

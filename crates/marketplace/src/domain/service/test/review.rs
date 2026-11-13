@@ -48,6 +48,7 @@ async fn global_board(service: &Service, pages: &FakePages) -> Listing {
             owned(ADA, BOARD),
             text("Board"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await
         .expect("a publisher publishes to everyone")
@@ -106,6 +107,7 @@ async fn publish_board_version(
             listing,
             owned(ADA, BOARD),
             bump,
+            Changelog::default(),
         )
         .await
         .expect("the version publishes")
@@ -126,6 +128,7 @@ async fn without_a_publisher_team_nobody_publishes_to_everyone() {
             owned(ADA, BOARD),
             text("Board"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await;
     let flag = service
@@ -154,6 +157,7 @@ async fn only_the_publisher_team_publishes_to_everyone_and_reviews() {
             owned(CAM, BOARD),
             text("Board"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await;
     let without_team = service
@@ -163,6 +167,7 @@ async fn only_the_publisher_team_publishes_to_everyone_and_reviews() {
             owned(CAM, BOARD),
             text("Board"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await;
     let listing = global_board(&service, &pages).await;
@@ -407,6 +412,7 @@ async fn one_version_waits_at_a_time() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await;
 
@@ -427,6 +433,7 @@ async fn a_publisher_who_left_the_team_publishes_no_global_version() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await;
 
@@ -460,6 +467,7 @@ async fn rejecting_a_new_listing_unlists_it_so_its_source_publishes_again() {
             owned(ADA, BOARD),
             text("Board"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await;
 
@@ -605,6 +613,7 @@ async fn publish_digest_version(
             listing,
             digest_source(variables),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await
         .expect("the version publishes")
@@ -620,6 +629,7 @@ async fn installed_global_digest(service: &Service, routines: &FakeRoutines) -> 
             digest_source(vec![zone()]),
             text("Weekly digest"),
             PublishScope::Global,
+            Changelog::default(),
         )
         .await
         .expect("the digest publishes");
@@ -759,4 +769,272 @@ async fn a_routine_preview_shows_its_interface_changes() {
             name: "board (item)".to_owned(),
         }]
     );
+}
+
+// How review meets version history, pins and copies.
+
+/// Ada's board, published to everyone with `changelog` and approved, then
+/// installed by Cam.
+async fn installed_global_board(service: &Service, pages: &FakePages, changelog: &str) -> Listing {
+    pages.save(BOARD, "<h1>Board</h1>");
+    let listing = service
+        .publish(
+            &user(ADA),
+            Some(&publisher(ADA)),
+            owned(ADA, BOARD),
+            text("Board"),
+            PublishScope::Global,
+            Changelog::new(Some(changelog)).expect("a changelog"),
+        )
+        .await
+        .expect("a publisher publishes to everyone");
+    approve(service, listing.id, V1_0).await;
+    service
+        .install(
+            &user(CAM),
+            Some(&outsider()),
+            listing.id,
+            InstallRequest::default(),
+        )
+        .await
+        .expect("Cam installs the approved board")
+}
+
+async fn history(
+    service: &Service,
+    viewer: &'static str,
+    team: &EntityAccessReceipt<MemberTeamRole>,
+    listing: ListingId,
+) -> Vec<(Version, ReviewState, Option<String>)> {
+    service
+        .versions(&user(viewer), Some(team), listing)
+        .await
+        .expect("the history loads")
+        .into_iter()
+        .map(|version| (version.version, version.review, version.changelog))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_history_shows_approved_versions_and_only_publishers_see_the_pending_one() {
+    let (service, pages, _, _) = global_marketplace();
+    let listing = installed_global_board(&service, &pages, "First cut").await;
+    pages.save(BOARD, "<h1>Board, tidied</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&publisher(ADA)),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+            Changelog::new(Some("Tidier columns")).expect("a changelog"),
+        )
+        .await
+        .expect("a pending version publishes");
+
+    let for_cam = history(&service, CAM, &outsider(), listing.id).await;
+    let for_ada = history(&service, ADA, &publisher(ADA), listing.id).await;
+    decide(
+        &service,
+        BEN,
+        listing.id,
+        V1_1,
+        ReviewDecision::Reject { reason: None },
+    )
+    .await
+    .expect("Ben rejects it");
+    let after_rejection = history(&service, BEN, &publisher(BEN), listing.id).await;
+
+    let first = (V1_0, ReviewState::Approved, Some("First cut".to_owned()));
+    assert_eq!(for_cam, vec![first.clone()]);
+    assert_eq!(
+        for_ada,
+        vec![
+            (
+                V1_1,
+                ReviewState::Pending,
+                Some("Tidier columns".to_owned())
+            ),
+            first.clone(),
+        ]
+    );
+    // A rejected version is out of the history, as it is out of the
+    // numbering.
+    assert_eq!(after_rejection, vec![first]);
+}
+
+#[tokio::test]
+async fn an_approval_skips_pinned_routines_and_unpinning_catches_up_to_the_approved_minor() {
+    let (service, _, routines, notifier) = global_marketplace();
+    let (listing, routine_id) = installed_global_digest(&service, &routines).await;
+    service
+        .set_pinned(&user(CAM), Some(&outsider()), listing.id, true)
+        .await
+        .expect("Cam pins his digest");
+
+    publish_digest_version(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week briefly",
+        vec![zone()],
+    )
+    .await;
+    let approved = approve(&service, listing.id, V1_1).await;
+    let while_pinned = routines.saved(routine_id);
+    // 1.2 waits for review while Cam unpins.
+    publish_digest_version(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in one line",
+        vec![zone()],
+    )
+    .await;
+    let unpinned = service
+        .set_pinned(&user(CAM), Some(&outsider()), listing.id, false)
+        .await
+        .expect("Cam unpins");
+    let caught_up = routines.saved(routine_id);
+
+    assert_eq!(approved.updates.updated, 0);
+    assert_eq!(
+        while_pinned.routine.task["steps"][0]["instructions"],
+        "Sum up the week"
+    );
+    // Cam still hears of the approved minor; the web app leaves a pinned
+    // page alone.
+    assert!(
+        notifier
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(notice, users)| notice.version == V1_1 && users == &vec![CAM.to_owned()])
+    );
+    assert!(!unpinned.pinned);
+    assert_eq!(unpinned.installed_version, Some(V1_1));
+    assert_eq!(
+        caught_up.routine.task["steps"][0]["instructions"],
+        "Sum up the week briefly"
+    );
+}
+
+#[tokio::test]
+async fn an_approval_leaves_a_pinned_page_and_unpinning_shows_the_approved_minor() {
+    let (service, pages, _, _) = global_marketplace();
+    let listing = installed_global_board(&service, &pages, "First cut").await;
+    service
+        .set_pinned(&user(CAM), Some(&outsider()), listing.id, true)
+        .await
+        .expect("Cam pins his board");
+    publish_board_version(
+        &service,
+        &pages,
+        listing.id,
+        "<h1>Board 1.1</h1>",
+        VersionBump::Minor,
+    )
+    .await;
+    approve(&service, listing.id, V1_1).await;
+    let pinned = service
+        .installed_build(&user(CAM), Some(&outsider()), listing.id)
+        .await
+        .expect("the pinned page builds");
+    publish_board_version(
+        &service,
+        &pages,
+        listing.id,
+        "<h1>Board 1.2</h1>",
+        VersionBump::Minor,
+    )
+    .await;
+    service
+        .set_pinned(&user(CAM), Some(&outsider()), listing.id, false)
+        .await
+        .expect("Cam unpins");
+    let unpinned = service
+        .installed_build(&user(CAM), Some(&outsider()), listing.id)
+        .await
+        .expect("the page builds");
+
+    assert_eq!((pinned.version, pinned.pinned), (V1_0, true));
+    // 1.2 waits for review: unpinning reaches the newest approved minor.
+    assert_eq!((unpinned.version, unpinned.pinned), (V1_1, false));
+}
+
+#[tokio::test]
+async fn a_copy_takes_the_approved_version_the_install_shows() {
+    let (service, pages, _, documents, _) = marketplace_with_documents(FakeNotifier::default());
+    let service = service.with_publisher_team(Some(MACRO));
+    let listing = installed_global_board(&service, &pages, "First cut").await;
+    publish_board_version(
+        &service,
+        &pages,
+        listing.id,
+        "<h1>Board 1.1, waiting</h1>",
+        VersionBump::Minor,
+    )
+    .await;
+
+    let copy = service
+        .copy(&user(CAM), Some(&outsider()), listing.id)
+        .await
+        .expect("Cam copies his board");
+
+    let (owner, _, html) = documents.get(copy.id);
+    assert_eq!(owner, CAM);
+    assert_eq!(html, "<h1>Board</h1>");
+}
+
+#[tokio::test]
+async fn a_routine_version_records_a_forced_major_against_the_approved_one() {
+    let (service, _, routines, _) = global_marketplace();
+    let (listing, _) = installed_global_digest(&service, &routines).await;
+
+    // A new variable is a major whatever was asked; Ben rejects it.
+    let forced = publish_digest_version(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the board",
+        vec![zone(), board(VariableFill::Shared)],
+    )
+    .await;
+    let while_pending = history(&service, ADA, &publisher(ADA), listing.id).await;
+    let forced_flag = service
+        .versions(&user(ADA), Some(&publisher(ADA)), listing.id)
+        .await
+        .expect("the history loads")[0]
+        .forced_major;
+    decide(
+        &service,
+        BEN,
+        listing.id,
+        forced.listing.pending_version.expect("a pending version"),
+        ReviewDecision::Reject { reason: None },
+    )
+    .await
+    .expect("Ben rejects it");
+    // Compared with approved 1.0, not the rejected 2.0: a minor.
+    let next = publish_digest_version(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week briefly",
+        vec![zone()],
+    )
+    .await;
+    let after = service
+        .versions(&user(ADA), Some(&publisher(ADA)), listing.id)
+        .await
+        .expect("the history loads");
+
+    assert_eq!(forced.bump, VersionBump::Major);
+    assert_eq!(while_pending[0].0, Version { major: 2, minor: 0 });
+    assert!(forced_flag);
+    assert_eq!(next.bump, VersionBump::Minor);
+    assert_eq!(after[0].version, V1_1);
+    assert_eq!(after[0].review, ReviewState::Pending);
+    assert!(!after[0].forced_major);
 }

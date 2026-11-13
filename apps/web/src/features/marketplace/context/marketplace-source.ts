@@ -2,13 +2,14 @@ import type { TraceContext } from '@macro-inc/observability';
 import type {
   ActionTrigger,
   InstallListing,
+  ListingCopy,
   PendingVersion,
   ReviewOutcome,
   ReviewVersion,
   TemplateVariable,
 } from '@service-agent-harness/generated/schemas';
 import type { Accessor } from 'solid-js';
-import type { Listing } from '../core/listing';
+import type { Listing, ListingVersion } from '../core/listing';
 
 /** Which listings a marketplace list reads. */
 export type ListingsFilter = {
@@ -77,6 +78,28 @@ export type MarketplaceSource = {
     request: ReviewVersion,
     parentSpan?: TraceContext
   ): Promise<ReviewOutcome>;
+  /** A listing's versions, newest first, with what each one changed. */
+  versions(listingId: string): Promise<readonly ListingVersion[]>;
+  /**
+   * Pin the viewer's install to the version it has, or unpin it, which
+   * moves it to the newest minor of its major.
+   */
+  pin(
+    listingId: string,
+    pinned: boolean,
+    parentSpan?: TraceContext
+  ): Promise<Listing>;
+  /**
+   * Make the viewer's own copy of what they installed: a new HTML document
+   * of the version a page install shows (the install stays), or their
+   * routine detached from the listing.
+   */
+  copy(listingId: string, parentSpan?: TraceContext): Promise<ListingCopy>;
+};
+
+/** The host's documents side: opening a document a copy made. */
+export type MarketplaceDocuments = {
+  open(documentId: string): void;
 };
 
 /** What the person decided while filling in a routine to install. */

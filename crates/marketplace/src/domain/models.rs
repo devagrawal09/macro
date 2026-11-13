@@ -27,6 +27,9 @@ pub const MAX_TITLE_CHARS: usize = 120;
 /// Longest description a listing takes, in characters.
 pub const MAX_DESCRIPTION_CHARS: usize = 1000;
 
+/// Longest changelog a version takes, in characters.
+pub const MAX_CHANGELOG_CHARS: usize = 2000;
+
 /// The connection gateway message that tells installers a version was
 /// published, shared with the web app's websocket handler.
 pub const LISTING_VERSION_MESSAGE_TYPE: &str = "marketplace_listing_version";
@@ -266,6 +269,15 @@ pub struct Listing {
     pub pending_version: Option<Version>,
     /// The major version the person asking is on, when they installed it.
     pub installed_major: Option<i32>,
+    /// The version the person asking has: the one their page shows, or the
+    /// one their routine was last filled in from.
+    pub installed_version: Option<Version>,
+    /// The person asking pinned their install to `installed_version`: newer
+    /// minor versions don't reach it until they unpin or update.
+    pub pinned: bool,
+    /// The listing its source was copied from, when the person asking may
+    /// see that listing.
+    pub based_on: Option<ListingOrigin>,
     /// The routine the person asking got from installing it.
     pub installed_routine: Option<InstalledRoutine>,
     /// How many people installed it.
@@ -284,6 +296,16 @@ impl Listing {
     pub fn has_approved_version(&self) -> bool {
         self.pending_version != Some(self.latest_version)
     }
+}
+
+/// The listing another one's source was copied from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingOrigin {
+    /// Its id.
+    pub id: ListingId,
+    /// Its title.
+    pub title: String,
 }
 
 /// Listings a page holds when the request doesn't say.
@@ -455,6 +477,56 @@ impl ListingText {
     }
 }
 
+/// What a publisher says changed in a version, trimmed. Blank says nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changelog(Option<String>);
+
+impl Changelog {
+    /// The changelog a publisher typed, or why it can't be used.
+    pub fn new(text: Option<&str>) -> Result<Self, MarketplaceError> {
+        let text = text.map(str::trim).filter(|text| !text.is_empty());
+        if text.is_some_and(|text| text.chars().count() > MAX_CHANGELOG_CHARS) {
+            return Err(MarketplaceError::Invalid(format!(
+                "a changelog is at most {MAX_CHANGELOG_CHARS} characters"
+            )));
+        }
+
+        Ok(Self(text.map(str::to_owned)))
+    }
+
+    /// The text, when there is any.
+    pub fn as_deref(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+}
+
+/// What a new version says about itself, beside its content.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VersionNotes {
+    /// What its publisher says changed.
+    pub changelog: Changelog,
+    /// A routine version the server made major whatever was asked.
+    pub forced_major: bool,
+}
+
+/// One version in a listing's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingVersion {
+    /// Its version.
+    pub version: Version,
+    /// What its publisher said changed; absent when they said nothing.
+    pub changelog: Option<String>,
+    /// A routine version the server made major because what installs rely
+    /// on changed, whatever bump was asked.
+    pub forced_major: bool,
+    /// `approved`, or `pending` for the version waiting for review, which
+    /// only Macro's publishers see. Rejected versions are never listed.
+    pub review: ReviewState,
+    /// When it was published.
+    pub created_at: DateTime<Utc>,
+}
+
 /// A page's source as published: what a version stores.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedPage {
@@ -540,6 +612,36 @@ pub struct NewListing {
     pub content: ListingContent,
     /// Its first version's review: approved for a team, pending for everyone.
     pub review: ReviewState,
+    /// What its first version says changed.
+    pub changelog: Changelog,
+    /// The listing its source was copied from, when it is a recorded copy.
+    pub derived_from: Option<ListingId>,
+}
+
+/// A copy a person made of what they installed, to record where it came
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewCopy {
+    /// What was copied, which says what `copy_id` names.
+    pub kind: ListingKind,
+    /// The new document, or the routine made the person's own.
+    pub copy_id: Uuid,
+    /// The listing it came from.
+    pub listing_id: ListingId,
+    /// The version it came from.
+    pub version: Version,
+    /// Who made it.
+    pub user: MacroUserIdStr<'static>,
+}
+
+/// What making one's own copy of an install made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingCopy {
+    /// What it is: a document for an artifact, a routine for a routine.
+    pub kind: ListingKind,
+    /// The new document, or the routine now the caller's own.
+    pub id: Uuid,
 }
 
 /// What became of a new version.
@@ -711,6 +813,8 @@ pub struct InstalledPage {
     pub version: Version,
     /// Its source.
     pub html: String,
+    /// The install is pinned to this version.
+    pub pinned: bool,
 }
 
 /// An installed page's build.
@@ -718,6 +822,9 @@ pub struct InstalledPage {
 pub struct InstalledBuild {
     /// The version built.
     pub version: Version,
+    /// The install is pinned to this version, so newer minors don't replace
+    /// it.
+    pub pinned: bool,
     /// The page to render, or why it doesn't build.
     pub build: DocumentBuild,
     /// The version's source, which a page without programs is shown as.

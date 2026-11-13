@@ -9,10 +9,11 @@ import {
 import userEvent from '@testing-library/user-event';
 import { ImperativeDialogHost } from '@ui';
 import { createSignal } from 'solid-js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ListingList,
   ListingsFilter,
+  MarketplaceDocuments,
   MarketplaceRoutines,
   MarketplaceSource,
   PendingList,
@@ -20,6 +21,15 @@ import type {
 import type { Listing } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { MarketplaceView } from './marketplace-view';
+
+// jsdom has no scrollTo, which opening and closing a dialog or menu reaches,
+// nor CSS.escape, which a menu closed by unmounting reaches to return focus.
+beforeEach(() => {
+  vi.stubGlobal('scrollTo', vi.fn());
+  vi.stubGlobal('CSS', {
+    escape: (value: string) => value.replace(/[^\w-]/g, (char) => `\\${char}`),
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -37,6 +47,7 @@ const listing = (overrides: Partial<Listing>): Listing => ({
   latestVersion: { major: 1, minor: 0 },
   installCount: 3,
   removed: false,
+  pinned: false,
   createdAt: '2026-11-01T10:00:00Z',
   updatedAt: '2026-11-01T10:00:00Z',
   ...overrides,
@@ -69,6 +80,14 @@ function fakeSource(
       state: request.decision === 'approve' ? 'approved' : 'rejected',
       updates: { updated: 0, detached: 0, failed: 0 },
     })),
+    versions: vi.fn(async () => []),
+    pin: vi.fn(async (id: string, pinned: boolean) =>
+      listing({ id, installedMajor: 1, pinned })
+    ),
+    copy: vi.fn(async (id: string) => ({
+      kind: 'artifact' as const,
+      id: `copy-of-${id}`,
+    })),
     ...overrides,
   } satisfies MarketplaceSource;
 }
@@ -96,6 +115,27 @@ const pendingVersion = (
   ...overrides,
 });
 
+/** A history entry, as the server answers it. */
+const entry = (
+  major: number,
+  minor: number,
+  changelog?: string,
+  review: 'approved' | 'pending' = 'approved'
+) => ({
+  version: { major, minor },
+  changelog,
+  forcedMajor: false,
+  review,
+  createdAt: '2026-11-01T10:00:00Z',
+});
+
+/** Confirms the update dialog that opened, by its title. */
+async function confirmUpdate(title: string, action: string) {
+  const confirm = await screen.findByRole('dialog', { name: title });
+  fireEvent.click(within(confirm).getByRole('button', { name: action }));
+  return confirm;
+}
+
 function fakeRoutines(
   overrides: Partial<MarketplaceRoutines> = {}
 ): MarketplaceRoutines {
@@ -109,12 +149,15 @@ function fakeRoutines(
 
 function renderMarketplace(
   source: MarketplaceSource,
-  routines: MarketplaceRoutines = fakeRoutines()
+  routines: MarketplaceRoutines = fakeRoutines(),
+  documents: MarketplaceDocuments = { open: vi.fn() }
 ) {
+  render(() => <ImperativeDialogHost />);
   render(() => (
     <MarketplaceView
       source={source}
       routines={routines}
+      documents={documents}
       userId="macro|grace@example.com"
       isTeamAdmin={() => false}
       publisherName={() => 'Ada Lovelace'}
@@ -149,7 +192,7 @@ describe('Marketplace', () => {
     expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
   });
 
-  it('offers a waiting major version as Update, and takes it by installing again', () => {
+  it('offers a waiting major version as Update, and takes it by installing again', async () => {
     const source = fakeSource(() => [
       listing({
         id: 'dashboard',
@@ -178,12 +221,86 @@ describe('Marketplace', () => {
     fireEvent.click(
       within(behind).getByRole('button', { name: 'Update to v2' })
     );
-    expect(source.install).toHaveBeenCalledWith('dashboard', expect.anything());
+    await confirmUpdate('Update “Launch dashboard” to v2.0?', 'Update to v2');
+    await vi.waitFor(() =>
+      expect(source.install).toHaveBeenCalledWith(
+        'dashboard',
+        expect.anything()
+      )
+    );
+  });
+
+  it('shows what the versions an update brings changed before taking it', async () => {
+    const versions = vi.fn(async () => [
+      entry(2, 1, 'Sorts by owner'),
+      entry(2, 0, 'Adds a timeline'),
+      entry(1, 1, 'Tidier columns'),
+      entry(1, 0, 'First cut'),
+    ]);
+    const source = fakeSource(
+      () => [
+        listing({
+          id: 'dashboard',
+          installedMajor: 1,
+          installedVersion: { major: 1, minor: 1 },
+          latestVersion: { major: 2, minor: 1 },
+        }),
+      ],
+      { versions }
+    );
+    renderMarketplace(source);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Update “Launch dashboard” to v2.1?',
+    });
+    const changes = within(confirm).getByRole('list', { name: 'What changed' });
+    expect(
+      within(changes)
+        .getAllByRole('listitem')
+        .map((item) => item.getAttribute('aria-label'))
+    ).toEqual(['v2.1', 'v2.0']);
+    expect(within(changes).getByText('Adds a timeline')).toBeTruthy();
+    expect(within(confirm).queryByText('Tidier columns')).toBeNull();
+    expect(versions).toHaveBeenCalledWith('dashboard');
+    expect(source.install).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(confirm).getByRole('button', { name: 'Update to v2' })
+    );
+    await vi.waitFor(() => expect(source.install).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows a listing’s version history from its More actions', async () => {
+    const versions = vi.fn(async () => [
+      entry(1, 1, 'Tidier columns'),
+      entry(1, 0),
+    ]);
+    const source = fakeSource(() => [listing({ id: 'dashboard' })], {
+      versions,
+    });
+    renderMarketplace(source);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Version history' })
+    );
+    const details = await screen.findByRole('dialog', {
+      name: 'Launch dashboard',
+    });
+    const history = await within(details).findByRole('list', {
+      name: 'Version history',
+    });
+    expect(within(history).getByText('Tidier columns')).toBeTruthy();
+    expect(
+      within(history).getByText('No notes for this version.')
+    ).toBeTruthy();
+    expect(versions).toHaveBeenCalledWith('dashboard');
   });
 
   it('opens a card’s More actions menu with a tap', async () => {
-    // jsdom has no scrollTo, which opening the menu reaches.
-    vi.stubGlobal('scrollTo', vi.fn());
     const source = fakeSource(() => [
       listing({ id: 'dashboard', installedMajor: 1 }),
     ]);
@@ -201,6 +318,167 @@ describe('Marketplace', () => {
       'dashboard',
       expect.anything()
     );
+  });
+
+  it('leaves a version waiting for review out of what an update brings', async () => {
+    // A publisher's history also holds the pending version.
+    const versions = vi.fn(async () => [
+      entry(2, 2, 'Not reviewed yet', 'pending'),
+      entry(2, 1, 'Sorts by owner'),
+      entry(2, 0, 'Adds a timeline'),
+      entry(1, 0, 'First cut'),
+    ]);
+    const source = fakeSource(
+      () => [
+        listing({
+          id: 'dashboard',
+          installedMajor: 1,
+          installedVersion: { major: 1, minor: 0 },
+          latestVersion: { major: 2, minor: 1 },
+          pendingVersion: { major: 2, minor: 2 },
+        }),
+      ],
+      { versions }
+    );
+    renderMarketplace(source);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Update “Launch dashboard” to v2.1?',
+    });
+    const changes = within(confirm).getByRole('list', { name: 'What changed' });
+    expect(
+      within(changes)
+        .getAllByRole('listitem')
+        .map((item) => item.getAttribute('aria-label'))
+    ).toEqual(['v2.1', 'v2.0']);
+    expect(within(confirm).queryByText('Not reviewed yet')).toBeNull();
+  });
+
+  it('marks the version waiting for review in a publisher’s history', async () => {
+    const versions = vi.fn(async () => [
+      entry(1, 1, 'Tidier columns', 'pending'),
+      entry(1, 0, 'First cut'),
+    ]);
+    const source = fakeSource(
+      () => [
+        listing({ id: 'dashboard', pendingVersion: { major: 1, minor: 1 } }),
+      ],
+      { versions }
+    );
+    renderMarketplace(source);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Version history' })
+    );
+    const history = await screen.findByRole('list', {
+      name: 'Version history',
+    });
+    const pending = within(history).getByRole('listitem', { name: 'v1.1' });
+    const approved = within(history).getByRole('listitem', { name: 'v1.0' });
+    expect(within(pending).getByText('Waiting for review')).toBeTruthy();
+    expect(within(approved).queryByText('Waiting for review')).toBeNull();
+  });
+
+  it('pins an install to its version from More actions', async () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        installedMajor: 1,
+        installedVersion: { major: 1, minor: 2 },
+        latestVersion: { major: 1, minor: 2 },
+      }),
+    ]);
+    renderMarketplace(source);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    expect(screen.queryByRole('menuitem', { name: 'Unpin' })).toBeNull();
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Pin to v1.2' })
+    );
+    expect(source.pin).toHaveBeenCalledWith(
+      'dashboard',
+      true,
+      expect.anything()
+    );
+  });
+
+  it('marks a pinned install, says a newer version is out, and unpins it', async () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        installedMajor: 1,
+        installedVersion: { major: 1, minor: 0 },
+        latestVersion: { major: 1, minor: 1 },
+        pinned: true,
+      }),
+    ]);
+    renderMarketplace(source);
+
+    const card = screen.getByRole('article', {
+      name: 'Marketplace page: Launch dashboard',
+    });
+    expect(within(card).getByText('Pinned')).toBeTruthy();
+    expect(
+      within(card).getByText('Pinned to v1.0. v1.1 is available.')
+    ).toBeTruthy();
+    expect(
+      within(card).getByRole('button', { name: 'Update to v1.1' })
+    ).toBeTruthy();
+
+    await userEvent.click(
+      within(card).getByRole('button', {
+        name: 'More actions for Launch dashboard',
+      })
+    );
+    expect(screen.queryByRole('menuitem', { name: /Pin to/ })).toBeNull();
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Unpin' })
+    );
+    expect(source.pin).toHaveBeenCalledWith(
+      'dashboard',
+      false,
+      expect.anything()
+    );
+  });
+
+  it('copies an installed page into a new document and opens it', async () => {
+    const source = fakeSource(() => [
+      listing({ id: 'dashboard', installedMajor: 1 }),
+    ]);
+    const documents = { open: vi.fn() };
+    renderMarketplace(source, fakeRoutines(), documents);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Make a copy' })
+    );
+    await vi.waitFor(() =>
+      expect(documents.open).toHaveBeenCalledWith('copy-of-dashboard')
+    );
+    expect(source.copy).toHaveBeenCalledWith('dashboard', expect.anything());
+  });
+
+  it('says which listing a listing is based on', () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        basedOn: { id: 'origin', title: 'Team board' },
+      }),
+    ]);
+    renderMarketplace(source);
+
+    const card = screen.getByRole('article', {
+      name: 'Marketplace page: Launch dashboard',
+    });
+    expect(within(card).getByText('Based on Team board')).toBeTruthy();
   });
 
   it('lists the viewer’s installs under Installed', () => {
@@ -374,7 +652,6 @@ describe('Marketplace', () => {
             },
           }),
         ]);
-        render(() => <ImperativeDialogHost />);
         renderMarketplace(source);
 
         const card = screen.getByRole('article', {
@@ -386,6 +663,9 @@ describe('Marketplace', () => {
         const confirm = await screen.findByRole('dialog', {
           name: 'Update “Weekly digest” to v2.0?',
         });
+        expect(
+          within(confirm).getByText(/Updating replaces your edits/)
+        ).toBeTruthy();
         expect(source.install).not.toHaveBeenCalled();
 
         fireEvent.click(within(confirm).getByRole('button', { name: choice }));
@@ -395,6 +675,70 @@ describe('Marketplace', () => {
         );
       }
     );
+
+    it.each([
+      ['Make my own', 1],
+      ['Cancel', 0],
+    ] as const)(
+      'asks before making an installed routine one’s own: %s',
+      async (choice, copies) => {
+        const source = fakeSource(() => [
+          digest({
+            installedMajor: 1,
+            installedRoutine: {
+              routineId: 'routine-1',
+              detached: false,
+              updateFailed: false,
+            },
+          }),
+        ]);
+        renderMarketplace(source);
+
+        await userEvent.click(
+          screen.getByRole('button', { name: 'More actions for Weekly digest' })
+        );
+        expect(
+          screen.queryByRole('menuitem', { name: 'Make a copy' })
+        ).toBeNull();
+        await userEvent.click(
+          await screen.findByRole('menuitem', { name: 'Make my own' })
+        );
+        const confirm = await screen.findByRole('dialog', {
+          name: 'Make “Weekly digest” your own?',
+        });
+        fireEvent.click(within(confirm).getByRole('button', { name: choice }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        await vi.waitFor(() =>
+          expect(source.copy).toHaveBeenCalledTimes(copies)
+        );
+      }
+    );
+
+    it('offers no Make my own or Pin for a routine already detached', async () => {
+      const source = fakeSource(() => [
+        digest({
+          installedMajor: 1,
+          installedVersion: { major: 1, minor: 0 },
+          installedRoutine: {
+            routineId: 'routine-1',
+            detached: true,
+            updateFailed: false,
+          },
+        }),
+      ]);
+      renderMarketplace(source);
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'More actions for Weekly digest' })
+      );
+      expect(
+        await screen.findByRole('menuitem', { name: 'Uninstall' })
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole('menuitem', { name: 'Make my own' })
+      ).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: /Pin to/ })).toBeNull();
+    });
 
     it('asks only for what a new major added, then takes it', async () => {
       const board = {
@@ -431,6 +775,7 @@ describe('Marketplace', () => {
       renderMarketplace(source, routines);
 
       fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+      await confirmUpdate('Update “Weekly digest” to v2.0?', 'Update to v2');
       await vi.waitFor(() => expect(install).toHaveBeenCalledTimes(2));
       expect(install).toHaveBeenNthCalledWith(1, 'digest', expect.anything());
       expect(routines.fill).toHaveBeenCalledWith({

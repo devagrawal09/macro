@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE marketplace_install i\n            SET pinned_minor = CASE\n                    WHEN $3 THEN COALESCE(\n                        i.pinned_minor,\n                        i.routine_minor,\n                        (\n                            SELECT max(v.minor)\n                            FROM marketplace_listing_version v\n                            WHERE v.listing_id = i.listing_id\n                              AND v.major = i.major\n                              AND v.review_state = 'approved'\n                        )\n                    )\n                END,\n                updated_at = now()\n            WHERE i.listing_id = $1\n              AND i.user_id = $2\n              -- A claim still creating its routine isn't an install yet.\n              AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)\n            RETURNING i.listing_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "listing_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2146e4f4bf542471c8796b51f157a103c57127b858cd9a8ea332407617054975"
+}

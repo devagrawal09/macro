@@ -1,0 +1,165 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                l.id,\n                l.kind,\n                l.user_id,\n                l.team_id,\n                l.source_id,\n                l.title,\n                l.description,\n                l.removed_at,\n                l.created_at,\n                l.updated_at,\n                v.major AS \"latest_major!\",\n                v.minor AS \"latest_minor!\",\n                p.major AS \"pending_major?\",\n                p.minor AS \"pending_minor?\",\n                i.major AS \"installed_major?\",\n                -- A routine is on the version it was last filled in from; a\n                -- page shows the minor it is pinned to, or the newest approved\n                -- one of its major.\n                COALESCE(i.routine_minor, i.pinned_minor, iv.minor) AS \"installed_minor?\",\n                (i.pinned_minor IS NOT NULL) AS \"pinned?\",\n                i.routine_id AS \"installed_routine_id?\",\n                o.id AS \"based_on_id?\",\n                o.title AS \"based_on_title?\",\n                (i.detached_at IS NOT NULL) AS \"detached?\",\n                (i.update_failed_at IS NOT NULL) AS \"update_failed?\",\n                (\n                    SELECT count(*)\n                    FROM marketplace_install c\n                    WHERE c.listing_id = l.id\n                      AND (c.routine_claimed_at IS NULL OR c.routine_id IS NOT NULL)\n                ) AS \"install_count!\"\n            FROM marketplace_listing l\n            CROSS JOIN LATERAL (\n                SELECT major, minor\n                FROM marketplace_listing_version\n                WHERE listing_id = l.id\n                  AND (\n                      review_state = 'approved'\n                      OR ($12::bool AND l.team_id IS NULL AND review_state = 'pending')\n                  )\n                ORDER BY (review_state = 'approved') DESC, major DESC, minor DESC\n                LIMIT 1\n            ) v\n            LEFT JOIN marketplace_listing_version p\n                ON $12::bool\n               AND p.listing_id = l.id\n               AND p.review_state = 'pending'\n            -- A claim still creating its routine isn't an install yet.\n            LEFT JOIN marketplace_install i\n                ON i.listing_id = l.id\n               AND i.user_id = $1\n               AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)\n            LEFT JOIN LATERAL (\n                SELECT max(minor) AS minor\n                FROM marketplace_listing_version\n                WHERE listing_id = l.id AND major = i.major AND review_state = 'approved'\n            ) iv ON true\n            -- The listing it was copied from, only when $1 may see it, by the\n            -- rules this query lists by: their team's or everyone's, listed\n            -- or installed by them, and with an approved version, or global\n            -- and waiting for its first while $1 is a global publisher.\n            LEFT JOIN marketplace_listing o\n                ON o.id = l.derived_from_listing_id\n               AND (o.team_id IS NULL OR o.team_id = $2)\n               AND (\n                   o.removed_at IS NULL\n                   OR EXISTS (\n                       SELECT 1\n                       FROM marketplace_install oi\n                       WHERE oi.listing_id = o.id\n                         AND oi.user_id = $1\n                         AND (oi.routine_claimed_at IS NULL OR oi.routine_id IS NOT NULL)\n                   )\n               )\n               AND EXISTS (\n                   SELECT 1\n                   FROM marketplace_listing_version ov\n                   WHERE ov.listing_id = o.id\n                     AND (\n                         ov.review_state = 'approved'\n                         OR ($12::bool AND o.team_id IS NULL AND ov.review_state = 'pending')\n                     )\n               )\n            WHERE (l.team_id IS NULL OR l.team_id = $2)\n              AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)\n              AND ($3::uuid IS NULL OR l.id = $3)\n              AND (NOT $4::bool OR i.user_id IS NOT NULL)\n              AND (NOT $5::bool OR l.removed_at IS NULL)\n              AND ($6::text IS NULL OR l.kind = $6)\n              AND ($7::uuid IS NULL OR l.source_id = $7)\n              AND ($8::text IS NULL OR l.title ILIKE $8 OR l.description ILIKE $8)\n              AND (\n                  $9::timestamptz IS NULL\n                  OR l.created_at < $9\n                  OR (l.created_at = $9 AND l.id > $10)\n              )\n            ORDER BY l.created_at DESC, l.id\n            LIMIT $11\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "removed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "latest_major!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "latest_minor!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "pending_major?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "pending_minor?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "installed_major?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "installed_minor?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "pinned?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "installed_routine_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "based_on_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
+        "name": "based_on_title?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "detached?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 21,
+        "name": "update_failed?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 22,
+        "name": "install_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "a7fea298bf270315f1f83e9488c6199e98e9bab55abc3ec69e1b495f8dc65fb0"
+}

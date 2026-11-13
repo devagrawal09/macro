@@ -7,6 +7,7 @@ import {
   ownListingForSource,
   updateAvailable,
   versionLabel,
+  versionsBetween,
 } from './listing';
 
 const listing = (overrides: Partial<Listing> = {}): Listing => ({
@@ -20,6 +21,7 @@ const listing = (overrides: Partial<Listing> = {}): Listing => ({
   latestVersion: { major: 1, minor: 0 },
   installCount: 0,
   removed: false,
+  pinned: false,
   createdAt: '2026-11-01T10:00:00Z',
   updatedAt: '2026-11-01T10:00:00Z',
   ...overrides,
@@ -28,6 +30,47 @@ const listing = (overrides: Partial<Listing> = {}): Listing => ({
 describe('marketplace listings', () => {
   it('writes a version as people read it', () => {
     expect(versionLabel({ major: 2, minor: 13 })).toBe('v2.13');
+  });
+
+  it('finds the approved versions an update brings, newest first', () => {
+    const entry = (
+      major: number,
+      minor: number,
+      review: 'approved' | 'pending' = 'approved'
+    ) => ({
+      version: { major, minor },
+      forcedMajor: false,
+      review,
+      createdAt: '2026-11-01T10:00:00Z',
+    });
+    // A publisher's history also holds the version waiting for review.
+    const history = [
+      entry(1, 0),
+      entry(1, 1),
+      entry(2, 0),
+      entry(2, 1),
+      entry(2, 2, 'pending'),
+      entry(3, 0),
+    ];
+
+    const brought = versionsBetween(
+      history,
+      { major: 1, minor: 1 },
+      { major: 2, minor: 1 }
+    ).map((item) => versionLabel(item.version));
+    const unknownStart = versionsBetween(history, undefined, {
+      major: 1,
+      minor: 1,
+    }).map((item) => versionLabel(item.version));
+    const pastPending = versionsBetween(
+      history,
+      { major: 2, minor: 0 },
+      { major: 2, minor: 2 }
+    ).map((item) => versionLabel(item.version));
+
+    expect(brought).toEqual(['v2.1', 'v2.0']);
+    expect(pastPending).toEqual(['v2.1']);
+    expect(unknownStart).toEqual(['v1.1', 'v1.0']);
   });
 
   it('counts a listing as installed only on a major the viewer is on', () => {
@@ -55,6 +98,26 @@ describe('marketplace listings', () => {
     ).toBe(true);
     expect(
       hasApprovedVersion(listing({ pendingVersion: { major: 1, minor: 0 } }))
+    ).toBe(false);
+  });
+
+  it('offers a pinned install any newer version, and an unpinned one only a major', () => {
+    const behind = {
+      latestVersion: { major: 1, minor: 3 },
+      installedMajor: 1,
+      installedVersion: { major: 1, minor: 1 },
+    };
+
+    expect(updateAvailable(listing({ ...behind, pinned: true }))).toBe(true);
+    expect(updateAvailable(listing({ ...behind, pinned: false }))).toBe(false);
+    expect(
+      updateAvailable(
+        listing({
+          ...behind,
+          installedVersion: { major: 1, minor: 3 },
+          pinned: true,
+        })
+      )
     ).toBe(false);
   });
 
