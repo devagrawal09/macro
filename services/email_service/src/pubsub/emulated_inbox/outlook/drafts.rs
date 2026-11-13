@@ -160,11 +160,7 @@ impl OutlookInbox {
         &self,
     ) -> MailboxDraftService<
         PgMailboxSync,
-        ProviderMailboxGateway<
-            OutlookApiClientRepository,
-            MailboxCredentials<PgMailboxSync, MicrosoftCredentialsClient>,
-            AlwaysAllowRateLimiter,
-        >,
+        GraphGateway,
         DraftContentService<
             EmailPgRepo,
             NoDraftFiles,
@@ -173,24 +169,9 @@ impl OutlookInbox {
             >,
         >,
     > {
-        let repository = PgMailboxSync::new(self.db.clone());
-        let api = MailboxApiService::new(
-            OutlookApiClientRepository::for_graph_url(&MicrosoftGraphUrl::from(
-                self.outlook.graph_url(),
-            ))
-            .expect("outlook client"),
-            MailboxCredentials::new(
-                repository.clone(),
-                MicrosoftCredentialsClient(authentication_service_client::AuthServiceClient::new(
-                    "secret".to_string(),
-                    self.outlook.authentication_service_url(),
-                )),
-            ),
-            AlwaysAllowRateLimiter,
-        );
         MailboxDraftService::new(
-            repository,
-            ProviderMailboxGateway(api),
+            PgMailboxSync::new(self.db.clone()),
+            self.graph(),
             DraftContentService {
                 repository: EmailPgRepo::new(self.db.clone()),
                 bytes: NoDraftFiles,
@@ -200,6 +181,33 @@ impl OutlookInbox {
             },
         )
         .with_writes_enabled(true)
+    }
+}
+
+/// Macro's Outlook client, as the workers wire it.
+pub type GraphGateway = ProviderMailboxGateway<
+    OutlookApiClientRepository,
+    MailboxCredentials<PgMailboxSync, MicrosoftCredentialsClient>,
+    AlwaysAllowRateLimiter,
+>;
+
+impl OutlookInbox {
+    /// Macro's Outlook client for this inbox, as the workers wire it.
+    pub fn graph(&self) -> GraphGateway {
+        ProviderMailboxGateway(MailboxApiService::new(
+            OutlookApiClientRepository::for_graph_url(&MicrosoftGraphUrl::from(
+                self.outlook.graph_url(),
+            ))
+            .expect("outlook client"),
+            MailboxCredentials::new(
+                PgMailboxSync::new(self.db.clone()),
+                MicrosoftCredentialsClient(authentication_service_client::AuthServiceClient::new(
+                    "secret".to_string(),
+                    self.outlook.authentication_service_url(),
+                )),
+            ),
+            AlwaysAllowRateLimiter,
+        ))
     }
 }
 

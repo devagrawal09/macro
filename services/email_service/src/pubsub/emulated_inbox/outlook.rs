@@ -14,6 +14,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 mod access;
+mod attachments;
 mod changes;
 mod drafts;
 #[cfg(test)]
