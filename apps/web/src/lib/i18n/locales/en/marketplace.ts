@@ -11,6 +11,12 @@ export default {
     'Pages your team publishes appear here. To publish one, open an HTML page you own and choose “Publish to marketplace…” from its menu.',
   installedEmptyTitle: 'Nothing installed yet',
   installedEmptyDescription: 'Pages you install from Browse appear here.',
+  search: 'Search marketplace',
+  searchEmptyTitle: 'No pages match “{{search}}”',
+  searchEmptyDescription:
+    'Try another word from a page’s title or description.',
+  loadingMore: 'Loading more pages',
+  loadMoreFailed: 'Could not load more pages.',
   listingLabel: 'Marketplace page: {{title}}',
   byPublisher: 'by {{name}}',
   installs: { one: '{{count}} install', other: '{{count}} installs' },

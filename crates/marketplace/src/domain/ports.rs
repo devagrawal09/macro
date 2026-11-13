@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingText, MarketplaceError,
-    NewListing, PublishedPage, VersionBump,
+    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingPage, ListingQuery,
+    ListingText, MarketplaceError, NewListing, PublishedPage, VersionBump,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -27,15 +27,23 @@ pub trait ListingRepo: Send + Sync + 'static {
         listing: NewListing,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// The listings a member of `team` may see, as `user` sees them, newest
-    /// first: their team's and everyone's, leaving out unlisted ones `user`
-    /// hasn't installed. Only `only` when given.
+    /// The listing, as `user` sees it, when a member of `team` may see it:
+    /// it is their team's or everyone's, and listed or installed by `user`.
+    fn listing(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<Option<Listing>, Self::Err>> + Send;
+
+    /// A page of the listings a member of `team` may see, as `user` sees
+    /// them, newest first: their team's and everyone's, as `query` picks.
     fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
         team: Option<Uuid>,
-        only: Option<ListingId>,
-    ) -> impl Future<Output = Result<Vec<Listing>, Self::Err>> + Send;
+        query: &ListingQuery,
+    ) -> impl Future<Output = Result<ListingPage, Self::Err>> + Send;
 
     /// Store `page` as the listing's next version, unless its newest version
     /// already holds the same source.
@@ -110,12 +118,13 @@ pub trait Rollout: Send + Sync + 'static {
 /// `team` is the caller's team membership, when they have one. Every method
 /// answers [`MarketplaceError::NotFound`] to a caller outside the rollout.
 pub trait MarketplaceService: Send + Sync + 'static {
-    /// The listings the caller may see.
+    /// A page of the listings the caller may see, as `query` picks.
     fn listings(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
-    ) -> impl Future<Output = Result<Vec<Listing>, MarketplaceError>> + Send;
+        query: ListingQuery,
+    ) -> impl Future<Output = Result<ListingPage, MarketplaceError>> + Send;
 
     /// Publish a document the caller owns to their team, as version 1.0.
     fn publish(

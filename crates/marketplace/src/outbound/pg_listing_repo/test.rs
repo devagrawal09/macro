@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use super::PgListingRepo;
 use crate::domain::models::{
-    AddedVersion, ListingId, ListingKind, ListingScope, ListingText, NewListing, PublishedPage,
-    Version, VersionBump,
+    AddedVersion, Listing, ListingCursor, ListingId, ListingKind, ListingQuery, ListingScope,
+    ListingText, ListingsShown, NewListing, PublishedPage, Version, VersionBump,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -48,6 +48,19 @@ async fn insert_user(pool: &PgPool, id: &str) {
     .execute(pool)
     .await
     .expect("user should insert");
+}
+
+/// The first page of `shown`, of the default size.
+fn first_page(shown: ListingsShown) -> ListingQuery {
+    ListingQuery::new(shown, None, None, None, None).expect("a valid query")
+}
+
+/// What Browse lists for `user`, as a member of `team`.
+async fn browse(repo: &PgListingRepo, user_id: &'static str, team: Option<Uuid>) -> Vec<Listing> {
+    repo.listings(&user(user_id), team, &first_page(ListingsShown::Listed))
+        .await
+        .unwrap()
+        .listings
 }
 
 /// A team owned by a new user `owner`; a person owns one team at most.
@@ -90,9 +103,9 @@ async fn a_listing_is_seen_by_its_team_with_its_first_version(pool: PgPool) {
     let listing = board(acme);
 
     let created = repo.create_listing(listing.clone()).await.unwrap();
-    let for_team = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
-    let for_other_team = repo.listings(&user(BEN), Some(other), None).await.unwrap();
-    let without_team = repo.listings(&user(BEN), None, None).await.unwrap();
+    let for_team = browse(&repo, BEN, Some(acme)).await;
+    let for_other_team = browse(&repo, BEN, Some(other)).await;
+    let without_team = browse(&repo, BEN, None).await;
 
     assert!(created);
     assert_eq!(for_team.len(), 1);
@@ -125,7 +138,7 @@ async fn a_document_lists_once_until_its_listing_is_removed(pool: PgPool) {
     let repeated = repo.create_listing(second).await.unwrap();
     repo.remove_listing(first.id).await.unwrap();
     let relisted = repo.create_listing(third.clone()).await.unwrap();
-    let listed = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let listed = browse(&repo, BEN, Some(acme)).await;
 
     assert!(created);
     assert!(!repeated);
@@ -165,7 +178,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
         )
         .await
         .unwrap();
-    let listed = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let listed = browse(&repo, BEN, Some(acme)).await;
 
     assert_eq!(unchanged, AddedVersion::Unchanged);
     assert_eq!(minor, AddedVersion::Added(Version { major: 1, minor: 1 }));
@@ -207,7 +220,7 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
         .installed_page(listing.id, &user(BEN), Some(other))
         .await
         .unwrap();
-    let waiting = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let waiting = browse(&repo, BEN, Some(acme)).await;
 
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
@@ -216,7 +229,7 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
         .await
         .unwrap()
         .expect("the install has a page");
-    let moved = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let moved = browse(&repo, BEN, Some(acme)).await;
 
     assert_eq!(before, None);
     assert_eq!(on_first_major.version, Version { major: 1, minor: 1 });
@@ -238,10 +251,23 @@ async fn a_removed_listing_stays_only_for_those_who_installed_it(pool: PgPool) {
     let listing = board(acme);
     repo.create_listing(listing.clone()).await.unwrap();
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
+    let installed = first_page(ListingsShown::Installed);
 
     repo.remove_listing(listing.id).await.unwrap();
-    let for_installer = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
-    let for_others = repo.listings(&user(ADA), Some(acme), None).await.unwrap();
+    let browsed_by_installer = browse(&repo, BEN, Some(acme)).await;
+    let installed_by_installer = repo
+        .listings(&user(BEN), Some(acme), &installed)
+        .await
+        .unwrap()
+        .listings;
+    let looked_up_by_installer = repo
+        .listing(&user(BEN), Some(acme), listing.id)
+        .await
+        .unwrap();
+    let looked_up_by_others = repo
+        .listing(&user(ADA), Some(acme), listing.id)
+        .await
+        .unwrap();
     let page = repo
         .installed_page(listing.id, &user(BEN), Some(acme))
         .await
@@ -249,13 +275,235 @@ async fn a_removed_listing_stays_only_for_those_who_installed_it(pool: PgPool) {
 
     repo.uninstall(listing.id, &user(BEN)).await.unwrap();
     repo.uninstall(listing.id, &user(BEN)).await.unwrap();
-    let after_uninstall = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let after_uninstall = repo
+        .listings(&user(BEN), Some(acme), &installed)
+        .await
+        .unwrap()
+        .listings;
 
-    assert_eq!(for_installer.len(), 1);
-    assert!(for_installer[0].removed);
-    assert!(for_others.is_empty());
+    assert!(browsed_by_installer.is_empty());
+    assert_eq!(installed_by_installer.len(), 1);
+    assert!(installed_by_installer[0].removed);
+    assert!(looked_up_by_installer.is_some_and(|listing| listing.removed));
+    assert_eq!(looked_up_by_others, None);
     assert!(page.is_some());
     assert!(after_uninstall.is_empty());
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn installed_lists_only_the_callers_installs(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool);
+    let board = board(acme);
+    let notes = NewListing {
+        id: ListingId::generate(),
+        source_document_id: Uuid::now_v7(),
+        ..board.clone()
+    };
+    repo.create_listing(board.clone()).await.unwrap();
+    repo.create_listing(notes.clone()).await.unwrap();
+    repo.install_latest(notes.id, &user(BEN)).await.unwrap();
+    let installed = first_page(ListingsShown::Installed);
+
+    let bens = repo
+        .listings(&user(BEN), Some(acme), &installed)
+        .await
+        .unwrap();
+    let adas = repo
+        .listings(&user(ADA), Some(acme), &installed)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        bens.listings
+            .iter()
+            .map(|listing| listing.id)
+            .collect::<Vec<_>>(),
+        vec![notes.id]
+    );
+    assert_eq!(bens.next, None);
+    assert!(adas.listings.is_empty());
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_search_matches_the_title_or_description_literally(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = |title: &str, description: &str| NewListing {
+        id: ListingId::generate(),
+        source_document_id: Uuid::now_v7(),
+        text: ListingText {
+            title: title.to_owned(),
+            description: description.to_owned(),
+        },
+        ..board(acme)
+    };
+    let launch = listing("Launch Dashboard", "Tracks the launch");
+    let notes = listing("Release notes", "What shipped, by DASHBOARD area");
+    let discount = listing("Pricing", "100% off_peak");
+    let other = listing("Pricing table", "100 percent of peak");
+    for listing in [&launch, &notes, &discount, &other] {
+        repo.create_listing(listing.clone()).await.unwrap();
+    }
+    let search = |text: &str| {
+        ListingQuery::new(ListingsShown::Listed, Some(text), None, None, None)
+            .expect("a valid query")
+    };
+    let ids = |listings: Vec<Listing>| {
+        let mut ids: Vec<_> = listings.into_iter().map(|listing| listing.id).collect();
+        ids.sort_by_key(|id| id.as_uuid());
+        ids
+    };
+
+    let dashboards = repo
+        .listings(&user(BEN), Some(acme), &search("dashboard"))
+        .await
+        .unwrap();
+    let wildcards = repo
+        .listings(&user(BEN), Some(acme), &search("0% off_"))
+        .await
+        .unwrap();
+    let nothing = repo
+        .listings(&user(BEN), Some(acme), &search("roadmap"))
+        .await
+        .unwrap();
+
+    let mut expected = vec![launch.id, notes.id];
+    expected.sort_by_key(|id| id.as_uuid());
+    assert_eq!(ids(dashboards.listings), expected);
+    assert_eq!(ids(wildcards.listings), vec![discount.id]);
+    assert!(nothing.listings.is_empty());
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn pages_follow_newest_first_and_end_on_the_last_listing(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    let repo = PgListingRepo::new(pool.clone());
+    // Five listings, the last two created at the same instant, so the
+    // cursor's id orders them.
+    let mut listings = Vec::new();
+    for _ in 0..5 {
+        let listing = NewListing {
+            id: ListingId::generate(),
+            source_document_id: Uuid::now_v7(),
+            ..board(acme)
+        };
+        repo.create_listing(listing.clone()).await.unwrap();
+        listings.push(listing);
+    }
+    for (offset, listing) in [4, 3, 2, 1, 1].into_iter().zip(&listings) {
+        sqlx::query!(
+            r#"
+            UPDATE marketplace_listing
+            SET created_at = '2026-11-01T00:00:00Z'::timestamptz + make_interval(mins => $2)
+            WHERE id = $1
+            "#,
+            listing.id.as_uuid(),
+            offset,
+        )
+        .execute(&pool)
+        .await
+        .expect("listing should update");
+    }
+    let mut tied = [listings[3].id, listings[4].id];
+    tied.sort_by_key(|id| id.as_uuid());
+    let newest_first = vec![
+        listings[0].id,
+        listings[1].id,
+        listings[2].id,
+        tied[0],
+        tied[1],
+    ];
+    let page = |cursor: Option<String>, limit: u16| {
+        ListingQuery::new(
+            ListingsShown::Listed,
+            None,
+            None,
+            cursor.as_deref(),
+            Some(limit),
+        )
+        .expect("a valid query")
+    };
+
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    let mut pages = 0;
+    loop {
+        let read = repo
+            .listings(&user(BEN), Some(acme), &page(cursor, 2))
+            .await
+            .unwrap();
+        pages += 1;
+        seen.extend(read.listings.iter().map(|listing| listing.id));
+        let Some(next) = read.next else { break };
+        cursor = Some(next.encode());
+    }
+    let exact = repo
+        .listings(&user(BEN), Some(acme), &page(None, 5))
+        .await
+        .unwrap();
+    let after_fourth = repo
+        .listings(
+            &user(BEN),
+            Some(acme),
+            &page(Some(ListingCursor::after(&exact.listings[3]).encode()), 2),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(seen, newest_first);
+    assert_eq!(pages, 3);
+    assert_eq!(exact.listings.len(), 5);
+    assert_eq!(exact.next, None);
+    assert_eq!(
+        after_fourth
+            .listings
+            .iter()
+            .map(|listing| listing.id)
+            .collect::<Vec<_>>(),
+        vec![tied[1]]
+    );
+    assert_eq!(after_fourth.next, None);
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_document_finds_its_live_listing(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    let repo = PgListingRepo::new(pool);
+    let first = board(acme);
+    let other = NewListing {
+        id: ListingId::generate(),
+        source_document_id: Uuid::now_v7(),
+        ..board(acme)
+    };
+    repo.create_listing(first.clone()).await.unwrap();
+    repo.create_listing(other).await.unwrap();
+    repo.remove_listing(first.id).await.unwrap();
+    let relisted = NewListing {
+        id: ListingId::generate(),
+        ..first.clone()
+    };
+    repo.create_listing(relisted.clone()).await.unwrap();
+    let query = ListingQuery::new(
+        ListingsShown::Listed,
+        None,
+        Some(first.source_document_id),
+        None,
+        None,
+    )
+    .expect("a valid query");
+
+    let found = repo.listings(&user(ADA), Some(acme), &query).await.unwrap();
+
+    assert_eq!(
+        found
+            .listings
+            .iter()
+            .map(|listing| listing.id)
+            .collect::<Vec<_>>(),
+        vec![relisted.id]
+    );
 }
 
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
@@ -273,7 +521,7 @@ async fn a_listing_without_a_team_is_seen_by_everyone(pool: PgPool) {
     .await
     .expect("listing should update");
 
-    let without_team = repo.listings(&user(BEN), None, None).await.unwrap();
+    let without_team = browse(&repo, BEN, None).await;
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
     let page = repo
         .installed_page(listing.id, &user(BEN), None)
@@ -306,7 +554,7 @@ async fn deleting_a_user_removes_their_installs_and_listings(pool: PgPool) {
         .await
         .expect("user should delete");
 
-    let listed = repo.listings(&user(CARA), Some(acme), None).await.unwrap();
+    let listed = browse(&repo, CARA, Some(acme)).await;
     let installs = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM marketplace_install"#)
         .fetch_one(&pool)
         .await

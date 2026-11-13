@@ -30,6 +30,7 @@ import type {
   ExecutionRecord,
   InstalledListingBuild,
   Listing,
+  ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
   MarketplaceListings,
@@ -536,10 +537,22 @@ export const agentHarnessServiceClient = {
     );
   },
 
-  /** The marketplace listings the caller may see: their team's and everyone's. */
-  listMarketplaceListings(signal?: AbortSignal) {
+  /**
+   * A page of the marketplace listings the caller may see, newest first:
+   * their team's and everyone's. Those still listed, or with `installed` the
+   * caller's installs; `nextCursor` asks for the next page.
+   */
+  listMarketplaceListings(
+    params: ListMarketplaceListingsParams,
+    signal?: AbortSignal
+  ) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) query.set(key, String(value));
+    }
+
     return fetchWithToken<MarketplaceListings>(
-      `${agentHarnessHost}/marketplace/listings`,
+      `${agentHarnessHost}/marketplace/listings?${query}`,
       { method: 'GET', signal, errorResponseHandler: marketplaceError }
     );
   },

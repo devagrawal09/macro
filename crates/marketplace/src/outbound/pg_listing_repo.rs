@@ -11,8 +11,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, InstalledPage, Listing, ListingId, ListingKind, ListingScope, NewListing,
-    PublishedPage, Version, VersionBump,
+    AddedVersion, InstalledPage, Listing, ListingCursor, ListingId, ListingKind, ListingPage,
+    ListingQuery, ListingScope, ListingsShown, NewListing, PublishedPage, Version, VersionBump,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -94,6 +94,108 @@ impl TryFrom<ListingRow> for Listing {
     }
 }
 
+/// Which of the listings a caller may see one read returns.
+struct Selection {
+    only: Option<Uuid>,
+    installed_only: bool,
+    listed_only: bool,
+    source_document_id: Option<Uuid>,
+    /// An `ILIKE` pattern for the title or description.
+    pattern: Option<String>,
+    after: Option<ListingCursor>,
+    limit: i64,
+}
+
+/// `search` as an `ILIKE` pattern that matches it literally: its wildcards
+/// and Postgres's default escape character are escaped.
+fn escape_like(search: &str) -> String {
+    let mut escaped = String::with_capacity(search.len());
+    for character in search.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+impl PgListingRepo {
+    /// The listings a member of `team` may see, as `user` sees them, newest
+    /// first: their team's and everyone's, leaving out unlisted ones `user`
+    /// hasn't installed, narrowed by `selection`.
+    async fn select(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        selection: Selection,
+    ) -> Result<Vec<Listing>, ListingRepoErr> {
+        // Newest first, then by id: a cursor resumes after the listing it
+        // names, among those created at the same instant too.
+        let rows = sqlx::query_as!(
+            ListingRow,
+            r#"
+            SELECT
+                l.id,
+                l.kind,
+                l.user_id,
+                l.team_id,
+                l.source_document_id,
+                l.title,
+                l.description,
+                l.removed_at,
+                l.created_at,
+                l.updated_at,
+                v.major AS "latest_major!",
+                v.minor AS "latest_minor!",
+                i.major AS "installed_major?",
+                (
+                    SELECT count(*)
+                    FROM marketplace_install c
+                    WHERE c.listing_id = l.id
+                ) AS "install_count!"
+            FROM marketplace_listing l
+            CROSS JOIN LATERAL (
+                SELECT major, minor
+                FROM marketplace_listing_version
+                WHERE listing_id = l.id
+                ORDER BY major DESC, minor DESC
+                LIMIT 1
+            ) v
+            LEFT JOIN marketplace_install i
+                ON i.listing_id = l.id AND i.user_id = $1
+            WHERE (l.team_id IS NULL OR l.team_id = $2)
+              AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
+              AND ($3::uuid IS NULL OR l.id = $3)
+              AND (NOT $4::bool OR i.user_id IS NOT NULL)
+              AND (NOT $5::bool OR l.removed_at IS NULL)
+              AND ($6::uuid IS NULL OR l.source_document_id = $6)
+              AND ($7::text IS NULL OR l.title ILIKE $7 OR l.description ILIKE $7)
+              AND (
+                  $8::timestamptz IS NULL
+                  OR l.created_at < $8
+                  OR (l.created_at = $8 AND l.id > $9)
+              )
+            ORDER BY l.created_at DESC, l.id
+            LIMIT $10
+            "#,
+            user.as_ref(),
+            team,
+            selection.only,
+            selection.installed_only,
+            selection.listed_only,
+            selection.source_document_id,
+            selection.pattern,
+            selection.after.map(|cursor| cursor.created_at),
+            selection.after.map(|cursor| cursor.id.as_uuid()),
+            selection.limit,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(Listing::try_from).collect()
+    }
+}
+
 impl ListingRepo for PgListingRepo {
     type Err = ListingRepoErr;
 
@@ -141,57 +243,55 @@ impl ListingRepo for PgListingRepo {
     }
 
     #[tracing::instrument(err, skip_all)]
+    async fn listing(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        id: ListingId,
+    ) -> Result<Option<Listing>, Self::Err> {
+        let selection = Selection {
+            only: Some(id.as_uuid()),
+            installed_only: false,
+            listed_only: false,
+            source_document_id: None,
+            pattern: None,
+            after: None,
+            limit: 1,
+        };
+        let listings = self.select(user, team, selection).await?;
+        Ok(listings.into_iter().next())
+    }
+
+    #[tracing::instrument(err, skip_all)]
     async fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
         team: Option<Uuid>,
-        only: Option<ListingId>,
-    ) -> Result<Vec<Listing>, Self::Err> {
-        let rows = sqlx::query_as!(
-            ListingRow,
-            r#"
-            SELECT
-                l.id,
-                l.kind,
-                l.user_id,
-                l.team_id,
-                l.source_document_id,
-                l.title,
-                l.description,
-                l.removed_at,
-                l.created_at,
-                l.updated_at,
-                v.major AS "latest_major!",
-                v.minor AS "latest_minor!",
-                i.major AS "installed_major?",
-                (
-                    SELECT count(*)
-                    FROM marketplace_install c
-                    WHERE c.listing_id = l.id
-                ) AS "install_count!"
-            FROM marketplace_listing l
-            CROSS JOIN LATERAL (
-                SELECT major, minor
-                FROM marketplace_listing_version
-                WHERE listing_id = l.id
-                ORDER BY major DESC, minor DESC
-                LIMIT 1
-            ) v
-            LEFT JOIN marketplace_install i
-                ON i.listing_id = l.id AND i.user_id = $1
-            WHERE (l.team_id IS NULL OR l.team_id = $2)
-              AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
-              AND ($3::uuid IS NULL OR l.id = $3)
-            ORDER BY l.created_at DESC, l.id
-            "#,
-            user.as_ref(),
-            team,
-            only.map(|id| id.as_uuid()),
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        query: &ListingQuery,
+    ) -> Result<ListingPage, Self::Err> {
+        let limit = usize::from(query.limit);
+        // One listing past the page says whether another page follows.
+        let selection = Selection {
+            only: None,
+            installed_only: query.shown == ListingsShown::Installed,
+            listed_only: query.shown == ListingsShown::Listed,
+            source_document_id: query.source_document_id,
+            pattern: query
+                .search
+                .as_deref()
+                .map(|search| format!("%{}%", escape_like(search))),
+            after: query.after,
+            limit: i64::from(query.limit) + 1,
+        };
+        let mut listings = self.select(user, team, selection).await?;
 
-        rows.into_iter().map(Listing::try_from).collect()
+        let next = if listings.len() > limit {
+            listings.truncate(limit);
+            listings.last().map(ListingCursor::after)
+        } else {
+            None
+        };
+        Ok(ListingPage { listings, next })
     }
 
     #[tracing::instrument(err, skip_all)]

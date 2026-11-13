@@ -1,4 +1,6 @@
+import { SearchBar } from '@app/components/view-shell';
 import { t } from '@app/lib/i18n';
+import { useInfiniteScrollSentinel } from '@app/lib/primitives/infinite-scroll-sentinel';
 import {
   beginInteraction,
   TraceFlow,
@@ -6,6 +8,7 @@ import {
 } from '@app/observability/flow';
 import { toast } from '@core/component/Toast/Toast';
 import { isTouchDevice } from '@core/mobile/isTouchDevice';
+import { debouncedDependent } from '@core/util/debounce';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
 import { type Span, Telemetry } from '@macro-inc/observability';
@@ -25,6 +28,9 @@ import {
 import { createMarketplaceList } from '../primitives/marketplace-list';
 import { InstalledPageView } from './installed-page-view';
 
+/** How long Browse waits for typing to pause before it searches. */
+const SEARCH_DEBOUNCE_MS = 300;
+
 /**
  * The marketplace: what the viewer's team published (Browse) and what the
  * viewer installed (Installed), as cards. Opening an installed listing shows
@@ -39,17 +45,37 @@ export function MarketplaceView(props: {
   publisherName: (publisherId: string) => string;
 }) {
   const [tab, setTab] = createSignal<MarketplaceTab>('browse');
+  const [searchText, setSearchText] = createSignal('');
+  // Browse searches once typing pauses; Installed lists every install.
+  const typedSearch = debouncedDependent(
+    () => searchText().trim(),
+    SEARCH_DEBOUNCE_MS
+  );
+  const search = () => (tab() === 'browse' ? typedSearch() : '');
   const [openId, setOpenId] = createSignal<string>();
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
-  const view = createMarketplaceList(props.source, tab);
+  const list = props.source.list(() => ({
+    installed: tab() === 'installed',
+    search: search(),
+  }));
+  const view = createMarketplaceList(list, tab, search);
+  const [sentinel, setSentinel] = createSignal<HTMLDivElement>();
+  const loadMore = () => fireAndForget(list.loadMore(), 'marketplace');
   // An install that goes away (uninstalled, or gone with its listing) closes.
   const openListing = () => {
     const id = openId();
 
-    return props.source
+    return list
       .listings()
       .find((listing) => listing.id === id && isInstalled(listing));
   };
+
+  useInfiniteScrollSentinel({
+    sentinel,
+    hasNextPage: () => list.hasMore() && !list.loadMoreFailed(),
+    isFetchingNextPage: list.loadingMore,
+    fetchNextPage: loadMore,
+  });
   usePending('marketplace.listings', () => view().t === 'loading');
 
   /**
@@ -158,7 +184,7 @@ export function MarketplaceView(props: {
       when={openListing()}
       fallback={
         <div class="flex size-full min-h-0 min-w-0 flex-col">
-          <div class="flex shrink-0 items-center px-4 pt-3 mobile:px-3">
+          <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3 mobile:px-3">
             <Tabs
               aria-label={t('marketplace.tabsLabel')}
               size={isTouchDevice() ? 'lg' : undefined}
@@ -172,6 +198,15 @@ export function MarketplaceView(props: {
               value={tab()}
               onChange={setTab}
             />
+            <Show when={tab() === 'browse'}>
+              <SearchBar
+                label={t('marketplace.search')}
+                placeholder={t('marketplace.search')}
+                value={searchText()}
+                onValueChange={setSearchText}
+                class="max-w-80 min-w-48 flex-1 mobile:max-w-none"
+              />
+            </Show>
           </div>
           <div class="min-h-0 flex-1 overflow-auto touch:pb-(--mobile-content-inset-bottom)">
             <ListingGrid
@@ -181,7 +216,12 @@ export function MarketplaceView(props: {
                   ? t('marketplace.browse')
                   : t('marketplace.installed')
               }
-              onRetry={() => fireAndForget(props.source.retry(), 'marketplace')}
+              hasMore={list.hasMore()}
+              loadingMore={list.loadingMore()}
+              loadMoreFailed={list.loadMoreFailed()}
+              sentinelRef={setSentinel}
+              onRetry={() => fireAndForget(list.retry(), 'marketplace')}
+              onLoadMore={loadMore}
             >
               {(listing) => (
                 <ListingCard

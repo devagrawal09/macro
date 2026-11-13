@@ -1,0 +1,109 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                l.id,\n                l.kind,\n                l.user_id,\n                l.team_id,\n                l.source_document_id,\n                l.title,\n                l.description,\n                l.removed_at,\n                l.created_at,\n                l.updated_at,\n                v.major AS \"latest_major!\",\n                v.minor AS \"latest_minor!\",\n                i.major AS \"installed_major?\",\n                (\n                    SELECT count(*)\n                    FROM marketplace_install c\n                    WHERE c.listing_id = l.id\n                ) AS \"install_count!\"\n            FROM marketplace_listing l\n            CROSS JOIN LATERAL (\n                SELECT major, minor\n                FROM marketplace_listing_version\n                WHERE listing_id = l.id\n                ORDER BY major DESC, minor DESC\n                LIMIT 1\n            ) v\n            LEFT JOIN marketplace_install i\n                ON i.listing_id = l.id AND i.user_id = $1\n            WHERE (l.team_id IS NULL OR l.team_id = $2)\n              AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)\n              AND ($3::uuid IS NULL OR l.id = $3)\n              AND (NOT $4::bool OR i.user_id IS NOT NULL)\n              AND (NOT $5::bool OR l.removed_at IS NULL)\n              AND ($6::uuid IS NULL OR l.source_document_id = $6)\n              AND ($7::text IS NULL OR l.title ILIKE $7 OR l.description ILIKE $7)\n              AND (\n                  $8::timestamptz IS NULL\n                  OR l.created_at < $8\n                  OR (l.created_at = $8 AND l.id > $9)\n              )\n            ORDER BY l.created_at DESC, l.id\n            LIMIT $10\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_document_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "removed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "latest_major!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "latest_minor!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "installed_major?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "install_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "3f8e106c988d72a823530db949c66e91c162e6175f1abafda5822d004e8f7dad"
+}

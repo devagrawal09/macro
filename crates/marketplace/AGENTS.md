@@ -54,6 +54,13 @@ source; an install follows the newest minor version of the major it is on.
   Runs refuse an agent's or a program's token, like a document's.
 - An unlisted listing (`removed_at`) leaves browsing and keeps serving those
   who installed it. Its document can then be published again.
+- `GET /marketplace/listings` pages newest first by `(created_at, id)`: `limit`
+  (default 50, at most 100) and the opaque `nextCursor` it answers. It lists
+  what is still listed, or with `installed=true` the caller's installs,
+  unlisted ones included; `q` matches title or description (`ILIKE`, its
+  wildcards escaped) and `documentId` finds a document's live listing, which
+  the publish dialog needs. The service's own one-listing lookup
+  (`ListingRepo::listing`) sees listed and installed listings alike.
 - Deleting a user cascades: their installs go, and so do the listings they
   published, with everyone's installs of them.
 

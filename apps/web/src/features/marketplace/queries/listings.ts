@@ -8,10 +8,22 @@ import {
   type PublishListingErrorCode,
   type PublishListingVersion,
 } from '@service-agent-harness/client';
-import type { MarketplaceListings } from '@service-agent-harness/generated/schemas';
-import { queryOptions, useMutation, useQuery } from '@tanstack/solid-query';
+import type {
+  ListMarketplaceListingsParams,
+  MarketplaceListings,
+} from '@service-agent-harness/generated/schemas';
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  useMutation,
+} from '@tanstack/solid-query';
 import type { Accessor } from 'solid-js';
-import type { MarketplaceSource } from '../context/marketplace-source';
+import type {
+  ListingList,
+  ListingsFilter,
+  MarketplaceSource,
+} from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
 import { marketplaceKeys } from './keys';
 
@@ -39,51 +51,70 @@ function inTrace<T>(parentSpan: TraceContext | undefined, send: () => T): T {
   return (parentSpan ?? Telemetry.captureContext()).run(send);
 }
 
+/** Which listings one request reads; every page shares it. */
+export type ListingsRequest = Omit<ListMarketplaceListingsParams, 'cursor'>;
+
 /**
- * The listings the viewer may see: their team's and everyone's. Always
- * stale, so opening the page or returning to the window shows what
- * teammates published since.
+ * The listings the viewer may see that `request` picks, a page at a time,
+ * newest first: their team's and everyone's. Always stale, so opening the
+ * page or returning to the window shows what teammates published since.
  */
-export function listingsQueryOptions(enabled: boolean) {
-  return queryOptions({
-    queryKey: marketplaceKeys.listings.queryKey,
+export function listingsQueryOptions(
+  request: ListingsRequest,
+  enabled: boolean
+) {
+  return infiniteQueryOptions({
+    queryKey: marketplaceKeys.listings(request).queryKey,
     enabled,
     staleTime: 0,
     refetchOnWindowFocus: true,
-    queryFn: ({ signal }) =>
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page: MarketplaceListings) =>
+      page.nextCursor ?? undefined,
+    queryFn: ({ pageParam, signal }) =>
       throwOnErr(() =>
-        agentHarnessServiceClient.listMarketplaceListings(signal)
+        agentHarnessServiceClient.listMarketplaceListings(
+          { ...request, cursor: pageParam },
+          signal
+        )
       ),
   });
 }
 
-export function useListingsQuery(enabled: Accessor<boolean>) {
-  return useQuery(() => listingsQueryOptions(enabled()));
+/**
+ * The live listing of a document, if it has one: whoever opens the document
+ * keeps publishing its versions there.
+ */
+export function useDocumentListingQuery(
+  documentId: Accessor<string>,
+  enabled: Accessor<boolean>
+) {
+  return useInfiniteQuery(() =>
+    listingsQueryOptions({ documentId: documentId() }, enabled())
+  );
 }
 
 function invalidateListings() {
   return queryClient.invalidateQueries({
-    queryKey: marketplaceKeys.listings.queryKey,
+    queryKey: marketplaceKeys.listings._def,
   });
 }
 
 /** Show a listing the server just answered with, ahead of the refetch. */
 function setListing(listing: Listing) {
-  queryClient.setQueryData<MarketplaceListings>(
-    marketplaceKeys.listings.queryKey,
-    (current) => {
-      if (!current) return current;
+  queryClient.setQueriesData<
+    InfiniteData<MarketplaceListings, string | undefined>
+  >({ queryKey: marketplaceKeys.listings._def }, (current) => {
+    if (!current) return current;
 
-      const known = current.listings.some((item) => item.id === listing.id);
-      const listings = known
-        ? current.listings.map((item) =>
-            item.id === listing.id ? listing : item
-          )
-        : [listing, ...current.listings];
-
-      return { ...current, listings };
-    }
-  );
+    const pages = current.pages.map((page) => ({
+      ...page,
+      listings: page.listings.map((item) =>
+        item.id === listing.id ? listing : item
+      ),
+    }));
+    return { ...current, pages };
+  });
 }
 
 /** Installs a listing, or moves the viewer's install to its newest major. */
@@ -165,7 +196,15 @@ export function usePublishListingMutation(
     ...withCallbacks(
       {
         onSuccess: async (listing) => {
-          setListing(listing);
+          // Its document now has this listing: publishing it again offers
+          // an update before the refetch lands.
+          queryClient.setQueryData<
+            InfiniteData<MarketplaceListings, string | undefined>
+          >(
+            marketplaceKeys.listings({ documentId: listing.sourceDocumentId })
+              .queryKey,
+            { pages: [{ listings: [listing] }], pageParams: [undefined] }
+          );
           await invalidateListings();
         },
       },
@@ -206,23 +245,49 @@ export function usePublishListingVersionMutation(
   }));
 }
 
-/** The marketplace page's listings and actions over the listings query. */
+/** One marketplace list over the listings query its filter picks. */
+function createListingList(
+  filter: Accessor<ListingsFilter>,
+  enabled: Accessor<boolean>
+): ListingList {
+  const query = useInfiniteQuery(() => {
+    const { installed, search } = filter();
+    return listingsQueryOptions(
+      { installed, q: search === '' ? undefined : search },
+      enabled()
+    );
+  });
+
+  return {
+    // A pending first page's data read would suspend the page.
+    listings: () =>
+      query.isPending
+        ? []
+        : (query.data?.pages.flatMap((page) => page.listings) ?? []),
+    loading: () => query.isPending && query.isEnabled,
+    failed: () => Boolean(query.error) && !query.isFetchNextPageError,
+    hasMore: () => query.hasNextPage,
+    loadingMore: () => query.isFetchingNextPage,
+    loadMoreFailed: () => query.isFetchNextPageError,
+    loadMore: async () => {
+      await query.fetchNextPage();
+    },
+    retry: async () => {
+      await query.refetch();
+    },
+  };
+}
+
+/** The marketplace page's listings and actions over the listings queries. */
 export function createMarketplaceSource(
   enabled: Accessor<boolean>
 ): MarketplaceSource {
-  const query = useListingsQuery(enabled);
   const install = useInstallListingMutation();
   const uninstall = useUninstallListingMutation();
   const unlist = useUnlistListingMutation();
 
   return {
-    // A pending first load's data read would suspend the page.
-    listings: () => (query.isPending ? [] : (query.data?.listings ?? [])),
-    loading: () => query.isPending && query.isEnabled,
-    failed: () => query.isError,
-    retry: async () => {
-      await query.refetch();
-    },
+    list: (filter) => createListingList(filter, enabled),
     install: (listingId, parentSpan) =>
       install.mutateAsync({ listingId, parentSpan }),
     uninstall: (listingId, parentSpan) =>

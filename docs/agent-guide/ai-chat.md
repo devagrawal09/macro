@@ -495,8 +495,13 @@ the shimmer.
   off the link is hidden and a direct visit says the marketplace isn't
   available. **Browse** lists every listed page as a card (title, description,
   publisher, newest version such as `v1.2`, install count, **Team** or
-  **Macro**); **Installed** lists the viewer's installs, including ones since
-  unlisted (badge **Unlisted**). **Install** adds a page; **Open** shows the
+  **Macro**), newest first; its **Search marketplace** field narrows it to
+  pages whose title or description holds the typed text, ignoring case, once
+  typing pauses, and says **No pages match “…”** when none do. **Installed**
+  lists the viewer's installs, including ones since unlisted (badge
+  **Unlisted**). Both load 50 cards at a time and load more as the end of
+  the grid scrolls into view (`GET /marketplace/listings?q=&cursor=`, with
+  `installed=true` for Installed). **Install** adds a page; **Open** shows the
   installed page in place of the lists, with **Back**, its title and the
   version shown. An install follows the newest minor version of its major: a
   minor update reaches every install at once (on the next run, or on

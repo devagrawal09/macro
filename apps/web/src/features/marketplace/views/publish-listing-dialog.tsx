@@ -13,7 +13,7 @@ import {
 } from '../core/listing';
 import {
   type PublishListingErrorCode,
-  useListingsQuery,
+  useDocumentListingQuery,
   usePublishListingMutation,
   usePublishListingVersionMutation,
 } from '../queries/listings';
@@ -37,13 +37,16 @@ export function PublishListingDialog(props: {
   unsaved: boolean;
 }) {
   const flag = useMarketplaceFlag();
-  const listings = useListingsQuery(() => flag().enabled);
+  const listings = useDocumentListingQuery(
+    () => props.documentId,
+    () => flag().enabled
+  );
   // A pending load's data read would suspend the dialog.
   const existing = () =>
     listings.isPending
       ? undefined
       : ownListingForDocument(
-          listings.data?.listings ?? [],
+          listings.data?.pages.flatMap((page) => page.listings) ?? [],
           props.documentId,
           props.userId
         );

@@ -3907,8 +3907,58 @@
     "/marketplace/listings": {
       "get": {
         "tags": ["marketplace"],
-        "summary": "The listings the caller may see: their team's and everyone's, each with\nthe major version they are on when they installed it.",
+        "summary": "A page of the listings the caller may see, newest first: their team's and\neveryone's, each with the major version they are on when they installed\nit. Those still listed, or with `installed=true` the caller's installs.",
         "operationId": "list_marketplace_listings",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Text the title or description holds, ignoring case.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Listings per page, 1 to 100; 50 when absent.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `nextCursor` of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "installed",
+            "in": "query",
+            "description": "The caller's installs, unlisted ones included. Otherwise the listings\nstill listed.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "documentId",
+            "in": "query",
+            "description": "Only listings published from this document.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -3916,6 +3966,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MarketplaceListings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -7638,7 +7698,7 @@
       },
       "MarketplaceListings": {
         "type": "object",
-        "description": "The listings the caller may see.",
+        "description": "A page of the listings the caller may see.",
         "required": ["listings"],
         "properties": {
           "listings": {
@@ -7647,6 +7707,10 @@
               "$ref": "#/components/schemas/Listing"
             },
             "description": "Their team's and everyone's, newest first."
+          },
+          "nextCursor": {
+            "type": ["string", "null"],
+            "description": "Send as `cursor` for the next page; absent on the last page."
           }
         }
       },

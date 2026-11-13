@@ -2332,13 +2332,17 @@ export type LogFrameDto = {
 export type MacroUserIdStr = string;
 
 /**
- * The listings the caller may see.
+ * A page of the listings the caller may see.
  */
 export type MarketplaceListings = {
     /**
      * Their team's and everyone's, newest first.
      */
     listings: Array<Listing>;
+    /**
+     * Send as `cursor` for the next page; absent on the last page.
+     */
+    nextCursor?: string | null;
 };
 
 /**
@@ -5215,15 +5219,40 @@ export type RunDocumentProgramResponse = RunDocumentProgramResponses[keyof RunDo
 export type ListMarketplaceListingsData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Text the title or description holds, ignoring case.
+         */
+        q?: string;
+        /**
+         * Listings per page, 1 to 100; 50 when absent.
+         */
+        limit?: number;
+        /**
+         * The `nextCursor` of the previous page.
+         */
+        cursor?: string;
+        /**
+         * The caller's installs, unlisted ones included. Otherwise the listings
+         * still listed.
+         */
+        installed?: boolean;
+        /**
+         * Only listings published from this document.
+         */
+        documentId?: string;
+    };
     url: '/marketplace/listings';
 };
 
 export type ListMarketplaceListingsErrors = {
+    400: ErrorResponse;
     401: unknown;
     404: unknown;
     500: unknown;
 };
+
+export type ListMarketplaceListingsError = ListMarketplaceListingsErrors[keyof ListMarketplaceListingsErrors];
 
 export type ListMarketplaceListingsResponses = {
     200: MarketplaceListings;

@@ -15,8 +15,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingKind, ListingText,
-    MarketplaceError, NewListing, PublishedPage, VersionBump,
+    AddedVersion, InstalledBuild, InstalledPage, Listing, ListingId, ListingKind, ListingPage,
+    ListingQuery, ListingText, MarketplaceError, NewListing, PublishedPage, VersionBump,
 };
 use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout};
 
@@ -59,11 +59,9 @@ where
         id: ListingId,
     ) -> Result<Listing, MarketplaceError> {
         self.listings
-            .listings(user, team, Some(id))
+            .listing(user, team, id)
             .await
             .map_err(internal)?
-            .into_iter()
-            .next()
             .ok_or(MarketplaceError::NotFound)
     }
 
@@ -169,11 +167,12 @@ where
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
-    ) -> Result<Vec<Listing>, MarketplaceError> {
+        query: ListingQuery,
+    ) -> Result<ListingPage, MarketplaceError> {
         self.admit(user).await?;
         let team = membership(user, team)?.map(|member| member.team_id);
         self.listings
-            .listings(user, team, None)
+            .listings(user, team, &query)
             .await
             .map_err(internal)
     }

@@ -8,7 +8,11 @@ import {
 import userEvent from '@testing-library/user-event';
 import { createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MarketplaceSource } from '../context/marketplace-source';
+import type {
+  ListingList,
+  ListingsFilter,
+  MarketplaceSource,
+} from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
 import { MarketplaceView } from './marketplace-view';
 
@@ -33,15 +37,24 @@ const listing = (overrides: Partial<Listing>): Listing => ({
   ...overrides,
 });
 
+/** A source whose lists read `listings` for their filter, a page at once. */
 function fakeSource(
-  listings: () => Listing[],
-  overrides: Partial<MarketplaceSource> = {}
+  listings: (filter: ListingsFilter) => Listing[],
+  overrides: Partial<MarketplaceSource> = {},
+  list: Partial<ListingList> = {}
 ): MarketplaceSource {
   return {
-    listings,
-    loading: () => false,
-    failed: () => false,
-    retry: vi.fn(async () => {}),
+    list: (filter) => ({
+      listings: () => listings(filter()),
+      loading: () => false,
+      failed: () => false,
+      hasMore: () => false,
+      loadingMore: () => false,
+      loadMoreFailed: () => false,
+      loadMore: vi.fn(async () => {}),
+      retry: vi.fn(async () => {}),
+      ...list,
+    }),
     install: vi.fn(async (id: string) => listing({ id, installedMajor: 1 })),
     uninstall: vi.fn(async () => {}),
     unlist: vi.fn(async () => {}),
@@ -141,11 +154,16 @@ describe('Marketplace', () => {
     );
   });
 
-  it('lists only installed pages under Installed', () => {
-    const source = fakeSource(() => [
-      listing({ id: 'dashboard' }),
-      listing({ id: 'notes', title: 'Release notes', installedMajor: 1 }),
-    ]);
+  it('lists the viewer’s installs under Installed', () => {
+    const dashboard = listing({ id: 'dashboard' });
+    const notes = listing({
+      id: 'notes',
+      title: 'Release notes',
+      installedMajor: 1,
+    });
+    const source = fakeSource((filter) =>
+      filter.installed ? [notes] : [dashboard, notes]
+    );
     renderMarketplace(source);
 
     fireEvent.click(screen.getByRole('radio', { name: 'Installed' }));
@@ -154,5 +172,60 @@ describe('Marketplace', () => {
     ).getAllByRole('article');
     expect(cards).toHaveLength(1);
     expect(cards[0].textContent).toContain('Release notes');
+    expect(
+      screen.queryByRole('searchbox', { name: 'Search marketplace' })
+    ).toBeNull();
+  });
+
+  it('searches Browse once typing pauses, and says when nothing matches', () => {
+    vi.useFakeTimers();
+    try {
+      const searches: string[] = [];
+      const source = fakeSource((filter) => {
+        searches.push(filter.search);
+        return [
+          listing({ id: 'dashboard' }),
+          listing({ id: 'notes', title: 'Release notes' }),
+        ].filter((item) =>
+          item.title.toLowerCase().includes(filter.search.toLowerCase())
+        );
+      });
+      renderMarketplace(source);
+
+      fireEvent.input(
+        screen.getByRole('searchbox', { name: 'Search marketplace' }),
+        { target: { value: ' notes ' } }
+      );
+      expect(screen.getAllByRole('article')).toHaveLength(2);
+
+      vi.advanceTimersByTime(300);
+      const cards = screen.getAllByRole('article');
+      expect(cards).toHaveLength(1);
+      expect(cards[0].textContent).toContain('Release notes');
+      expect(searches.at(-1)).toBe('notes');
+
+      fireEvent.input(
+        screen.getByRole('searchbox', { name: 'Search marketplace' }),
+        { target: { value: 'roadmap' } }
+      );
+      vi.advanceTimersByTime(300);
+      expect(screen.getByText('No pages match “roadmap”')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries loading more after a page failed', () => {
+    const loadMore = vi.fn(async () => {});
+    const source = fakeSource(
+      () => [listing({ id: 'dashboard' })],
+      {},
+      { loadMoreFailed: () => true, loadMore }
+    );
+    renderMarketplace(source);
+
+    expect(screen.getByText('Could not load more pages.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(loadMore).toHaveBeenCalledTimes(1);
   });
 });
