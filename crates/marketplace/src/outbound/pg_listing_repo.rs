@@ -14,8 +14,8 @@ use scheduled_action::domain::templates::fill::RoutineFills;
 
 use crate::domain::models::{
     AddedVersion, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine, Listing,
-    ListingContent, ListingId, ListingKind, ListingScope, NewListing, RoutineInstall,
-    RoutineVersion, TaskHash, Version, VersionBump,
+    ListingContent, ListingCursor, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
+    ListingsShown, NewListing, RoutineInstall, RoutineVersion, TaskHash, Version, VersionBump,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -108,53 +108,44 @@ impl TryFrom<ListingRow> for Listing {
     }
 }
 
-impl ListingRepo for PgListingRepo {
-    type Err = ListingRepoErr;
+/// Which of the listings a caller may see one read returns.
+struct Selection {
+    only: Option<Uuid>,
+    installed_only: bool,
+    listed_only: bool,
+    kind: Option<ListingKind>,
+    source_id: Option<Uuid>,
+    /// An `ILIKE` pattern for the title or description.
+    pattern: Option<String>,
+    after: Option<ListingCursor>,
+    limit: i64,
+}
 
-    #[tracing::instrument(err, skip_all)]
-    async fn create_listing(&self, listing: NewListing) -> Result<bool, Self::Err> {
-        let mut transaction = self.pool.begin().await?;
-
-        let inserted = sqlx::query!(
-            r#"
-            INSERT INTO marketplace_listing
-                (id, kind, user_id, team_id, source_id, title, description)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (kind, source_id) WHERE removed_at IS NULL DO NOTHING
-            "#,
-            listing.id.as_uuid(),
-            listing.content.kind().to_string(),
-            listing.publisher.as_ref(),
-            listing.team_id,
-            listing.source_id,
-            listing.text.title,
-            listing.text.description,
-        )
-        .execute(&mut *transaction)
-        .await?;
-        if inserted.rows_affected() == 0 {
-            return Ok(false);
+/// `search` as an `ILIKE` pattern that matches it literally: its wildcards
+/// and Postgres's default escape character are escaped.
+fn escape_like(search: &str) -> String {
+    let mut escaped = String::with_capacity(search.len());
+    for character in search.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
         }
-
-        insert_version(
-            &mut transaction,
-            listing.id,
-            Version::FIRST,
-            &listing.content,
-        )
-        .await?;
-
-        transaction.commit().await?;
-        Ok(true)
+        escaped.push(character);
     }
+    escaped
+}
 
-    #[tracing::instrument(err, skip_all)]
-    async fn listings(
+impl PgListingRepo {
+    /// The listings a member of `team` may see, as `user` sees them, newest
+    /// first: their team's and everyone's, leaving out unlisted ones `user`
+    /// hasn't installed, narrowed by `selection`.
+    async fn select(
         &self,
         user: &MacroUserIdStr<'_>,
         team: Option<Uuid>,
-        only: Option<ListingId>,
-    ) -> Result<Vec<Listing>, Self::Err> {
+        selection: Selection,
+    ) -> Result<Vec<Listing>, ListingRepoErr> {
+        // Newest first, then by id: a cursor resumes after the listing it
+        // names, among those created at the same instant too.
         let rows = sqlx::query_as!(
             ListingRow,
             r#"
@@ -197,16 +188,130 @@ impl ListingRepo for PgListingRepo {
             WHERE (l.team_id IS NULL OR l.team_id = $2)
               AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
               AND ($3::uuid IS NULL OR l.id = $3)
+              AND (NOT $4::bool OR i.user_id IS NOT NULL)
+              AND (NOT $5::bool OR l.removed_at IS NULL)
+              AND ($6::text IS NULL OR l.kind = $6)
+              AND ($7::uuid IS NULL OR l.source_id = $7)
+              AND ($8::text IS NULL OR l.title ILIKE $8 OR l.description ILIKE $8)
+              AND (
+                  $9::timestamptz IS NULL
+                  OR l.created_at < $9
+                  OR (l.created_at = $9 AND l.id > $10)
+              )
             ORDER BY l.created_at DESC, l.id
+            LIMIT $11
             "#,
             user.as_ref(),
             team,
-            only.map(|id| id.as_uuid()),
+            selection.only,
+            selection.installed_only,
+            selection.listed_only,
+            selection.kind.map(|kind| kind.to_string()),
+            selection.source_id,
+            selection.pattern,
+            selection.after.map(|cursor| cursor.created_at),
+            selection.after.map(|cursor| cursor.id.as_uuid()),
+            selection.limit,
         )
         .fetch_all(&self.pool)
         .await?;
 
         rows.into_iter().map(Listing::try_from).collect()
+    }
+}
+
+impl ListingRepo for PgListingRepo {
+    type Err = ListingRepoErr;
+
+    #[tracing::instrument(err, skip_all)]
+    async fn create_listing(&self, listing: NewListing) -> Result<bool, Self::Err> {
+        let mut transaction = self.pool.begin().await?;
+
+        let inserted = sqlx::query!(
+            r#"
+            INSERT INTO marketplace_listing
+                (id, kind, user_id, team_id, source_id, title, description)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (kind, source_id) WHERE removed_at IS NULL DO NOTHING
+            "#,
+            listing.id.as_uuid(),
+            listing.content.kind().to_string(),
+            listing.publisher.as_ref(),
+            listing.team_id,
+            listing.source_id,
+            listing.text.title,
+            listing.text.description,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        insert_version(
+            &mut transaction,
+            listing.id,
+            Version::FIRST,
+            &listing.content,
+        )
+        .await?;
+
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn listing(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        id: ListingId,
+    ) -> Result<Option<Listing>, Self::Err> {
+        let selection = Selection {
+            only: Some(id.as_uuid()),
+            installed_only: false,
+            listed_only: false,
+            kind: None,
+            source_id: None,
+            pattern: None,
+            after: None,
+            limit: 1,
+        };
+        let listings = self.select(user, team, selection).await?;
+        Ok(listings.into_iter().next())
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn listings(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        query: &ListingQuery,
+    ) -> Result<ListingPage, Self::Err> {
+        let limit = usize::from(query.limit);
+        // One listing past the page says whether another page follows.
+        let selection = Selection {
+            only: None,
+            installed_only: query.shown == ListingsShown::Installed,
+            listed_only: query.shown == ListingsShown::Listed,
+            kind: query.kind,
+            source_id: query.source_id,
+            pattern: query
+                .search
+                .as_deref()
+                .map(|search| format!("%{}%", escape_like(search))),
+            after: query.after,
+            limit: i64::from(query.limit) + 1,
+        };
+        let mut listings = self.select(user, team, selection).await?;
+
+        let next = if listings.len() > limit {
+            listings.truncate(limit);
+            listings.last().map(ListingCursor::after)
+        } else {
+            None
+        };
+        Ok(ListingPage { listings, next })
     }
 
     #[tracing::instrument(err, skip_all)]

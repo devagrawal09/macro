@@ -1,5 +1,8 @@
 //! Domain models for the marketplace.
 
+#[cfg(test)]
+mod test;
+
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -180,6 +183,127 @@ pub struct Listing {
     pub created_at: DateTime<Utc>,
     /// When it last changed.
     pub updated_at: DateTime<Utc>,
+}
+
+/// Listings a page holds when the request doesn't say.
+pub const DEFAULT_PAGE_SIZE: u16 = 50;
+
+/// Most listings a page holds.
+pub const MAX_PAGE_SIZE: u16 = 100;
+
+/// Longest search a page takes, in characters.
+pub const MAX_SEARCH_CHARS: usize = 200;
+
+/// Which listings a page is drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListingsShown {
+    /// Those still listed: what Browse shows.
+    Listed,
+    /// Those the person asking installed, unlisted ones included.
+    Installed,
+}
+
+/// Where the next page of listings starts: after this listing, in their
+/// newest-first order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListingCursor {
+    /// The last listing's `created_at`.
+    pub created_at: DateTime<Utc>,
+    /// The last listing's id, which orders listings created together.
+    pub id: ListingId,
+}
+
+impl ListingCursor {
+    /// The cursor after `listing`.
+    pub fn after(listing: &Listing) -> Self {
+        Self {
+            created_at: listing.created_at,
+            id: listing.id,
+        }
+    }
+
+    /// The cursor as a client holds it. Clients send it back as it is and
+    /// read nothing into it.
+    pub fn encode(&self) -> String {
+        format!("{}.{}", self.created_at.timestamp_micros(), self.id)
+    }
+
+    /// A cursor a client sent back.
+    pub fn decode(cursor: &str) -> Result<Self, MarketplaceError> {
+        let invalid = || MarketplaceError::Invalid("invalid cursor".to_owned());
+        let (micros, id) = cursor.split_once('.').ok_or_else(invalid)?;
+        let micros = micros.parse::<i64>().map_err(|_| invalid())?;
+        let created_at = DateTime::from_timestamp_micros(micros).ok_or_else(invalid)?;
+        let id = Uuid::parse_str(id).map_err(|_| invalid())?;
+
+        Ok(Self {
+            created_at,
+            id: ListingId::from_uuid(id),
+        })
+    }
+}
+
+/// One page of listings to read, newest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListingQuery {
+    /// Which listings it is drawn from.
+    pub shown: ListingsShown,
+    /// Text the title or description holds, ignoring case.
+    pub search: Option<String>,
+    /// Only listings of this kind.
+    pub kind: Option<ListingKind>,
+    /// Only listings published from this source: with `kind`, a document's
+    /// or routine's live listing, which the publish dialog looks up.
+    pub source_id: Option<Uuid>,
+    /// Start after this listing; the first page when absent.
+    pub after: Option<ListingCursor>,
+    /// Most listings the page holds.
+    pub limit: u16,
+}
+
+impl ListingQuery {
+    /// A page as a client asks for it, or why it can't be read. A blank
+    /// search searches nothing.
+    pub fn new(
+        shown: ListingsShown,
+        search: Option<&str>,
+        kind: Option<ListingKind>,
+        source_id: Option<Uuid>,
+        cursor: Option<&str>,
+        limit: Option<u16>,
+    ) -> Result<Self, MarketplaceError> {
+        let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE);
+        if !(1..=MAX_PAGE_SIZE).contains(&limit) {
+            return Err(MarketplaceError::Invalid(format!(
+                "limit must be between 1 and {MAX_PAGE_SIZE}"
+            )));
+        }
+
+        let search = search.map(str::trim).filter(|search| !search.is_empty());
+        if search.is_some_and(|search| search.chars().count() > MAX_SEARCH_CHARS) {
+            return Err(MarketplaceError::Invalid(format!(
+                "a search is at most {MAX_SEARCH_CHARS} characters"
+            )));
+        }
+
+        Ok(Self {
+            shown,
+            search: search.map(str::to_owned),
+            kind,
+            source_id,
+            after: cursor.map(ListingCursor::decode).transpose()?,
+            limit,
+        })
+    }
+}
+
+/// One page of listings, newest first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListingPage {
+    /// The page's listings.
+    pub listings: Vec<Listing>,
+    /// Where the next page starts; absent on the last page.
+    pub next: Option<ListingCursor>,
 }
 
 /// What a person types to publish a listing.

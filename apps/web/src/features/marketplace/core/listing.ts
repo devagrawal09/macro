@@ -73,13 +73,3 @@ export function installedRoutineState(
 
 /** The two lists of the marketplace page. */
 export type MarketplaceTab = 'browse' | 'installed';
-
-/** Browse lists what can be installed; Installed keeps unlisted installs too. */
-export function listingsForTab(
-  listings: readonly Listing[],
-  tab: MarketplaceTab
-): Listing[] {
-  if (tab === 'installed') return listings.filter(isInstalled);
-
-  return listings.filter((listing) => !listing.removed);
-}

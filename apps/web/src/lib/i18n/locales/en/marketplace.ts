@@ -12,6 +12,12 @@ export default {
   installedEmptyTitle: 'Nothing installed yet',
   installedEmptyDescription:
     'Pages and routines you install from Browse appear here.',
+  search: 'Search marketplace',
+  searchEmptyTitle: 'Nothing matches “{{search}}”',
+  searchEmptyDescription:
+    'Try another word from a page’s or routine’s title or description.',
+  loadingMore: 'Loading more',
+  loadMoreFailed: 'Could not load more.',
   listingLabel: 'Marketplace page: {{title}}',
   byPublisher: 'by {{name}}',
   installs: { one: '{{count}} install', other: '{{count}} installs' },

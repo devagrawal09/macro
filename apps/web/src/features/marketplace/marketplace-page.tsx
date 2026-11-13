@@ -1,9 +1,12 @@
 import { openAgentsPage } from '@app/features/agents-view/primitives/open-page';
 import { variableKey } from '@app/features/routines/core/template';
 import { openFillTemplateDialog } from '@app/features/routines/routine-template';
+import { SettingsPage } from '@app/features/settings/primitives';
 import { t } from '@app/lib/i18n';
 import { useSplitLayout } from '@components/app/split-layout/layout';
+import { useSettingsState } from '@core/constant/SettingsState';
 import { useUserId } from '@core/context/user';
+import { isMobile } from '@core/mobile/isMobile';
 import { idToDisplayName } from '@core/user';
 import EmptyStateNoAccessGraphic from '@design/empty-state-no-access.svg';
 import { useIsTeamAdmin } from '@queries/team/teams';
@@ -24,9 +27,10 @@ import { MarketplaceView } from './views/marketplace-view';
 
 /**
  * Routine listings over the routines feature: its template dialog asks for
- * fills, and an installed routine opens in Agents → Routines.
+ * fills, and an installed routine opens in Agents → Routines, after which
+ * `onOpened` runs.
  */
-function createMarketplaceRoutines(): MarketplaceRoutines {
+function createMarketplaceRoutines(onOpened?: () => void): MarketplaceRoutines {
   const owner = getOwner();
   const layout = useSplitLayout();
 
@@ -66,18 +70,21 @@ function createMarketplaceRoutines(): MarketplaceRoutines {
 
   return {
     fill,
-    open: (routineId) => openAgentsPage(layout, 'routines', { routineId }),
+    open: (routineId) => {
+      openAgentsPage(layout, 'routines', { routineId });
+      onOpened?.();
+    },
   };
 }
 
-function Marketplace() {
+function Marketplace(props: { onRoutineOpened?: () => void }) {
   const flag = useMarketplaceFlag();
   const userId = useUserId();
   const isTeamAdmin = useIsTeamAdmin();
   const source = createMarketplaceSource(
     () => flag().enabled && Boolean(userId())
   );
-  const routines = createMarketplaceRoutines();
+  const routines = createMarketplaceRoutines(props.onRoutineOpened);
 
   return (
     <MarketplaceView
@@ -87,6 +94,30 @@ function Marketplace() {
       isTeamAdmin={isTeamAdmin}
       publisherName={idToDisplayName}
     />
+  );
+}
+
+/**
+ * Settings → Marketplace: the touch entry to the page the Agents sidebar
+ * links on desktop. The tab shows only within the marketplace's rollout, and
+ * an installed page opens in place. An installed routine opens in Agents →
+ * Routines, which takes the settings split's place; on a phone settings is
+ * a sheet over it, so it closes.
+ */
+export function MarketplaceSettings() {
+  const settings = useSettingsState();
+
+  return (
+    <SettingsPage
+      title={t('settingsNav.tabMarketplace')}
+      bodyClass="[--mobile-content-inset-top:0px]"
+    >
+      <Marketplace
+        onRoutineOpened={() => {
+          if (isMobile()) settings.closeSettings();
+        }}
+      />
+    </SettingsPage>
   );
 }
 

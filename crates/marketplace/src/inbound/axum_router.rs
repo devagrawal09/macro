@@ -11,7 +11,7 @@ use agent_code_mode::inbound::document_router::{
 };
 use axum::{
     Json, Router,
-    extract::{FromRef, Path, State},
+    extract::{FromRef, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
@@ -33,13 +33,13 @@ use model_error_response::ErrorResponse;
 use scheduled_action::domain::templates::{RoutineSnapshot, TemplateVariable, VariableFill};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::domain::{
     models::{
-        InstallRequest, InstalledBuild, Listing, ListingId, ListingText, MarketplaceError,
-        PublishSource, PublishedVersion, Version, VersionBump,
+        InstallRequest, InstalledBuild, Listing, ListingId, ListingKind, ListingQuery, ListingText,
+        ListingsShown, MarketplaceError, PublishSource, PublishedVersion, Version, VersionBump,
     },
     ports::MarketplaceService,
 };
@@ -131,12 +131,36 @@ where
         .with_state(state)
 }
 
-/// The listings the caller may see.
+/// A page of the listings the caller may see.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceListings {
     /// Their team's and everyone's, newest first.
     pub listings: Vec<Listing>,
+    /// Send as `cursor` for the next page; absent on the last page.
+    pub next_cursor: Option<String>,
+}
+
+/// Which page of listings to read.
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ListMarketplaceListingsParams {
+    /// Text the title or description holds, ignoring case.
+    pub q: Option<String>,
+    /// Listings per page, 1 to 100; 50 when absent.
+    pub limit: Option<u16>,
+    /// The `nextCursor` of the previous page.
+    pub cursor: Option<String>,
+    /// The caller's installs, unlisted ones included. Otherwise the listings
+    /// still listed.
+    #[serde(default)]
+    pub installed: bool,
+    /// Only listings of this kind.
+    pub kind: Option<ListingKind>,
+    /// Only listings published from this document or routine: with `kind`,
+    /// its live listing, which the publish dialog looks up.
+    pub source_id: Option<Uuid>,
 }
 
 /// What a listing is published from.
@@ -329,28 +353,49 @@ type Caller<Auth> = MacroAuthorizationExtractor<Auth, UserOnly>;
 type Team<Access, Auth> = OptionalMacroUserTeamExtractorV2<MemberTeamRole, Access, Auth>;
 
 #[utoipa::path(get, path = "/marketplace/listings", tag = "marketplace", operation_id = "list_marketplace_listings",
-    responses((status = 200, body = MarketplaceListings), (status = 401), (status = 404), (status = 500)))]
-/// The listings the caller may see: their team's and everyone's, each with
-/// the major version they are on when they installed it.
-#[tracing::instrument(err, skip_all)]
+    params(ListMarketplaceListingsParams),
+    responses((status = 200, body = MarketplaceListings), (status = 400, body = ErrorResponse), (status = 401), (status = 404), (status = 500)))]
+/// A page of the listings the caller may see, newest first: their team's and
+/// everyone's, each with the major version they are on when they installed
+/// it. Those still listed, or with `installed=true` the caller's installs.
+#[tracing::instrument(err, skip_all, fields(installed = params.installed, searched = params.q.is_some()))]
 pub async fn list_marketplace_listings<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,
     caller: Caller<Auth>,
     team: Team<Access, Auth>,
+    Query(params): Query<ListMarketplaceListingsParams>,
 ) -> Result<Json<MarketplaceListings>, MarketplaceError>
 where
     S: MarketplaceService,
     Access: EntityAccessService,
     Auth: MacroAuthorizationService,
 {
-    let listings = state
+    let shown = if params.installed {
+        ListingsShown::Installed
+    } else {
+        ListingsShown::Listed
+    };
+    let query = ListingQuery::new(
+        shown,
+        params.q.as_deref(),
+        params.kind,
+        params.source_id,
+        params.cursor.as_deref(),
+        params.limit,
+    )?;
+
+    let page = state
         .service
         .listings(
             &caller.authorization.macro_user_id,
             team.entity_access_receipt.as_ref(),
+            query,
         )
         .await?;
-    Ok(Json(MarketplaceListings { listings }))
+    Ok(Json(MarketplaceListings {
+        listings: page.listings,
+        next_cursor: page.next.map(|cursor| cursor.encode()),
+    }))
 }
 
 #[utoipa::path(post, path = "/marketplace/listings", tag = "marketplace", operation_id = "publish_marketplace_listing",

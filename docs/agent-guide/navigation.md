@@ -1542,6 +1542,9 @@ rewrites your routine (name, description, trigger and steps, filled in again
 from your choices) unless you edited it since; then the card reads **You
 edited this routine, so updates are paused.** and it is left alone. When an
 update couldn't be applied the card says so; the next update tries again.
+Publishing any version also refreshes installers' open marketplace lists
+within seconds, so a major update's **Update to v2** appears without a
+reload.
 **Update to v2** takes a major update, filled in from your earlier choices,
 asking only about references the new version added; when you had edited the
 routine it first asks **Update “name” to v2.0?**, saying your edits will be

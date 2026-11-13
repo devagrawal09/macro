@@ -26,8 +26,9 @@ export async function handleListingVersion(data: unknown): Promise<void> {
   if (!parsed.success) return;
   const { listingId, version } = parsed.data;
 
+  // Every listings request: Browse, Installed, searches and source lookups.
   const listings = queryClient.invalidateQueries({
-    queryKey: marketplaceKeys.listings.queryKey,
+    queryKey: marketplaceKeys.listings._def,
   });
 
   // Invalidating refetches the build only where its page is open; a closed

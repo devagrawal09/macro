@@ -76,21 +76,24 @@ describe('a published version message', () => {
     expect(fetchBuild).not.toHaveBeenCalled();
   });
 
-  it('refreshes the listings, so a waiting major shows its Update button', async () => {
+  it('refreshes every listings request, so a waiting major shows its Update button', async () => {
     const queryClient = new QueryClient();
     client.current = queryClient;
-    queryClient.setQueryData(marketplaceKeys.listings.queryKey, {
-      listings: [],
-    });
+    const browse = marketplaceKeys.listings({ installed: false }).queryKey;
+    const installed = marketplaceKeys.listings({ installed: true }).queryKey;
+    for (const key of [browse, installed]) {
+      queryClient.setQueryData(key, {
+        pages: [{ listings: [] }],
+        pageParams: [undefined],
+      });
+    }
 
     await handleListingVersion({
       listingId: 'board',
       version: { major: 2, minor: 0 },
     });
 
-    expect(
-      queryClient.getQueryState(marketplaceKeys.listings.queryKey)
-        ?.isInvalidated
-    ).toBe(true);
+    expect(queryClient.getQueryState(browse)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(installed)?.isInvalidated).toBe(true);
   });
 });

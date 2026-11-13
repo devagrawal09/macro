@@ -59,6 +59,7 @@ import type {
   ListAgentRepositoryBranchesParams,
   Listing,
   ListingRoutine,
+  ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
   MarketplaceListings,
@@ -4605,12 +4606,18 @@ export const runDocumentProgram = async (
 };
 
 /**
- * @summary The listings the caller may see: their team's and everyone's, each with
-the major version they are on when they installed it.
+ * @summary A page of the listings the caller may see, newest first: their team's and
+everyone's, each with the major version they are on when they installed
+it. Those still listed, or with `installed=true` the caller's installs.
  */
 export type listMarketplaceListingsResponse200 = {
   data: MarketplaceListings;
   status: 200;
+};
+
+export type listMarketplaceListingsResponse400 = {
+  data: ErrorResponse;
+  status: 400;
 };
 
 export type listMarketplaceListingsResponse401 = {
@@ -4633,6 +4640,7 @@ export type listMarketplaceListingsResponseSuccess =
     headers: Headers;
   };
 export type listMarketplaceListingsResponseError = (
+  | listMarketplaceListingsResponse400
   | listMarketplaceListingsResponse401
   | listMarketplaceListingsResponse404
   | listMarketplaceListingsResponse500
@@ -4644,14 +4652,29 @@ export type listMarketplaceListingsResponse =
   | listMarketplaceListingsResponseSuccess
   | listMarketplaceListingsResponseError;
 
-export const getListMarketplaceListingsUrl = () => {
-  return `/marketplace/listings`;
+export const getListMarketplaceListingsUrl = (
+  params?: ListMarketplaceListingsParams
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/marketplace/listings?${stringifiedParams}`
+    : `/marketplace/listings`;
 };
 
 export const listMarketplaceListings = async (
+  params?: ListMarketplaceListingsParams,
   options?: RequestInit
 ): Promise<listMarketplaceListingsResponse> => {
-  const res = await fetch(getListMarketplaceListingsUrl(), {
+  const res = await fetch(getListMarketplaceListingsUrl(params), {
     ...options,
     method: 'GET',
   });

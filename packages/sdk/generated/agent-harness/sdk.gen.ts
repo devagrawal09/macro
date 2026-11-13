@@ -815,8 +815,9 @@ export class Sdk extends HeyApiClient {
     }
 
     /**
-     * The listings the caller may see: their team's and everyone's, each with
-     * the major version they are on when they installed it.
+     * A page of the listings the caller may see, newest first: their team's and
+     * everyone's, each with the major version they are on when they installed
+     * it. Those still listed, or with `installed=true` the caller's installs.
      */
     public listMarketplaceListings<ThrowOnError extends boolean = false>(options?: Options<ListMarketplaceListingsData, ThrowOnError>): RequestResult<ListMarketplaceListingsResponses, ListMarketplaceListingsErrors, ThrowOnError> {
         return (options?.client ?? this.client).get<ListMarketplaceListingsResponses, ListMarketplaceListingsErrors, ThrowOnError>({ url: '/marketplace/listings', ...options });

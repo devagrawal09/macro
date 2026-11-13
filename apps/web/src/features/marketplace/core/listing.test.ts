@@ -3,7 +3,6 @@ import {
   isInstalled,
   isPublisher,
   type Listing,
-  listingsForTab,
   ownListingForSource,
   updateAvailable,
   versionLabel,
@@ -52,23 +51,6 @@ describe('marketplace listings', () => {
     expect(isPublisher(listing(), 'macro|ada@example.com')).toBe(true);
     expect(isPublisher(listing(), 'macro|grace@example.com')).toBe(false);
     expect(isPublisher(listing(), undefined)).toBe(false);
-  });
-
-  it('keeps unlisted listings out of Browse but in Installed', () => {
-    const open = listing({ id: 'open' });
-    const installed = listing({ id: 'installed', installedMajor: 1 });
-    const unlisted = listing({
-      id: 'unlisted',
-      installedMajor: 1,
-      removed: true,
-    });
-    const listings = [open, installed, unlisted];
-
-    expect(listingsForTab(listings, 'browse')).toEqual([open, installed]);
-    expect(listingsForTab(listings, 'installed')).toEqual([
-      installed,
-      unlisted,
-    ]);
   });
 
   it('finds the live listing a person publishes a document’s versions to', () => {

@@ -265,7 +265,7 @@ the header back button returns to the previous screen, or Agents for a direct li
 Portrait and landscape touch layouts have no conversation side panel. **Changes** opens a full-width,
 unified diff with **Back to conversation**; returning preserves the unsent draft.
 
-The mobile conversation list omits the desktop **Agents**, **Routines**, **Artifacts** and **Connections** controls; Routines and Artifacts are under Settings on touch. Use the Agents composer or global create menu to start
+The mobile conversation list omits the desktop **Agents**, **Routines**, **Artifacts**, **Marketplace** and **Connections** controls; Routines, Artifacts and Marketplace are under Settings on touch. Use the Agents composer or global create menu to start
 a conversation. Returning to the list and reopening the composer preserves the
 draft, attachments, agent, model, repository, and branch. Tap the
 agent/model control once to open a bottom sheet with its search field focused,
@@ -495,10 +495,16 @@ the shimmer.
   Copied links, reload, and browser Back/Forward restore it like Artifacts;
   code opens it with `openAgentsPage(layout, 'marketplace')`. With either flag
   off the link is hidden and a direct visit says the marketplace isn't
-  available. **Browse** lists every listed page as a card (title, description,
+  available. **Browse** lists every listed page and routine as a card (title, description,
   publisher, newest version such as `v1.2`, install count, **Team** or
-  **Macro**); **Installed** lists the viewer's installs, including ones since
-  unlisted (badge **Unlisted**). **Install** adds a page; **Open** shows the
+  **Macro**), newest first; its **Search marketplace** field narrows it to
+  listings whose title or description holds the typed text, ignoring case, once
+  typing pauses, and says **Nothing matches “…”** when none do. **Installed**
+  lists the viewer's installs, including ones since unlisted (badge
+  **Unlisted**). Both load 50 cards at a time and load more as the end of
+  the grid scrolls into view (`GET /marketplace/listings?q=&cursor=`, with
+  `installed=true` for Installed; the publish dialog finds a page's or
+  routine's own listing with `kind=&sourceId=`). **Install** adds a page; **Open** shows the
   installed page in place of the lists, with **Back**, its title and the
   version shown. An install follows the newest minor version of its major: a
   minor update reaches every install at once (an open page reloads within
@@ -514,7 +520,15 @@ the shimmer.
   publish, open an HTML page you own and choose **Publish to marketplace…**
   from its file menu (see
   [Program blocks in HTML previews](documents.md#program-blocks-in-html-previews)).
-  The touch Settings sheet has no Marketplace entry yet.
+  On touch, where the sidebar's tool links are hidden, the same page is
+  **Settings → Marketplace** (on phones **More views → Settings →
+  Marketplace**), after Artifacts and behind the same two flags. It keeps the
+  viewer in settings: **Open** shows the installed page in place, with
+  **Back** (just its arrow on a phone) returning to the lists. **Open** on an
+  installed routine goes to Agents → Routines instead, closing the settings
+  sheet on a phone. On touch the
+  tabs, card buttons, **More actions** (which opens by tap) and its rows are
+  44px.
 - Ask the agent to connect an MCP server by URL (for example "connect the MCP
   server at https://mcp.example.com/mcp"). It calls **ConnectMcpServer**, which
   adds a public `https` server to Connections and renders a **Connected MCP

@@ -32,6 +32,7 @@ export type SettingsTab =
   | 'Agents'
   | 'Routines'
   | 'Artifacts'
+  | 'Marketplace'
   | 'Harness'
   | 'Bots'
   | 'Team'

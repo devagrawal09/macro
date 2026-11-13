@@ -5,11 +5,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Listing } from './listing';
+import type { MarketplaceListingsNextCursor } from './marketplaceListingsNextCursor';
 
 /**
- * The listings the caller may see.
+ * A page of the listings the caller may see.
  */
 export interface MarketplaceListings {
   /** Their team's and everyone's, newest first. */
   listings: Listing[];
+  /** Send as `cursor` for the next page; absent on the last page. */
+  nextCursor?: MarketplaceListingsNextCursor;
 }

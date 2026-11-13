@@ -387,13 +387,23 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
     )
     .await;
     let for_ben = service
-        .listings(&user(BEN), Some(&member(BEN, ACME, TeamRole::Member)))
+        .listings(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            first_page(ListingsShown::Listed),
+        )
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
     let for_cam = service
-        .listings(&user(CAM), Some(&member(CAM, ACME, TeamRole::Member)))
+        .listings(
+            &user(CAM),
+            Some(&member(CAM, ACME, TeamRole::Member)),
+            first_page(ListingsShown::Listed),
+        )
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
 
     assert_eq!(published.updates.updated, 1);
     assert_eq!(published.updates.detached, 1);
@@ -477,9 +487,14 @@ async fn a_deleted_routine_records_a_failure_and_stays_attached() {
     )
     .await;
     let for_ben = service
-        .listings(&user(BEN), Some(&member(BEN, ACME, TeamRole::Member)))
+        .listings(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            first_page(ListingsShown::Listed),
+        )
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
 
     assert_eq!(published.updates.failed, 1);
     assert_eq!(published.updates.detached, 0);

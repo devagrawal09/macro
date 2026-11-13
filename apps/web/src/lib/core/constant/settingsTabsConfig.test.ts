@@ -50,8 +50,11 @@ describe('settings navigation', () => {
       'Agents',
       'Routines',
       'Artifacts',
+      'Marketplace',
       'CRM',
     ]);
+    expect(settingsSlugToTab('marketplace')).toBe('Marketplace');
+    expect(settingsTabToSlug('Marketplace')).toBe('marketplace');
     const workspace = SETTINGS_TAB_GROUPS.find(
       (group) => group.label === 'Workspace'
     );

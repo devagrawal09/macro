@@ -20,9 +20,10 @@ use uuid::Uuid;
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
     AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage, InstalledRoutine,
-    Listing, ListingContent, ListingId, ListingKind, ListingScope, ListingText, MarketplaceError,
-    NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate,
-    RoutineVersion, TaskHash, Version, VersionBump, VersionNotice,
+    Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
+    ListingText, ListingsShown, MarketplaceError, NewListing, PublishSource, PublishedVersion,
+    RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump,
+    VersionNotice,
 };
 use crate::domain::ports::{
     ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
@@ -62,6 +63,11 @@ fn owned(id: &'static str, document: Uuid) -> PublishSource {
     ))
 }
 
+/// The first page of `shown`, as the web app asks for it.
+fn first_page(shown: ListingsShown) -> ListingQuery {
+    ListingQuery::new(shown, None, None, None, None, None).expect("a valid query")
+}
+
 fn text(title: &str) -> ListingText {
     ListingText {
         title: title.to_owned(),
@@ -88,6 +94,41 @@ struct Stored {
 }
 
 impl Stored {
+    /// A member of `team` sees it, and so does `user` once it is unlisted
+    /// when they installed it.
+    fn seen_by(&self, user: &MacroUserIdStr<'_>, team: Option<Uuid>) -> bool {
+        Some(self.listing.team_id) == team
+            && (!self.removed || self.installs.contains_key(user.as_ref()))
+    }
+
+    fn as_seen_by(&self, user: &MacroUserIdStr<'_>) -> Listing {
+        let install = self.installs.get(user.as_ref());
+        Listing {
+            id: self.listing.id,
+            kind: self.listing.content.kind(),
+            scope: ListingScope::Team {
+                team_id: self.listing.team_id,
+            },
+            publisher: self.listing.publisher.clone(),
+            source_id: self.listing.source_id,
+            title: self.listing.text.title.clone(),
+            description: self.listing.text.description.clone(),
+            latest_version: self.newest().0,
+            installed_major: install.map(|install| install.major),
+            installed_routine: install.and_then(|install| {
+                install.routine.as_ref().map(|routine| InstalledRoutine {
+                    routine_id: routine.routine_id,
+                    detached: install.detached,
+                    update_failed: install.update_failed,
+                })
+            }),
+            install_count: self.installs.len() as i64,
+            removed: self.removed,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
     fn newest(&self) -> &(Version, ListingContent) {
         self.versions
             .iter()
@@ -128,46 +169,49 @@ impl ListingRepo for FakeListings {
         Ok(true)
     }
 
+    async fn listing(
+        &self,
+        user: &MacroUserIdStr<'_>,
+        team: Option<Uuid>,
+        id: ListingId,
+    ) -> Result<Option<Listing>, Self::Err> {
+        let stored = self.0.lock().unwrap();
+        Ok(stored
+            .iter()
+            .find(|entry| entry.listing.id == id && entry.seen_by(user, team))
+            .map(|entry| entry.as_seen_by(user)))
+    }
+
     async fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
         team: Option<Uuid>,
-        only: Option<ListingId>,
-    ) -> Result<Vec<Listing>, Self::Err> {
+        query: &ListingQuery,
+    ) -> Result<ListingPage, Self::Err> {
         let stored = self.0.lock().unwrap();
-        Ok(stored
+        let listings = stored
             .iter()
-            .filter(|entry| Some(entry.listing.team_id) == team)
-            .filter(|entry| !entry.removed || entry.installs.contains_key(user.as_ref()))
-            .filter(|entry| only.is_none_or(|id| id == entry.listing.id))
-            .map(|entry| Listing {
-                id: entry.listing.id,
-                kind: entry.listing.content.kind(),
-                scope: ListingScope::Team {
-                    team_id: entry.listing.team_id,
-                },
-                publisher: entry.listing.publisher.clone(),
-                source_id: entry.listing.source_id,
-                title: entry.listing.text.title.clone(),
-                description: entry.listing.text.description.clone(),
-                latest_version: entry.newest().0,
-                installed_major: entry
-                    .installs
-                    .get(user.as_ref())
-                    .map(|install| install.major),
-                installed_routine: entry.installs.get(user.as_ref()).and_then(|install| {
-                    install.routine.as_ref().map(|routine| InstalledRoutine {
-                        routine_id: routine.routine_id,
-                        detached: install.detached,
-                        update_failed: install.update_failed,
-                    })
-                }),
-                install_count: entry.installs.len() as i64,
-                removed: entry.removed,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
+            .filter(|entry| entry.seen_by(user, team))
+            .filter(|entry| match query.shown {
+                ListingsShown::Listed => !entry.removed,
+                ListingsShown::Installed => entry.installs.contains_key(user.as_ref()),
             })
-            .collect())
+            .filter(|entry| {
+                query
+                    .kind
+                    .is_none_or(|kind| kind == entry.listing.content.kind())
+            })
+            .filter(|entry| {
+                query
+                    .source_id
+                    .is_none_or(|id| id == entry.listing.source_id)
+            })
+            .map(|entry| entry.as_seen_by(user))
+            .collect();
+        Ok(ListingPage {
+            listings,
+            next: None,
+        })
     }
 
     async fn add_version(
@@ -793,9 +837,10 @@ async fn only_the_team_sees_and_installs_a_listing() {
         )
         .await;
     let outside_listings = service
-        .listings(&user(CAM), Some(&cam))
+        .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
 
     assert_eq!(installed.installed_major, Some(1));
     assert_eq!(installed.install_count, 1);
@@ -945,13 +990,15 @@ async fn the_publisher_or_a_team_admin_unlists_and_installs_keep_working() {
         .expect("a team admin unlists it");
 
     let for_newcomer = service
-        .listings(&user(CAM), Some(&cam))
+        .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
     let for_installer = service
-        .listings(&user(BEN), Some(&ben))
+        .listings(&user(BEN), Some(&ben), first_page(ListingsShown::Installed))
         .await
-        .expect("listings load");
+        .expect("listings load")
+        .listings;
     let still_builds = service
         .installed_build(&user(BEN), Some(&ben), listing.id)
         .await;
@@ -1022,7 +1069,11 @@ async fn nobody_outside_the_rollout_sees_the_marketplace() {
     );
 
     let listings = service
-        .listings(&user(ADA), Some(&member(ADA, ACME, TeamRole::Member)))
+        .listings(
+            &user(ADA),
+            Some(&member(ADA, ACME, TeamRole::Member)),
+            first_page(ListingsShown::Listed),
+        )
         .await;
 
     assert!(matches!(listings, Err(MarketplaceError::NotFound)));

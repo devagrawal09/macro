@@ -17,9 +17,9 @@ import {
 } from '../core/listing';
 import {
   type PublishListingErrorCode,
-  useListingsQuery,
   usePublishListingMutation,
   usePublishListingVersionMutation,
+  useSourceListingQuery,
 } from '../queries/listings';
 import { useMarketplaceFlag } from '../use-marketplace-flag';
 
@@ -67,7 +67,10 @@ export function PublishListingDialog(props: {
   userId: string | undefined;
 }) {
   const flag = useMarketplaceFlag();
-  const listings = useListingsQuery(() => flag().enabled);
+  const listings = useSourceListingQuery(
+    () => ({ kind: props.target.kind, id: props.target.id }),
+    () => flag().enabled
+  );
   const unsaved = () =>
     props.target.kind === 'artifact' && props.target.unsaved;
   const routine = () => props.target.kind === 'routine';
@@ -76,7 +79,7 @@ export function PublishListingDialog(props: {
     listings.isPending
       ? undefined
       : ownListingForSource(
-          listings.data?.listings ?? [],
+          listings.data?.pages.flatMap((page) => page.listings) ?? [],
           props.target.kind,
           props.target.id,
           props.userId

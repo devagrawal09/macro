@@ -29,6 +29,10 @@ const ArtifactsSettings = lazyNamed(
   () => import('../artifacts/artifacts-page'),
   'ArtifactsSettings'
 );
+const MarketplaceSettings = lazyNamed(
+  () => import('../marketplace/marketplace-page'),
+  'MarketplaceSettings'
+);
 const RoutineSettings = lazyNamed(
   () => import('../routines/routine-settings'),
   'RoutineSettings'
@@ -109,6 +113,9 @@ export function SettingsTabContent(props: { tab: SettingsTab }) {
       </Show>
       <Show when={isCurrentTab('Artifacts')}>
         <ArtifactsSettings />
+      </Show>
+      <Show when={isCurrentTab('Marketplace')}>
+        <MarketplaceSettings />
       </Show>
       <Show when={isCurrentTab('Harness')}>
         <AgentSettings initialSection="runtimes" />
