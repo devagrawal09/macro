@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT i.user_id\n            FROM marketplace_install i\n            JOIN marketplace_listing l ON l.id = i.listing_id\n            WHERE i.listing_id = $1\n              AND ($2::int IS NULL OR i.major = $2)\n              -- A claim still creating its routine isn't an install yet.\n              AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)\n              AND (\n                  l.team_id IS NULL\n                  OR EXISTS (\n                      SELECT 1\n                      FROM team_user t\n                      WHERE t.team_id = l.team_id AND t.user_id = i.user_id\n                  )\n              )\n            ORDER BY i.updated_at DESC, i.user_id\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2a59be9c3e7e5c9fb5c7cafea7b2b7ca57c2b6e2658409d837493137d8e34a67"
+}

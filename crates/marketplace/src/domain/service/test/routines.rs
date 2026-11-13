@@ -311,6 +311,60 @@ async fn a_minor_version_updates_installed_routines() {
 }
 
 #[tokio::test]
+async fn routine_versions_notify_by_the_version_stored() {
+    let (service, _, routines, notifier) = marketplace_with(FakeNotifier::default());
+    let listing = published_digest(&service, &routines).await;
+    install(&service, BEN, listing.id).await;
+
+    // A minor version updates Ben's routine and tells him, so his lists
+    // refetch.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    // Asked as a minor, a new variable makes it 2.0, which Ben may take.
+    let forced = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION}"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Minor,
+    )
+    .await;
+    install(&service, CAM, listing.id).await;
+    // A minor of 2 reaches only Cam, who is on it.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION} briefly"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Minor,
+    )
+    .await;
+
+    let notice = |major, minor| VersionNotice {
+        listing_id: listing.id,
+        version: Version { major, minor },
+    };
+    assert_eq!(forced.bump, VersionBump::Major);
+    assert_eq!(
+        notifier.sent.lock().unwrap().clone(),
+        vec![
+            (notice(1, 1), vec![BEN.to_owned()]),
+            (notice(2, 0), vec![BEN.to_owned()]),
+            (notice(2, 1), vec![CAM.to_owned()]),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
     let (service, _, routines) = marketplace_with_routines();
     let listing = published_digest(&service, &routines).await;

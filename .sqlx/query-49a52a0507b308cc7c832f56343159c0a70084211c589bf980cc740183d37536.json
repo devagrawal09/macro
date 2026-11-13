@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO marketplace_listing_version\n            (listing_id, kind, major, minor, source_hash, html)\n        VALUES ($1, 'artifact', 9, 0, 'hash', '<h1>Not a routine</h1>')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "49a52a0507b308cc7c832f56343159c0a70084211c589bf980cc740183d37536"
+}

@@ -1970,6 +1970,9 @@ async fn run() -> anyhow::Result<()> {
                             ),
                             document_rollout,
                         ),
+                        marketplace::outbound::conn_gateway_notifier::ConnGatewayVersionNotifier::new(
+                            connection_gateway.clone(),
+                        ),
                     )),
                     entity_access.clone(),
                     MacroAuthorizationState::new(Arc::new(authorization_service.clone())),

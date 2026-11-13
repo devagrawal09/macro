@@ -42,6 +42,12 @@ the socket themselves.
 
 - Add a message/event type sendable over the gateway: `src/model/message.rs` →
   `src/api/message.rs` → `connection_gateway_client` (the crate callers use).
+- Find a message type's sender and payload: each sender owns its type as a
+  constant beside its adapter (for example `scheduled_action_update` in
+  `crates/scheduled_action`, `marketplace_listing_version` in
+  `crates/marketplace`), and the web app handles it in
+  `apps/web/src/lib/queries/sync/use-query-sync.ts` or a feature's
+  `queries/sync.ts`.
 - Debug/clean stale connections: `scripts/stale_connections.rs` (see `README.md`).
 
 ## Checks

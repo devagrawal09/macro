@@ -22,11 +22,14 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
-    Listing, ListingContent, ListingId, ListingKind, ListingText, MarketplaceError, NewListing,
-    PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall,
-    RoutineUpdate, RoutineUpdates, RoutineVersion, Version, VersionBump,
+    Listing, ListingContent, ListingId, ListingKind, ListingText, MAX_NOTIFIED_INSTALLS,
+    MarketplaceError, NewListing, PublishSource, PublishedPage, PublishedRoutine, PublishedVersion,
+    RoutineCopy, RoutineInstall, RoutineUpdate, RoutineUpdates, RoutineVersion, Version,
+    VersionBump, VersionNotice,
 };
-use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, Routines};
+use crate::domain::ports::{
+    ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
+};
 
 /// How many installed routines a minor version updates at once.
 const UPDATE_CONCURRENCY: usize = 8;
@@ -36,30 +39,87 @@ const UPDATE_CONCURRENCY: usize = 8;
 /// its code.
 const CLAIM_STALE_AFTER_SECS: u32 = 120;
 
-/// The marketplace service over its repository, page builder, routines and
-/// rollout.
-pub struct MarketplaceServiceImpl<Listings, P, Ro, R> {
+/// The marketplace service over its repository, page builder, routines,
+/// rollout and version notifier.
+pub struct MarketplaceServiceImpl<Listings, P, Ro, R, N> {
     listings: Arc<Listings>,
     pages: Arc<P>,
     routines: Arc<Ro>,
     rollout: R,
+    notifier: N,
 }
 
-impl<Listings, P, Ro, R> MarketplaceServiceImpl<Listings, P, Ro, R>
+impl<Listings, P, Ro, R, N> MarketplaceServiceImpl<Listings, P, Ro, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     Ro: Routines,
     R: Rollout,
+    N: VersionNotifier,
 {
-    /// Bind the repository, the page builder, routines and the rollout.
-    pub fn new(listings: Listings, pages: Arc<P>, routines: Arc<Ro>, rollout: R) -> Self {
+    /// Bind the repository, the page builder, routines, the rollout and the
+    /// notifier.
+    pub fn new(
+        listings: Listings,
+        pages: Arc<P>,
+        routines: Arc<Ro>,
+        rollout: R,
+        notifier: N,
+    ) -> Self {
         Self {
             listings: Arc::new(listings),
             pages,
             routines,
             rollout,
+            notifier,
         }
+    }
+
+    /// Tell the installers a new version concerns, so their open pages and
+    /// lists refetch: those on its major for a minor version, which their
+    /// pages show at once, and everyone for a major one, which they may take.
+    /// The version is already stored, so a failure here is only logged.
+    #[tracing::instrument(
+        skip_all,
+        fields(listing_id = %id, recipient_count = tracing::field::Empty, truncated = tracing::field::Empty)
+    )]
+    async fn notify_installers(&self, id: ListingId, version: Version) {
+        // The stored version, not the bump asked for, says which it is: a
+        // major version starts at minor 0.
+        let major = (version.minor > 0).then_some(version.major);
+        // One more than the bound, to tell a listing at the bound from one
+        // past it.
+        let Ok(mut installers) = self
+            .listings
+            .installers(id, major, MAX_NOTIFIED_INSTALLS.saturating_add(1))
+            .await
+            .inspect_err(|error| {
+                tracing::error!(error = ?error, "failed to read a new version's installers");
+            })
+        else {
+            return;
+        };
+
+        let truncated = installers.len() > usize::from(MAX_NOTIFIED_INSTALLS);
+        installers.truncate(usize::from(MAX_NOTIFIED_INSTALLS));
+        let span = tracing::Span::current();
+        span.record("recipient_count", installers.len());
+        span.record("truncated", truncated);
+        if installers.is_empty() {
+            return;
+        }
+
+        let notice = VersionNotice {
+            listing_id: id,
+            version,
+        };
+        let _ = self
+            .notifier
+            .notify(notice, &installers)
+            .await
+            .inspect_err(|error| {
+                tracing::error!(error = ?error, "failed to notify a new version's installers");
+            });
     }
 
     /// A caller outside the rollout sees no marketplace at all.
@@ -443,12 +503,13 @@ fn internal<E: std::error::Error + Send + Sync + 'static>(error: E) -> Marketpla
     MarketplaceError::Internal(rootcause::Report::new(error).into_dynamic())
 }
 
-impl<Listings, P, Ro, R> MarketplaceService for MarketplaceServiceImpl<Listings, P, Ro, R>
+impl<Listings, P, Ro, R, N> MarketplaceService for MarketplaceServiceImpl<Listings, P, Ro, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     Ro: Routines,
     R: Rollout,
+    N: VersionNotifier,
 {
     #[tracing::instrument(err, skip_all, fields(team_id = tracing::field::Empty))]
     async fn listings(
@@ -579,6 +640,8 @@ where
             }
             _ => RoutineUpdates::default(),
         };
+        // After the updates, so a list the notice refetches shows them.
+        self.notify_installers(id, version).await;
 
         Ok(PublishedVersion {
             listing: self.listing(user, team, id).await?,

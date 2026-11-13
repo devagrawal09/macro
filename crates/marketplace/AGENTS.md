@@ -22,6 +22,9 @@ minor versions update until they edit it.
 - `src/outbound/document_pages.rs`: the `Pages` port over `agent_code_mode`'s
   `DocumentPrograms`, so a published page builds and runs like a stored HTML
   document, under the same limits.
+- `src/outbound/conn_gateway_notifier.rs`: the `VersionNotifier` port, which
+  sends installers' open clients `marketplace_listing_version` through the
+  connection gateway.
 - `src/inbound/axum_router.rs`: `/marketplace/listings...`, in the harness
   spec under the `marketplace` tag.
 
@@ -38,7 +41,8 @@ minor versions update until they edit it.
 
 - Depends on: `agent_code_mode` (page builds and runs), `entity_access`
   (receipts), `macro_authorization`, `scheduled_action` (the template data
-  types in the domain; its service only in `outbound/scheduled_routines.rs`).
+  types in the domain; its service only in `outbound/scheduled_routines.rs`),
+  `connection_gateway_client` (version notifications).
 - Used by: `services/agent_harness_service`, its only host.
 
 ## Checks
@@ -97,9 +101,23 @@ minor versions update until they edit it.
 - A listing with no `team_id` is seen by everyone: one Macro provides. No
   route publishes one yet.
 - A minor version is live as soon as it is stored: an install's build reads
-  the newest minor of its major, and a run with an older build's `sourceHash`
-  answers `409`, which makes the preview reload. A major version moves an
-  install only through `PUT .../install`.
+  the newest minor of its major. Publishing then sends
+  `marketplace_listing_version` (`{ listingId, version }`, no content) to the
+  installers on that major, and the web app refetches an open page's build;
+  a run with an older build's `sourceHash` answers `409`, and a return to the
+  window refetches, as fallbacks. A major version notifies every installer,
+  so the Update button appears, and moves an install only through
+  `PUT .../install`. Minor or major is read from the stored version (minor
+  `0` is a major), so a routine version forced to a major notifies everyone.
+  A minor routine version notifies after updating installs, so the listings
+  the web app refetches show them.
+- Version notifications are best effort: a failure is logged and never fails
+  the publish. They skip installers no longer in the listing's team, and
+  reach at most `MAX_NOTIFIED_INSTALLS` (1000) installers, most recently
+  installed first, 100 per gateway request; the rest rely on the fallbacks.
+  A routine install's pending claim isn't an installer.
+  The `notify_installers` span records `recipient_count` and `truncated`,
+  never user ids.
 - Publishing refuses a page that doesn't build, so an install never shows
   one. A routine listing has no page: `installed_page` reads artifacts only.
 - Every route answers `404` outside the rollout: `enable-marketplace` and

@@ -108,6 +108,18 @@ async fn insert_team(pool: &PgPool, owner: &str) -> Uuid {
     team
 }
 
+/// Make `user` a member of `team`.
+async fn join_team(pool: &PgPool, team: Uuid, user: &str) {
+    sqlx::query!(
+        r#"INSERT INTO team_user (user_id, team_id, team_role) VALUES ($1, $2, 'member')"#,
+        user,
+        team,
+    )
+    .execute(pool)
+    .await
+    .expect("team member should insert");
+}
+
 /// Ada's board, published to `team` from a new document.
 fn board(team: Uuid) -> NewListing {
     NewListing {
@@ -575,6 +587,7 @@ async fn updates_reach_installs_behind_on_the_major_until_they_detach(pool: PgPo
 async fn one_of_two_concurrent_first_installs_claims_the_routine(pool: PgPool) {
     let acme = insert_team(&pool, ADA).await;
     insert_user(&pool, BEN).await;
+    join_team(&pool, acme, BEN).await;
     let repo = PgListingRepo::new(pool);
     let listing = digest(acme);
     repo.create_listing(listing.clone()).await.unwrap();
@@ -588,6 +601,7 @@ async fn one_of_two_concurrent_first_installs_claims_the_routine(pool: PgPool) {
     };
     let (first, second) = tokio::join!(claim(repo.clone()), claim(repo.clone()));
     let while_claimed = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let installers_while_claimed = repo.installers(listing.id, None, 10).await.unwrap();
     let routine_id = Uuid::now_v7();
     repo.save_routine_install(listing.id, &user(BEN), &install(0, routine_id, "first"))
         .await
@@ -600,12 +614,16 @@ async fn one_of_two_concurrent_first_installs_claims_the_routine(pool: PgPool) {
         .await
         .unwrap();
     let kept = repo.routine_install(listing.id, &user(BEN)).await.unwrap();
+    let installers = repo.installers(listing.id, None, 10).await.unwrap();
 
     // Exactly one claims it.
     assert_ne!(first.unwrap(), second.unwrap());
     // A claim still creating its routine isn't shown as an install.
     assert_eq!(while_claimed[0].installed_major, None);
     assert_eq!(while_claimed[0].install_count, 0);
+    // Nor is it told of versions until its routine is saved.
+    assert_eq!(installers_while_claimed, Vec::new());
+    assert_eq!(installers, vec![user(BEN)]);
     // Neither claiming nor releasing touches an install with a routine.
     assert!(!after_install);
     assert_eq!(kept, Some(install(0, routine_id, "first")));
@@ -654,4 +672,33 @@ async fn a_stale_or_released_claim_is_taken_by_the_next_install(pool: PgPool) {
     assert!(!while_fresh);
     assert!(taken_over);
     assert!(after_release);
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn installers_are_team_members_on_the_major_newest_install_first(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    join_team(&pool, acme, BEN).await;
+    join_team(&pool, acme, CARA).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = board(acme);
+    repo.create_listing(listing.clone()).await.unwrap();
+
+    repo.install_latest(listing.id, &user(BEN)).await.unwrap();
+    repo.add_version(listing.id, VersionBump::Major, &page("<h1>Board 2.0</h1>"))
+        .await
+        .unwrap();
+    repo.install_latest(listing.id, &user(CARA)).await.unwrap();
+    // Ada owns the team but has no member row: like someone who left, she
+    // can't open the listing, so she isn't told of it.
+    repo.install_latest(listing.id, &user(ADA)).await.unwrap();
+
+    let on_second_major = repo.installers(listing.id, Some(2), 10).await.unwrap();
+    let on_any_major = repo.installers(listing.id, None, 10).await.unwrap();
+    let bounded = repo.installers(listing.id, None, 1).await.unwrap();
+
+    assert_eq!(on_second_major, vec![user(CARA)]);
+    assert_eq!(on_any_major, vec![user(CARA), user(BEN)]);
+    assert_eq!(bounded, vec![user(CARA)]);
 }
