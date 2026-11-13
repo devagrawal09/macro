@@ -1,4 +1,4 @@
 mod deferral;
 mod error_handlers;
-mod process;
+pub(crate) mod process;
 pub mod worker;

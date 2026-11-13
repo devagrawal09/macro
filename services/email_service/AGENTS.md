@@ -251,8 +251,10 @@ the gateway `/email` prefix.
   through the gmail_ops queues.
 - `pubsub::emulated_inbox` connects one inbox to `crates/gmail_emulator` or
   `crates/outlook_emulator` and runs the production inbox sync workers,
-  outbox publisher or Outlook mailbox sync loops against it, delivering
-  queued work as SQS does (three receives on the primary inbox sync queue).
+  backfill worker and outboxes or Outlook mailbox sync loops against it,
+  delivering queued work as SQS does (three receives on the primary inbox
+  sync queue). It ends the request gate's pause wherever SQS would have
+  waited longer (a redelivery or a delayed send) instead of sleeping.
   Add a spec there, written as what the owner sees, for sync behavior a
   provider failure or an odd message can break. `pubsub::test_support`
   holds the fake SQS and worker wiring it shares with `label_write_sim`.

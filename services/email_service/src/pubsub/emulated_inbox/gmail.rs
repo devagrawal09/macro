@@ -13,6 +13,7 @@ use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
 mod access;
+mod catch_up;
 mod changes;
 mod rate_limits;
 #[cfg(test)]
@@ -23,6 +24,8 @@ const OWNER: &str = "owner@example.com";
 /// The inbox sync queues' redrive policies (`infra/stacks/email-service`).
 const SYNC_MAX_RECEIVES: u32 = 3;
 const SYNC_RETRY_MAX_RECEIVES: u32 = 100;
+const BACKFILL_MAX_RECEIVES: u32 = 20;
+const BACKFILL_STACK: usize = 8 * 1024 * 1024;
 
 /// More deliveries than any spec needs; a sync that doesn't settle by then
 /// is looping.
@@ -84,6 +87,8 @@ pub struct GmailInbox {
     sync_queue: String,
     sync: InboxSyncContext,
     sync_retry: InboxSyncContext,
+    backfill_queue: String,
+    backfill: crate::pubsub::backfill::worker::BackfillContext,
     redis: redis::Client,
     lifecycle: crate::composition::InboxLifecycle,
 }
@@ -119,12 +124,13 @@ impl GmailInbox {
         let sqs_sdk = fake_sqs::client(&sqs.url, false);
         let sync_queue = sqs.queue_url("gmail-webhook");
         let retry_queue = sqs.queue_url("gmail-webhook-retry");
+        let backfill_queue = sqs.queue_url("backfill");
         let sqs_client = sqs_client::SQS::new(sqs_sdk.clone())
             .gmail_inbox_sync_queue(&sync_queue)
             .gmail_inbox_sync_retry_queue(&retry_queue)
             .gmail_ops_queue(&sqs.queue_url("gmail-ops"))
             .gmail_ops_retry_queue(&sqs.queue_url("gmail-ops-retry"))
-            .email_backfill_queue(&sqs.queue_url("backfill"))
+            .email_backfill_queue(&backfill_queue)
             .email_link_manager_queue(&sqs.queue_url("link-manager"))
             .sfs_uploader_queue(&sqs.queue_url("sfs"));
         let redis = redis::Client::open(test_support::redis_url()).expect("redis url");
@@ -155,6 +161,7 @@ impl GmailInbox {
         };
         let sync = wiring.context(false, &sync_queue);
         let sync_retry = wiring.context(true, &retry_queue);
+        let backfill = catch_up::backfill_context(&wiring, &backfill_queue);
         let lifecycle = crate::composition::inbox_lifecycle(
             email_api_client::OutlookApiClientRepository::new().expect("outlook client"),
             db.clone(),
@@ -179,6 +186,10 @@ impl GmailInbox {
                     url: retry_queue,
                     max_receives: SYNC_RETRY_MAX_RECEIVES,
                 },
+                QueueSpec {
+                    url: backfill_queue.clone(),
+                    max_receives: BACKFILL_MAX_RECEIVES,
+                },
             ],
         );
 
@@ -190,6 +201,8 @@ impl GmailInbox {
             sync_queue,
             sync,
             sync_retry,
+            backfill_queue,
+            backfill,
             redis,
             lifecycle,
         };
@@ -348,6 +361,7 @@ impl GmailInbox {
     async fn drain(&mut self) {
         for _ in 0..MAX_DELIVERIES {
             while self.lifecycle.publish_once().await.expect("outbox publish") {}
+            self.publish_backfill_outbox().await;
             self.queues.absorb();
             let Some((queued, message)) = self.queues.receive() else {
                 return;
@@ -355,16 +369,43 @@ impl GmailInbox {
             if queued.receives > 1 || queued.delay_seconds > 0 {
                 self.gmail_pause_passes().await;
             }
-            let ctx = if queued.queue_url == self.sync_queue {
-                self.sync.clone()
+            if queued.queue_url == self.backfill_queue {
+                run_backfill(self.backfill.clone(), message).await;
             } else {
-                self.sync_retry.clone()
-            };
-            crate::pubsub::inbox_sync::process::process_message(ctx, &message)
-                .await
-                .ok();
+                let ctx = if queued.queue_url == self.sync_queue {
+                    self.sync.clone()
+                } else {
+                    self.sync_retry.clone()
+                };
+                crate::pubsub::inbox_sync::process::process_message(ctx, &message)
+                    .await
+                    .ok();
+            }
             self.queues.settle(queued);
         }
         panic!("inbox sync did not settle");
     }
+}
+
+/// The backfill worker handles `message` on a thread of its own: in a debug
+/// build its CRM contact population needs more than a test thread's 2 MiB of
+/// stack. The test runtime keeps driving I/O and timers while it waits.
+async fn run_backfill(
+    ctx: crate::pubsub::backfill::worker::BackfillContext,
+    message: aws_sdk_sqs::types::Message,
+) {
+    let runtime = tokio::runtime::Handle::current();
+    let (done, finished) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .stack_size(BACKFILL_STACK)
+        .spawn(move || {
+            runtime.block_on(Box::pin(async move {
+                crate::pubsub::backfill::process::process_message(ctx, &message)
+                    .await
+                    .ok();
+            }));
+            done.send(()).ok();
+        })
+        .expect("backfill worker thread");
+    finished.await.expect("the backfill worker panicked");
 }
