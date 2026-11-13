@@ -137,9 +137,8 @@ impl Ctx<'_> {
             self.delay = fault.delay_ms.map(Duration::from_millis);
             match fault.error {
                 Some(FaultError::AnswerLost) => {
-                    self.lost_answer = Some(
-                        FaultError::AnswerLost.graph_error(fault.retry_after_seconds),
-                    );
+                    self.lost_answer =
+                        Some(FaultError::AnswerLost.graph_error(fault.retry_after_seconds));
                 }
                 Some(error) => return Err(error.graph_error(fault.retry_after_seconds)),
                 None => {}
