@@ -1524,7 +1524,8 @@ dev), a routine you own has **Publish to marketplace…** in its **Routine
 actions** menu (after **Share**). It opens the same dialog as an HTML page's
 publish: the first time **Publish to marketplace** with **Title** and
 **Description**, publishing the saved routine to your team as `v1.0`; after
-that **Publish an update** with **Minor update** / **Major update**. The
+that **Publish an update** with **Minor update** / **Major update**. Both
+have an optional **What changed** note for installers. The
 routine's references are marked as **Share** marks them (your own mentions
 and the schedules' time zone fill in as whoever installs it). The server
 decides a routine update's kind: one that changes its variables, required

@@ -3333,7 +3333,9 @@ time, its dialog asks for a **Title** (starting as the document's name) and a
 **Description**, and **Publish** lists the saved page for the viewer's team as
 version 1.0. After that it shows the listing's version and a choice between
 **Minor update** (everyone who installed it gets it right away) and **Major
-update** (people choose when to update), then **Publish update**. The server
+update** (people choose when to update), then **Publish update**. Both
+forms have an optional **What changed** note (up to 2000 characters), which
+installers read in the listing's version history and before updating. The server
 publishes the saved file, so the button waits while the editor's last changes
 save. The dialog stays open with the reason when the server refuses: nothing
 changed since the newest version, the page has build problems (fix the ones

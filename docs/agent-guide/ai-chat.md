@@ -513,7 +513,14 @@ the shimmer.
   and a major update waits behind a quiet **Update to v2** button on the card
   and the open page, which appears live too. To verify, open an installed
   page in one browser, publish a minor version as its publisher in another,
-  and watch the page swap without interacting with it. The card's **More actions** menu has **Uninstall**, and for the
+  and watch the page swap without interacting with it. **Update to v2**
+  first asks **Update “title” to v2.0?**, listing what changed in each
+  version between the viewer's and the newest (version, date, and the
+  publisher's **What changed** note, or "Its publisher didn’t say what
+  changed."). The card's **More actions** menu has **Version history** (a
+  dialog with the listing's description and every version's note, newest
+  first, from `GET /marketplace/listings/{id}/versions`; a routine version
+  the server made major is badged **Made major**), **Uninstall**, and for the
   publisher or a team admin **Unlist** (confirmed; people who installed the
   page keep it). An installed page is not a document: it is the marketplace's
   own build of the published version, and its programs run as the viewer. To
