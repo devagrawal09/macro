@@ -1,4 +1,5 @@
 import { t } from '@app/lib/i18n';
+import { fireAndForget } from '@core/util/fireAndForget';
 import EmptyStateDocGraphic from '@design/empty-state-doc.svg';
 import EmptyStateNoAccessGraphic from '@design/empty-state-no-access.svg';
 import type { PendingVersion } from '@service-agent-harness/generated/schemas';
@@ -37,7 +38,8 @@ export function ReviewList(props: {
           title={t('marketplace.reviewLoadFailed')}
           primaryAction={{
             label: t('common.retry'),
-            onClick: () => void props.list.retry(),
+            onClick: () =>
+              fireAndForget(props.list.retry(), 'marketplace-review'),
           }}
         />
       </Match>
