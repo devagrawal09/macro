@@ -16,6 +16,7 @@ mod access;
 mod attachments;
 mod catch_up;
 mod changes;
+mod in_macro;
 mod rate_limits;
 #[cfg(test)]
 mod specs;
