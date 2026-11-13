@@ -261,7 +261,7 @@ the gateway `/email` prefix.
   bytes through the attachment read path.
   Add a spec there, written as what the owner sees, for sync behavior a
   provider failure or an odd message can break. `GmailInboxInMacro` and
-  `OutlookInboxInMacro` (`gmail/changes.rs`, `outlook/changes.rs`) add the
+  `OutlookInboxInMacro` (`gmail/in_macro.rs`, `outlook/in_macro.rs`) add the
   owner acting in Macro through the email domain service, with the
   gmail_ops and scheduled delivery workers or the Outlook command and
   draft loops taking changes and sends to the emulator; `delivery.rs`
