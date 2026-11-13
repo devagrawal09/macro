@@ -3,6 +3,8 @@
 //! dead-letters it after the queue's maximum receives
 //! (`infra/stacks/email-service`). Redelivery is immediate: send delays and
 //! visibility timeouts are ignored, so specs count receives, not time.
+//! A harness that keeps time elsewhere reads `receives` and `delay_seconds`
+//! to tell when SQS would have waited.
 
 use crate::pubsub::test_support::fake_sqs::{Ack, FakeSqs, Sent};
 use aws_sdk_sqs::types::{Message, MessageSystemAttributeName};
@@ -20,6 +22,8 @@ pub struct Queued {
     pub queue_url: String,
     pub body: String,
     pub receives: u32,
+    /// The delay it was sent with.
+    pub delay_seconds: u64,
     id: String,
 }
 
@@ -105,6 +109,7 @@ impl Queues {
                 queue_url: message.queue_url,
                 body: message.body,
                 receives: 0,
+                delay_seconds: message.delay_seconds,
                 id: message.message_id,
             });
         }

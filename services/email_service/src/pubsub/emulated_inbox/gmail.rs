@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 mod access;
 mod changes;
+mod rate_limits;
 #[cfg(test)]
 mod specs;
 
@@ -83,6 +84,7 @@ pub struct GmailInbox {
     sync_queue: String,
     sync: InboxSyncContext,
     sync_retry: InboxSyncContext,
+    redis: redis::Client,
     lifecycle: crate::composition::InboxLifecycle,
 }
 
@@ -188,6 +190,7 @@ impl GmailInbox {
             sync_queue,
             sync,
             sync_retry,
+            redis,
             lifecycle,
         };
         inbox.link().await;
@@ -349,6 +352,9 @@ impl GmailInbox {
             let Some((queued, message)) = self.queues.receive() else {
                 return;
             };
+            if queued.receives > 1 || queued.delay_seconds > 0 {
+                self.gmail_pause_passes().await;
+            }
             let ctx = if queued.queue_url == self.sync_queue {
                 self.sync.clone()
             } else {
