@@ -260,8 +260,13 @@ the gateway `/email` prefix.
   reconnect (`/email/init`'s initialization service) and reads attachment
   bytes through the attachment read path.
   Add a spec there, written as what the owner sees, for sync behavior a
-  provider failure or an odd message can break. `pubsub::test_support`
-  holds the fake SQS and worker wiring it shares with `label_write_sim`.
+  provider failure or an odd message can break. `GmailInboxInMacro` and
+  `OutlookInboxInMacro` (`gmail/changes.rs`, `outlook/changes.rs`) add the
+  owner acting in Macro through the email domain service, with the
+  gmail_ops and scheduled delivery workers or the Outlook command and
+  draft loops taking changes and sends to the emulator; `delivery.rs`
+  holds what both share. `pubsub::test_support` holds the fake SQS and
+  worker wiring it shares with `label_write_sim`.
 - `pubsub::label_write_sim` wires one mailbox to the production label-write,
   gmail_ops and inbox sync code with fake Gmail and SQS. Add a test there for a
   new race between writes and syncs; its ignored `randomized_shard_*` tests run

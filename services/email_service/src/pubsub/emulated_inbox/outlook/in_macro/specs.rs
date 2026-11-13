@@ -72,6 +72,22 @@ async fn an_archive_in_macro_survives_a_brief_graph_outage(pool: PgPool) {
     assert!(!inbox.macro_shows(&mail).await.in_inbox);
 }
 
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn an_archive_in_macro_lands_once_when_graphs_answer_is_lost(pool: PgPool) {
+    let inbox = OutlookInboxInMacro::connected(pool).await;
+    let mail = inbox.receives(RECIPIENT, "Q3 plan");
+    inbox.syncs().await;
+    inbox.graph_fails(Route::MessagesMove, FaultError::AnswerLost, 1);
+
+    inbox.owner_archives(&mail).await;
+    inbox.changes_reach_outlook().await;
+    inbox.time_passes().await;
+    inbox.syncs().await;
+
+    assert_eq!(inbox.in_outlook(&mail).folder, "Archive");
+    assert!(!inbox.macro_shows(&mail).await.in_inbox);
+}
+
 /// Macro reads the mailbox from Outlook again, here because Graph dropped
 /// its sync state, after the owner archived the mail in Macro and before
 /// the archive reached Outlook.
