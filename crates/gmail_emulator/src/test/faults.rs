@@ -114,3 +114,27 @@ async fn a_mailbox_over_its_quota_is_rate_limited_until_the_minute_passes() {
     let ada = emulator.access_token(ADA).unwrap();
     assert!(client.get_profile(&ada).await.is_ok());
 }
+
+#[tokio::test]
+async fn a_send_whose_answer_is_lost_is_still_sent() {
+    let emulator = two_mailboxes().await;
+    let client = client(&emulator);
+    let ada = emulator.access_token(ADA).unwrap();
+    emulator.inject_fault(Fault {
+        route: Some(Route::MessagesSend),
+        error: Some(FaultError::AnswerLost),
+        times: Some(1),
+        ..Fault::default()
+    });
+    let mime = b"From: ada@example.com\r\nTo: bob@example.com\r\nSubject: Lunch\r\n\
+        Message-ID: <lunch-1@macro.test>\r\n\r\nNoon?\r\n";
+
+    assert!(client.send_message(&ada, mime, None).await.is_err());
+
+    let found = client
+        .find_sent_message(&ada, "lunch-1@macro.test")
+        .await
+        .unwrap();
+    assert!(found.is_some());
+    assert_eq!(emulator.messages(BOB).unwrap().len(), 1);
+}

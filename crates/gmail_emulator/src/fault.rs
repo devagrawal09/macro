@@ -336,6 +336,10 @@ pub enum FaultError {
     /// 412 `conditionNotMet`, which Calendar also answers when no
     /// precondition was sent.
     PreconditionFailed,
+    /// The request takes effect, then 504 `DEADLINE_EXCEEDED` is answered
+    /// in place of its result, as when Google's answer is lost on the way
+    /// back.
+    AnswerLost,
 }
 
 /// A failure to inject. A request matches when both `mailbox` and `route`

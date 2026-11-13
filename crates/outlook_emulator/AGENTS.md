@@ -154,7 +154,9 @@ local stack, without Microsoft accounts.
 - New mail: `POST /_emulator/mailboxes/{email}/messages` (`deliver`). A change
   made in Outlook: `PATCH`/`DELETE …/messages/{id}`. Provider failure:
   `POST /_emulator/faults` (`inject_fault`) with a `route` such as
-  `messages.get` and an `error` such as `rate_limit`. Time:
+  `messages.get` and an `error` such as `rate_limit`; `answer_lost` lets the
+  request take effect and answers 504 in place of its result, as when
+  Graph's answer is lost on the way back. Time:
   `POST /_emulator/clock/advance`. What it received: `GET /_emulator/requests`;
   what it sent subscribers: `GET /_emulator/notifications`.
 - Calendars: seed them under a mailbox (`time_zone`, `calendars`, each with

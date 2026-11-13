@@ -9,7 +9,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::error::ApiError;
-use crate::fault::Route;
+use crate::fault::{FaultError, Route};
 use crate::state::State;
 use crate::{GmailEmulator, RequestRecord};
 
@@ -76,18 +76,20 @@ fn tagged(mut response: Response, route: Route, mailbox: Option<String>) -> Resp
     response
 }
 
-/// Applies the first matching fault: its error, and how long to wait.
+/// Applies the first matching fault: its error, how long to wait, and
+/// whether the request takes effect before the error is answered.
 pub(crate) fn fault(
     state: &mut State,
     mailbox: Option<&str>,
     route: Route,
-) -> (Option<ApiError>, Option<Duration>) {
+) -> (Option<ApiError>, Option<Duration>, bool) {
     let Some(fault) = state.take_fault(mailbox, route) else {
-        return (None, None);
+        return (None, None, false);
     };
     (
         State::fault_error(&fault),
         fault.delay_ms.map(Duration::from_millis),
+        fault.error == Some(FaultError::AnswerLost),
     )
 }
 
@@ -133,9 +135,11 @@ pub(crate) async fn mailbox_request<T: IntoResponse>(
             return (Some(email), None, Err(refused));
         }
 
-        let (error, delay) = fault(state, Some(&email), route);
-        if let Some(error) = error {
-            return (Some(email), delay, Err(error));
+        let (error, delay, takes_effect) = fault(state, Some(&email), route);
+        if let Some(error) = &error
+            && !takes_effect
+        {
+            return (Some(email), delay, Err(error.clone()));
         }
 
         let now_ms = state.now_ms();
@@ -150,7 +154,10 @@ pub(crate) async fn mailbox_request<T: IntoResponse>(
             return (Some(email), delay, Err(limited));
         }
 
-        let result = handler(state, &email);
+        let result = match (handler(state, &email), error) {
+            (Ok(_), Some(lost)) => Err(lost),
+            (result, _) => result,
+        };
         (Some(email), delay, result)
     });
 
@@ -176,15 +183,19 @@ pub(crate) async fn open_request(
     handler: impl FnOnce(&mut State) -> (Option<String>, Response),
 ) -> Response {
     let (mailbox, delay, response) = emulator.with_state(|state| {
-        let (error, delay) = fault(state, None, route);
+        let (error, delay, takes_effect) = fault(state, None, route);
         if let Some(error) = error {
+            if takes_effect {
+                let (mailbox, _) = handler(state);
+                return (mailbox, delay, error.into_response());
+            }
             return (None, delay, error.into_response());
         }
         let (mailbox, response) = handler(state);
         if delay.is_some() || mailbox.is_none() {
             return (mailbox, delay, response);
         }
-        let (error, delay) = fault(state, mailbox.as_deref(), route);
+        let (error, delay, _) = fault(state, mailbox.as_deref(), route);
         match error {
             Some(error) => (mailbox, delay, error.into_response()),
             None => (mailbox, delay, response),

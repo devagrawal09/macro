@@ -27,7 +27,7 @@ use nom::sequence::delimited;
 use serde_json::{Value, json};
 
 use crate::error::GraphError;
-use crate::fault::Route;
+use crate::fault::{FaultError, Route};
 use crate::mailbox::Mailbox;
 use crate::odata::Query;
 use crate::state::State;
@@ -123,6 +123,8 @@ pub(crate) struct Ctx<'a> {
     pub(crate) now: DateTime<Utc>,
     route: Option<Route>,
     delay: Option<Duration>,
+    /// Answered in place of the request's result once it took effect.
+    lost_answer: Option<GraphError>,
 }
 
 impl Ctx<'_> {
@@ -133,8 +135,14 @@ impl Ctx<'_> {
         let email = (!self.email.is_empty()).then_some(self.email.as_str());
         if let Some(fault) = self.state.take_fault(email, route) {
             self.delay = fault.delay_ms.map(Duration::from_millis);
-            if let Some(error) = fault.error {
-                return Err(error.graph_error(fault.retry_after_seconds));
+            match fault.error {
+                Some(FaultError::AnswerLost) => {
+                    self.lost_answer = Some(
+                        FaultError::AnswerLost.graph_error(fault.retry_after_seconds),
+                    );
+                }
+                Some(error) => return Err(error.graph_error(fault.retry_after_seconds)),
+                None => {}
             }
         }
         let now_ms = self.state.now_ms();
@@ -272,12 +280,17 @@ pub(crate) fn open<'a>(
         now,
         route: None,
         delay: None,
+        lost_answer: None,
     })
 }
 
 impl Ctx<'_> {
     /// What the request log learns, once the route has answered.
     pub(crate) fn served(self, result: Handled) -> Served {
+        let result = match (result, self.lost_answer) {
+            (Ok(_), Some(lost)) => Err(lost),
+            (result, _) => result,
+        };
         Served {
             route: self.route,
             mailbox: (!self.email.is_empty()).then_some(self.email),
