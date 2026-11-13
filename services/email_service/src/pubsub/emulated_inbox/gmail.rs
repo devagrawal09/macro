@@ -12,6 +12,7 @@ use sqlx::PgPool;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
+mod access;
 mod changes;
 #[cfg(test)]
 mod specs;
