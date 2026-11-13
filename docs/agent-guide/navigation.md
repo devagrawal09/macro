@@ -1551,7 +1551,12 @@ asking only about references the new version added; when you had edited the
 routine it first asks **Update “name” to v2.0?**, saying your edits will be
 replaced. A second **Install** while the first is still creating the routine
 fails with a toast instead of creating a second routine. **Uninstall** asks
-first: your routine stays yours, it just stops getting updates.
+first: your routine stays yours, it just stops getting updates. **Pin to
+v1.2** in **More actions** holds your routine on its version: minor updates
+skip it (**Pinned** badge, and the card offers the newer version as
+**Update to v1.3**). **Unpin** applies the newest minor of your major at
+once, unless you edited the routine, which pauses its updates as an
+automatic update would. An edited routine has no **Pin**.
 
 **Runs** shows outcome, duration, and firing time. History loads fifty
 rows at a time; **Load more runs** reveals older records. Accessible run rows

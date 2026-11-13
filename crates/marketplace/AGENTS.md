@@ -126,6 +126,14 @@ minor versions update until they edit it.
   `GET /marketplace/listings/{id}/versions` answers them newest first, without
   content, to whoever sees the listing. A listing's `installedVersion` is the
   routine's `routine_minor`, or the newest minor of a page install's major.
+- An install can be pinned (`pinned_minor`, `PUT`/`DELETE
+  .../install/pin`) to the version it has: `installed_page` builds that
+  minor, `installs_behind` skips a pinned routine, and installers still get
+  version notifications (the web app refreshes lists, not a pinned page).
+  Unpinning a routine runs `update_install` once on its own task
+  (`catch_up_routine`), with the same edit/detach rules. Taking a version
+  (`install_latest`, `save_routine_install`) unpins. A detached routine
+  can't be pinned.
 - Every route answers `404` outside the rollout: `enable-marketplace` and
   `enable-html-code-mode` together, since listings are pages with programs.
   Runs refuse an agent's or a program's token, like a document's.
