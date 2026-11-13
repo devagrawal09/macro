@@ -6,6 +6,11 @@
 //! (`mailbox_sync_worker::run_commands`, `run_drafts`) then take them to the
 //! emulated Outlook.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "harness SQL reads and moves test state; it stays out of the offline query cache"
+)]
+
 use super::super::delivery::{self, Outgoing};
 use super::{OWNER, OutlookInbox, Received};
 use crate::pubsub::test_support::{self, GmailEndpoints, fake_sqs};

@@ -5,6 +5,11 @@
 //! receipts). No spec sends attachments, so S3 points at the stand-in
 //! services.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "harness SQL reads and moves test state; it stays out of the offline query cache"
+)]
+
 use crate::outbound::email_api::{GmailApi, MicrosoftCredentialsClient, ProviderMailboxGateway};
 use email::domain::mailbox::credentials::MailboxCredentials;
 use email::domain::models::{ContactInfo, CreateDraftInput};

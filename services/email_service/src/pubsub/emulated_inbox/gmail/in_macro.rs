@@ -7,6 +7,11 @@
 //! then take them to the emulated Gmail. Those queues live on an SQS
 //! endpoint of their own, so the inbox's sync delivery never sees them.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "harness SQL reads and moves test state; it stays out of the offline query cache"
+)]
+
 use super::super::delivery;
 use super::super::queues::{QueueSpec, Queues};
 use super::{GmailInbox, OWNER, Received};
