@@ -1,4 +1,5 @@
 import { t } from '@app/lib/i18n';
+import { fireAndForget } from '@core/util/fireAndForget';
 import { ActionDialogShell, Button, Dialog } from '@ui';
 import { createResource, Match, Show, Switch } from 'solid-js';
 import { VersionHistory } from '../components/version-history';
@@ -63,7 +64,9 @@ export function ListingDetailsDialog(props: {
                     variant="ghost"
                     size="sm"
                     class="touch:min-h-11"
-                    onClick={() => void refetch()}
+                    onClick={() =>
+                      fireAndForget(refetch(), 'marketplace-history')
+                    }
                   >
                     {t('common.retry')}
                   </Button>
