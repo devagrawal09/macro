@@ -61,6 +61,10 @@ import { handleRefreshCalendar } from '../calendar/sync';
 // listener. Must be imported somewhere that always loads on app start — this
 // provider is guaranteed to mount alongside the other sync handlers.
 import '@app/features/routines/queries/sync';
+import {
+  handleListingVersion,
+  LISTING_VERSION_MESSAGE_TYPE,
+} from '@app/features/marketplace/queries/sync';
 import { handleUserPictureChanged } from '@core/signal/profilePicture';
 import { fireAndForget } from '@core/util/fireAndForget';
 import {
@@ -243,6 +247,12 @@ export function useQuerySync(userId: Accessor<string | undefined>): void {
         fireAndForget(invalidateFavorites(), 'websocket-query-sync');
         invalidateAllProperties();
         invalidateAllSoup();
+      })
+      // A marketplace listing the viewer installed has a new version.
+      .with({ type: LISTING_VERSION_MESSAGE_TYPE }, () => {
+        withParsedWebsocketPayload(data.type, data.data, (payload) => {
+          fireAndForget(handleListingVersion(payload), 'websocket-query-sync');
+        });
       })
       .with({ type: SYSTEM_STATUS_MESSAGE_TYPE }, () => {
         handleSystemStatusMessage(data.data);

@@ -19,10 +19,18 @@ import {
   runInstalledProgram,
 } from '../queries/installed-page';
 
+/** The built page on screen, and the one it replaced. */
+type ShownPage = {
+  sourceHash: string;
+  major: number;
+  replaced?: { sourceHash: string; sameMajor: boolean };
+};
+
 /**
  * An installed listing's page, in place of the marketplace lists. It shows
- * the newest minor version of the major the viewer is on: a run that finds a
- * newer one published, or a return to the window, loads it.
+ * the newest minor version of the major the viewer is on: a published
+ * version's live message, a run that finds a newer one published, or a
+ * return to the window loads it.
  */
 export function InstalledPageView(props: {
   listing: Listing;
@@ -60,9 +68,38 @@ export function InstalledPageView(props: {
     build.isError &&
     (thrownResultErrorHasCode(build.error, 'BUILD_UNAVAILABLE') ||
       thrownResultErrorHasCode(build.error, 'BUILD_TOO_LARGE'));
-  // The build a run found stale; the frame that replaces it says why the
-  // page reloaded, since the failure shown on the old one goes with it.
+  // A page that replaces the one on screen says why it reloaded, since the
+  // old one's state went with it: a run found it stale, or a newer minor
+  // arrived. Taking a major version is the viewer's own doing and says
+  // nothing.
+  const shown = createMemo<ShownPage | undefined>((previous) => {
+    const page = built();
+    const version = installed()?.version;
+    if (!page || !version) return previous;
+    if (previous?.sourceHash === page.sourceHash) return previous;
+
+    return {
+      sourceHash: page.sourceHash,
+      major: version.major,
+      replaced: previous && {
+        sourceHash: previous.sourceHash,
+        sameMajor: previous.major === version.major,
+      },
+    };
+  });
+  // The build a run found stale: the frame that replaces it also says to try
+  // again, since the failure shown on the old one goes with it.
   const [staleBuild, setStaleBuild] = createSignal<string>();
+  const notice = (sourceHash: string) => {
+    const current = shown();
+    const replaced = current?.replaced;
+    if (current?.sourceHash !== sourceHash || !replaced) return undefined;
+
+    if (staleBuild() === replaced.sourceHash) {
+      return t('htmlPreview.pageUpdated');
+    }
+    return replaced.sameMajor ? t('marketplace.pageNewVersion') : undefined;
+  };
   const refetch = () => {
     fireAndForget(build.refetch(), 'marketplace-installed-build');
   };
@@ -130,12 +167,7 @@ export function InstalledPageView(props: {
                 html={current.html}
                 sourceHash={current.sourceHash}
                 run={runInstalledProgram}
-                notice={
-                  staleBuild() !== undefined &&
-                  staleBuild() !== current.sourceHash
-                    ? t('htmlPreview.pageUpdated')
-                    : undefined
-                }
+                notice={notice(current.sourceHash)}
                 onStale={() => {
                   setStaleBuild(current.sourceHash);
                   refetch();

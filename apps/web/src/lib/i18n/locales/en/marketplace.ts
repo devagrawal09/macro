@@ -36,6 +36,7 @@ export default {
   unlistFailed: 'Could not unlist {{title}}',
   backToMarketplace: 'Back to marketplace',
   pageLoading: 'Loading page',
+  pageNewVersion: 'A new version of this page was published, so it reloaded.',
   pageUnavailableTitle: 'This page isn’t available',
   pageUnavailableDescription:
     'It may have been uninstalled, or its listing is gone.',
