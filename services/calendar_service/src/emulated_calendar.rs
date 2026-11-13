@@ -88,8 +88,8 @@ pub fn day(days: i64) -> DateTime<Utc> {
 /// Production token acquisition against an emulator's stand-in for the
 /// authentication service.
 pub async fn tokens(authentication_service_url: String) -> CalendarTokenProviderAdapter {
-    let redis_uri =
-        std::env::var("REDIS_URI").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    let redis_uri = macro_env_var::maybe_read_env("REDIS_URI")
+        .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string());
     let redis = redis::Client::open(redis_uri)
         .expect("redis client")
         .get_multiplexed_async_connection()

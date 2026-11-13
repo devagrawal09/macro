@@ -27,6 +27,10 @@ pub mod calendar_tokens;
 pub mod config;
 /// Calendar sync against the provider emulators, with its specs.
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the harness's plain SQL keeps test-only queries out of the offline query cache"
+)]
 mod emulated_calendar;
 /// Health check router.
 pub mod health;
