@@ -233,10 +233,10 @@ where
         }
 
         let created = self.routines.create(user, filled, enabled).await;
-        if created.is_err() {
-            if let Err(error) = self.listings.release_routine_claim(id, user).await {
-                tracing::error!(error = %error, "could not release an install claim");
-            }
+        if created.is_err()
+            && let Err(error) = self.listings.release_routine_claim(id, user).await
+        {
+            tracing::error!(error = %error, "could not release an install claim");
         }
         created
     }
