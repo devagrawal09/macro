@@ -13,6 +13,7 @@ use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
 mod access;
+mod attachments;
 mod catch_up;
 mod changes;
 mod rate_limits;

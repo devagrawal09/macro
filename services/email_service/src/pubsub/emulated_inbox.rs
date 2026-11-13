@@ -11,6 +11,7 @@
 //! and the sync code. Emulated: the provider, its token service. Faked: SQS
 //! and the other internal services the workers call ([`services`]).
 
+mod attachments;
 mod gmail;
 mod outlook;
 mod queues;
