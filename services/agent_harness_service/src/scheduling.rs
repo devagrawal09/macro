@@ -535,7 +535,10 @@ pub async fn build<Ingress: notification::domain::service::NotificationIngress>(
             macro_tower_layers::MacroRequestIdAndTracingLayer::new(Duration::from_millis(200))
                 .into_inner(),
         );
-    Ok((SchedulingRuntime { router, lifecycle }, marketplace_routines))
+    Ok((
+        SchedulingRuntime { router, lifecycle },
+        marketplace_routines,
+    ))
 }
 
 fn mount_router(routes: Router) -> Router {

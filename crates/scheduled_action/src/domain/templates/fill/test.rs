@@ -10,12 +10,9 @@ fn person() -> MacroUserIdStr<'static> {
     MacroUserIdStr::try_from("macro|ben@example.com".to_owned()).unwrap()
 }
 
-const ADA_MENTION: &str =
-    r#"<m-user-mention>{"userId":"macro|ada@example.com","email":"ada@example.com","displayName":"Ada"}</m-user-mention>"#;
-const BOARD_MENTION: &str =
-    r#"<m-document-mention>{"documentId":"board","documentName":"Board","blockName":"md"}</m-document-mention>"#;
-const PRIVATE_MENTION: &str =
-    r#"<m-document-mention>{"documentId":"private","documentName":"Private notes","blockName":"md"}</m-document-mention>"#;
+const ADA_MENTION: &str = r#"<m-user-mention>{"userId":"macro|ada@example.com","email":"ada@example.com","displayName":"Ada"}</m-user-mention>"#;
+const BOARD_MENTION: &str = r#"<m-document-mention>{"documentId":"board","documentName":"Board","blockName":"md"}</m-document-mention>"#;
+const PRIVATE_MENTION: &str = r#"<m-document-mention>{"documentId":"private","documentName":"Private notes","blockName":"md"}</m-document-mention>"#;
 
 fn snapshot(task: Value, trigger: ActionTrigger) -> RoutineSnapshot {
     RoutineSnapshot {

@@ -16,8 +16,8 @@ use macro_user_id::user_id::MacroUserIdStr;
 use model_owner::CreationPrincipal;
 use scheduled_action::domain::code_check::CodeCheckError;
 use scheduled_action::domain::models::{
-    ActionConfiguration, ActionConfigurationUpdate, ActionKind, ActionPolicyError, OwnerNotUserError,
-    RunVisibility,
+    ActionConfiguration, ActionConfigurationUpdate, ActionKind, ActionPolicyError,
+    OwnerNotUserError, RunVisibility,
 };
 use scheduled_action::domain::ports::ScheduledActionService;
 use scheduled_action::domain::target_validation::TargetValidationError;
@@ -138,9 +138,9 @@ where
             )
             .await
             .map_err(routine_error)?;
-        let routine_id = created.id.ok_or_else(|| {
-            routine_error(anyhow::anyhow!("a created routine has no id"))
-        })?;
+        let routine_id = created
+            .id
+            .ok_or_else(|| routine_error(anyhow::anyhow!("a created routine has no id")))?;
 
         Ok(RoutineCopy {
             routine_id,

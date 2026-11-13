@@ -411,9 +411,13 @@ async fn a_routine_version_stores_its_snapshot_and_no_page(pool: PgPool) {
         .add_version(listing.id, VersionBump::Minor, &routine("Weekly digest"))
         .await
         .unwrap();
-    repo.add_version(listing.id, VersionBump::Minor, &routine("Weekly digest 1.1"))
-        .await
-        .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &routine("Weekly digest 1.1"),
+    )
+    .await
+    .unwrap();
     repo.add_version(listing.id, VersionBump::Major, &routine("Weekly digest 2"))
         .await
         .unwrap();
@@ -544,12 +548,25 @@ async fn updates_reach_installs_behind_on_the_major_until_they_detach(pool: PgPo
     assert_eq!(after_first.len(), 1);
     assert_eq!(after_first[0].user, user(CARA));
     assert_eq!(after_first[0].install, install(0, caras, "cara"));
-    assert!(cara_failed[0].installed_routine.as_ref().is_some_and(|routine| routine.update_failed));
+    assert!(
+        cara_failed[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| routine.update_failed)
+    );
     assert_eq!(after_detach.len(), 1);
     assert_eq!(after_detach[0].user, user(BEN));
-    assert!(cara_detached[0].installed_routine.as_ref().is_some_and(|routine| {
-        routine.detached && !routine.update_failed
-    }));
+    assert!(
+        cara_detached[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| { routine.detached && !routine.update_failed })
+    );
     assert_eq!(ben_updated, Some(install(1, bens, "ben 1.1")));
-    assert!(cara_reinstalled[0].installed_routine.as_ref().is_some_and(|routine| !routine.detached));
+    assert!(
+        cara_reinstalled[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| !routine.detached)
+    );
 }

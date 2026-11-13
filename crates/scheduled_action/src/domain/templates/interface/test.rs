@@ -44,7 +44,10 @@ fn zone() -> TemplateVariable {
 #[test]
 fn reads_variables_apps_triggers_and_knobs() {
     let routine = snapshot(
-        program("text", json!([{ "app_slug": "linear", "server_name": "Linear" }])),
+        program(
+            "text",
+            json!([{ "app_slug": "linear", "server_name": "Linear" }]),
+        ),
         json!({
             "type": "multiple",
             "triggers": [
@@ -89,7 +92,10 @@ fn wording_and_values_leave_it_alone() {
 fn a_new_app_variable_trigger_or_knob_type_changes_it() {
     let before = snapshot(program("text", json!([])), cron(), vec![zone()]);
     let with_app = snapshot(
-        program("text", json!([{ "app_slug": "linear", "server_name": "Linear" }])),
+        program(
+            "text",
+            json!([{ "app_slug": "linear", "server_name": "Linear" }]),
+        ),
         cron(),
         vec![zone()],
     );

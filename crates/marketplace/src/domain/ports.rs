@@ -7,9 +7,7 @@ use entity_access::domain::models::{
     EntityAccessReceipt, MemberTeamRole, OwnerAccessLevel, ViewAccessLevel,
 };
 use macro_user_id::user_id::MacroUserIdStr;
-use scheduled_action::domain::templates::{
-    RoutineSnapshot, TemplateVariable, fill::FilledRoutine,
-};
+use scheduled_action::domain::templates::{RoutineSnapshot, TemplateVariable, fill::FilledRoutine};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 

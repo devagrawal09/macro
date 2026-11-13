@@ -580,9 +580,7 @@ async fn insert_version(
 ) -> Result<(), ListingRepoErr> {
     let (html, routine) = match content {
         ListingContent::Page(page) => (Some(page.html.as_str()), None),
-        ListingContent::Routine(routine) => {
-            (None, Some(serde_json::to_value(&routine.snapshot)?))
-        }
+        ListingContent::Routine(routine) => (None, Some(serde_json::to_value(&routine.snapshot)?)),
     };
 
     sqlx::query!(

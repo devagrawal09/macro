@@ -346,7 +346,10 @@ impl PublishSource {
     /// The receipt naming what is published.
     pub fn receipt(&self) -> &EntityAccessReceipt<OwnerAccessLevel> {
         match self {
-            Self::Artifact(receipt) | Self::Routine { routine: receipt, .. } => receipt,
+            Self::Artifact(receipt)
+            | Self::Routine {
+                routine: receipt, ..
+            } => receipt,
         }
     }
 

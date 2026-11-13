@@ -13,17 +13,15 @@ use entity_access::domain::models::{
     TeamRole, ViewAccessLevel,
 };
 use macro_user_id::user_id::MacroUserIdStr;
-use scheduled_action::domain::templates::{
-    RoutineSnapshot, TemplateVariable, fill::FilledRoutine,
-};
+use scheduled_action::domain::templates::{RoutineSnapshot, TemplateVariable, fill::FilledRoutine};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage,
-    InstalledRoutine, Listing, ListingContent, ListingId, ListingKind, ListingScope, ListingText,
-    MarketplaceError, NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate,
+    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage, InstalledRoutine,
+    Listing, ListingContent, ListingId, ListingKind, ListingScope, ListingText, MarketplaceError,
+    NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate,
     RoutineVersion, TaskHash, Version, VersionBump,
 };
 use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, Routines};
@@ -467,7 +465,13 @@ impl FakeRoutines {
 
     /// The person edits their routine's task.
     fn edit(&self, id: Uuid, task: serde_json::Value) {
-        self.saved.lock().unwrap().get_mut(&id).unwrap().routine.task = task;
+        self.saved
+            .lock()
+            .unwrap()
+            .get_mut(&id)
+            .unwrap()
+            .routine
+            .task = task;
     }
 
     fn fail(&self, id: Uuid) {
@@ -490,7 +494,12 @@ impl Routines for FakeRoutines {
             .get(&id)
             .cloned()
             .ok_or(MarketplaceError::NotFound)?;
-        if routine.get_authenticated_user().ok().map(|user| user.as_ref()) != Some(owner.as_str()) {
+        if routine
+            .get_authenticated_user()
+            .ok()
+            .map(|user| user.as_ref())
+            != Some(owner.as_str())
+        {
             return Err(MarketplaceError::NotFound);
         }
 
@@ -640,10 +649,22 @@ async fn only_the_team_sees_and_installs_a_listing() {
     let cam = member(CAM, OTHER_TEAM, TeamRole::Member);
 
     let installed = service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await
         .expect("a teammate installs it");
-    let outside = service.install(&user(CAM), Some(&cam), listing.id, InstallRequest::default()).await;
+    let outside = service
+        .install(
+            &user(CAM),
+            Some(&cam),
+            listing.id,
+            InstallRequest::default(),
+        )
+        .await;
     let outside_listings = service
         .listings(&user(CAM), Some(&cam))
         .await
@@ -662,7 +683,12 @@ async fn a_minor_version_reaches_an_install_at_once_and_a_major_waits() {
     let ada = member(ADA, ACME, TeamRole::Member);
     let ben = member(BEN, ACME, TeamRole::Member);
     service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await
         .expect("a teammate installs it");
 
@@ -699,7 +725,12 @@ async fn a_minor_version_reaches_an_install_at_once_and_a_major_waits() {
         .expect("the install builds");
 
     let taken = service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await
         .expect("the major version is taken");
     let after_taking = service
@@ -767,7 +798,12 @@ async fn the_publisher_or_a_team_admin_unlists_and_installs_keep_working() {
     let ben = member(BEN, ACME, TeamRole::Member);
     let cam = member(CAM, ACME, TeamRole::Member);
     service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await
         .expect("a teammate installs it");
 
@@ -822,7 +858,12 @@ async fn a_page_runs_only_for_someone_who_installed_it() {
         )
         .await;
     service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await
         .expect("a teammate installs it");
     let after = service

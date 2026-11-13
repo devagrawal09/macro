@@ -12,8 +12,7 @@ use crate::domain::service::routine_bump;
 
 const DIGEST: Uuid = Uuid::from_u128(20);
 
-const BOARD_MENTION: &str =
-    r#"<m-document-mention>{"documentId":"board","documentName":"Board","blockName":"md"}</m-document-mention>"#;
+const BOARD_MENTION: &str = r#"<m-document-mention>{"documentId":"board","documentName":"Board","blockName":"md"}</m-document-mention>"#;
 
 fn routine_receipt(id: &'static str, routine: Uuid) -> EntityAccessReceipt<OwnerAccessLevel> {
     EntityAccessReceipt::dangerously_assert_authenticated_user(
@@ -294,7 +293,10 @@ async fn a_minor_version_updates_installed_routines() {
 
     assert_eq!(published.bump, VersionBump::Minor);
     assert_eq!(published.updates.updated, 1);
-    assert_eq!(instructions(&saved), json!("Sum up the week in three lines"));
+    assert_eq!(
+        instructions(&saved),
+        json!("Sum up the week in three lines")
+    );
     assert_eq!(saved.revision, 2);
     // Filled in again from the fills stored at install.
     assert_eq!(
@@ -348,10 +350,18 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
         instructions(&routines.saved(adas)),
         json!("Sum up the week in three lines")
     );
-    assert!(for_ben[0].installed_routine.as_ref().is_some_and(|routine| routine.detached));
-    assert!(for_cam[0].installed_routine.as_ref().is_some_and(|routine| {
-        routine.update_failed && !routine.detached
-    }));
+    assert!(
+        for_ben[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| routine.detached)
+    );
+    assert!(
+        for_cam[0]
+            .installed_routine
+            .as_ref()
+            .is_some_and(|routine| { routine.update_failed && !routine.detached })
+    );
 }
 
 #[tokio::test]
@@ -372,7 +382,12 @@ async fn a_major_version_asks_for_new_fills_before_it_updates() {
 
     let waiting = routines.saved(routine_id);
     let without_fill = service
-        .install(&user(BEN), Some(&ben), listing.id, InstallRequest::default())
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
         .await;
     let updated = service
         .install(
@@ -397,7 +412,10 @@ async fn a_major_version_asks_for_new_fills_before_it_updates() {
     }
     assert_eq!(updated.installed_major, Some(2));
     assert_eq!(installed_id(&updated), routine_id);
-    assert_eq!(instructions(&saved), json!(format!("Sum up {BOARD_MENTION}")));
+    assert_eq!(
+        instructions(&saved),
+        json!(format!("Sum up {BOARD_MENTION}"))
+    );
     // The time zone stored at install still applies.
     assert_eq!(
         saved.routine.trigger,

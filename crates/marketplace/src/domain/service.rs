@@ -7,14 +7,14 @@ mod test;
 use std::sync::Arc;
 
 use agent_code_mode::domain::{BuildOutcome, RunProgram, UserExecutionReceipt};
-use futures::StreamExt;
-use scheduled_action::domain::templates::{RoutineSnapshot, fill::RoutineFills};
-use tracing::Instrument;
 use entity_access::domain::models::{
     EntityAccessReceipt, EntityType, MemberTeamRole, OwnerAccessLevel, TeamRole, ViewAccessLevel,
 };
+use futures::StreamExt;
 use macro_user_id::user_id::MacroUserIdStr;
+use scheduled_action::domain::templates::{RoutineSnapshot, fill::RoutineFills};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::domain::models::{
@@ -224,16 +224,21 @@ where
         let updates = async move {
             let snapshot = &snapshot;
             futures::stream::iter(installs)
-                .map(|following| update_install(&*listings, &*routines, id, version, snapshot, following))
-                .buffer_unordered(UPDATE_CONCURRENCY)
-                .fold(RoutineUpdates::default(), |mut updates, update| async move {
-                    match update {
-                        InstallUpdate::Updated { .. } => updates.updated += 1,
-                        InstallUpdate::Detached => updates.detached += 1,
-                        InstallUpdate::Failed => updates.failed += 1,
-                    }
-                    updates
+                .map(|following| {
+                    update_install(&*listings, &*routines, id, version, snapshot, following)
                 })
+                .buffer_unordered(UPDATE_CONCURRENCY)
+                .fold(
+                    RoutineUpdates::default(),
+                    |mut updates, update| async move {
+                        match update {
+                            InstallUpdate::Updated { .. } => updates.updated += 1,
+                            InstallUpdate::Detached => updates.detached += 1,
+                            InstallUpdate::Failed => updates.failed += 1,
+                        }
+                        updates
+                    },
+                )
                 .await
         };
 

@@ -90,7 +90,9 @@ impl TemplateVariable {
     /// How its author marked it to be filled.
     pub fn fill(&self) -> VariableFill {
         match self {
-            Self::User { fill, .. } | Self::Item { fill, .. } | Self::TimeZone { fill, .. } => *fill,
+            Self::User { fill, .. } | Self::Item { fill, .. } | Self::TimeZone { fill, .. } => {
+                *fill
+            }
         }
     }
 }
