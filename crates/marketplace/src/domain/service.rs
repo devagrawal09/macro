@@ -55,11 +55,10 @@ where
         skip_all,
         fields(listing_id = %id, recipient_count = tracing::field::Empty, truncated = tracing::field::Empty)
     )]
-    async fn notify_installers(&self, id: ListingId, version: Version, bump: VersionBump) {
-        let major = match bump {
-            VersionBump::Minor => Some(version.major),
-            VersionBump::Major => None,
-        };
+    async fn notify_installers(&self, id: ListingId, version: Version) {
+        // The stored version, not the bump asked for, says which it is: a
+        // major version starts at minor 0.
+        let major = (version.minor > 0).then_some(version.major);
         // One more than the bound, to tell a listing at the bound from one
         // past it.
         let Ok(mut installers) = self
@@ -312,7 +311,7 @@ where
             .map_err(internal)?;
         match added {
             AddedVersion::Added(version) => {
-                self.notify_installers(id, version, bump).await;
+                self.notify_installers(id, version).await;
                 self.listing(user, team, id).await
             }
             AddedVersion::Unchanged => Err(MarketplaceError::Unchanged),
