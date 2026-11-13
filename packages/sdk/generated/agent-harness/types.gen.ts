@@ -2361,6 +2361,34 @@ export type IntentScore = {
 };
 
 /**
+ * One part of a routine's interface added or removed by a version.
+ */
+export type InterfaceChange = {
+    /**
+     * Added or removed.
+     */
+    change: InterfaceChangeKind;
+    /**
+     * The part as people read it, such as a variable's key and kind.
+     */
+    name: string;
+    /**
+     * Which part.
+     */
+    part: InterfacePart;
+};
+
+/**
+ * Whether a part of the interface came or went.
+ */
+export type InterfaceChangeKind = 'added' | 'removed';
+
+/**
+ * A part of a routine's interface.
+ */
+export type InterfacePart = 'variable' | 'app' | 'trigger' | 'knob';
+
+/**
  * How code reads a knob: a lowercase letter, then up to 31 letters or
  * digits, e.g. `dueWithinDays`.
  */
@@ -2446,9 +2474,11 @@ export type Listing = {
      */
     kind: ListingKind;
     /**
-     * Its newest version.
+     * Its newest approved version. A global listing not yet approved, which
+     * only Macro's publishers see, shows the version waiting for review.
      */
     latestVersion: Version;
+    pendingVersion?: null | Version;
     /**
      * Who published it.
      */
@@ -2600,6 +2630,11 @@ export type MacroUserIdStr = string;
  * A page of the listings the caller may see.
  */
 export type MarketplaceListings = {
+    /**
+     * The caller belongs to Macro's publisher team: they may publish to
+     * everyone and review other publishers' versions.
+     */
+    globalPublisher: boolean;
     /**
      * Their team's and everyone's, newest first.
      */
@@ -2767,6 +2802,51 @@ export type PayloadCondition = {
 export type PayloadScalar = null | boolean | number | string;
 
 /**
+ * A version waiting for review, as the review list shows it.
+ */
+export type PendingVersion = {
+    approvedVersion?: null | Version;
+    /**
+     * What it does.
+     */
+    description: string;
+    /**
+     * What the listing publishes.
+     */
+    kind: ListingKind;
+    /**
+     * Its listing.
+     */
+    listingId: ListingId;
+    /**
+     * When it was published.
+     */
+    publishedAt: string;
+    /**
+     * Who published the version, who may not review it.
+     */
+    publisher: string;
+    /**
+     * The listing's name.
+     */
+    title: string;
+    /**
+     * The version waiting.
+     */
+    version: Version;
+};
+
+/**
+ * The versions waiting for review, oldest first.
+ */
+export type PendingVersions = {
+    /**
+     * Each pending version, at most 100.
+     */
+    versions: Array<PendingVersion>;
+};
+
+/**
  * The decision carried by an [`AgentPermissionAction`].
  */
 export type PermissionAnswer = {
@@ -2874,6 +2954,11 @@ export type PublishListing = {
      */
     description?: string;
     /**
+     * Who sees it: the caller's team (the default), or everyone once
+     * another member of Macro's publisher team approves it.
+     */
+    scope?: PublishScope;
+    /**
      * What it is published from.
      */
     source: ListingSource;
@@ -2900,6 +2985,11 @@ export type PublishListingVersion = {
 };
 
 /**
+ * Who a first publish lists to.
+ */
+export type PublishScope = 'team' | 'global';
+
+/**
  * A new version and how it was numbered.
  */
 export type PublishedVersion = {
@@ -2912,6 +3002,11 @@ export type PublishedVersion = {
      * The listing with its new version.
      */
     listing: Listing;
+    /**
+     * `pending` for a global listing's version, which reaches nobody until
+     * another publisher approves it.
+     */
+    review: ReviewState;
     /**
      * Installs a minor routine version reached.
      */
@@ -3221,6 +3316,21 @@ export type ReviewDecisionContext = {
 export type ReviewId = string;
 
 /**
+ * What a review decided, and the installs an approved minor routine
+ * version reached.
+ */
+export type ReviewOutcome = {
+    /**
+     * `approved` or `rejected`.
+     */
+    state: ReviewState;
+    /**
+     * Installs the version reached when it went live.
+     */
+    updates: RoutineUpdates;
+};
+
+/**
  * Full UI record, fetched outside the model context.
  */
 export type ReviewRecord = {
@@ -3256,6 +3366,35 @@ export type ReviewRecord = {
      * Milliseconds since epoch of the last state change.
      */
     updatedAt: number;
+};
+
+/**
+ * Where a version stands in review. Team versions are approved as they are
+ * stored; a global version waits for a second publisher.
+ */
+export type ReviewState = 'pending' | 'approved' | 'rejected';
+
+/**
+ * What a reviewer decides about a pending version.
+ */
+export type ReviewVerdict = 'approve' | 'reject';
+
+/**
+ * Approve or reject a listing's pending version.
+ */
+export type ReviewVersion = {
+    /**
+     * The decision.
+     */
+    decision: ReviewVerdict;
+    /**
+     * Why it was rejected, for its publisher.
+     */
+    reason?: string | null;
+    /**
+     * The version reviewed; another one waiting answers `404`.
+     */
+    version: Version;
 };
 
 /**
@@ -3958,6 +4097,41 @@ export type Version = {
  * How a new version follows the newest one.
  */
 export type VersionBump = 'minor' | 'major';
+
+/**
+ * A pending version as a reviewer reads it. Nothing in it runs: a page is
+ * rendered with its programs refused.
+ */
+export type VersionReview = {
+    /**
+     * The version's source.
+     */
+    html: string;
+    kind: 'artifact';
+    /**
+     * The page to render with programs refused, or why it doesn't build.
+     */
+    page: DocumentBuildResponse;
+    /**
+     * The version.
+     */
+    pending: PendingVersion;
+} | {
+    /**
+     * What it asks of installs beyond the newest approved version, or
+     * no longer asks; all of it for a new listing.
+     */
+    interfaceChanges: Array<InterfaceChange>;
+    kind: 'routine';
+    /**
+     * The version.
+     */
+    pending: PendingVersion;
+    /**
+     * The routine as installs would get it, before filling in.
+     */
+    routine: RoutineSnapshot;
+};
 
 /**
  * A client-minted id deduplicates warm calls without creating a conversation.
@@ -6068,6 +6242,84 @@ export type PublishMarketplaceListingVersionResponses = {
 };
 
 export type PublishMarketplaceListingVersionResponse = PublishMarketplaceListingVersionResponses[keyof PublishMarketplaceListingVersionResponses];
+
+export type ListMarketplacePendingVersionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/marketplace/review';
+};
+
+export type ListMarketplacePendingVersionsErrors = {
+    401: unknown;
+    403: ErrorResponse;
+    404: unknown;
+    500: unknown;
+};
+
+export type ListMarketplacePendingVersionsError = ListMarketplacePendingVersionsErrors[keyof ListMarketplacePendingVersionsErrors];
+
+export type ListMarketplacePendingVersionsResponses = {
+    200: PendingVersions;
+};
+
+export type ListMarketplacePendingVersionsResponse = ListMarketplacePendingVersionsResponses[keyof ListMarketplacePendingVersionsResponses];
+
+export type GetMarketplaceVersionReviewData = {
+    body?: never;
+    path: {
+        /**
+         * A listing with a version waiting for review
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/review/{id}';
+};
+
+export type GetMarketplaceVersionReviewErrors = {
+    401: unknown;
+    403: ErrorResponse;
+    404: unknown;
+    500: unknown;
+    503: unknown;
+};
+
+export type GetMarketplaceVersionReviewError = GetMarketplaceVersionReviewErrors[keyof GetMarketplaceVersionReviewErrors];
+
+export type GetMarketplaceVersionReviewResponses = {
+    200: VersionReview;
+};
+
+export type GetMarketplaceVersionReviewResponse = GetMarketplaceVersionReviewResponses[keyof GetMarketplaceVersionReviewResponses];
+
+export type ReviewMarketplaceVersionData = {
+    body: ReviewVersion;
+    path: {
+        /**
+         * A listing with a version waiting for review
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/review/{id}';
+};
+
+export type ReviewMarketplaceVersionErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    403: ErrorResponse;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type ReviewMarketplaceVersionError = ReviewMarketplaceVersionErrors[keyof ReviewMarketplaceVersionErrors];
+
+export type ReviewMarketplaceVersionResponses = {
+    200: ReviewOutcome;
+};
+
+export type ReviewMarketplaceVersionResponse = ReviewMarketplaceVersionResponses[keyof ReviewMarketplaceVersionResponses];
 
 export type ClassifyData = {
     body: ClassifyInputRequest;

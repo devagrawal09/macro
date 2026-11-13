@@ -8,6 +8,7 @@ import type { ListingId } from './listingId';
 import type { ListingInstalledMajor } from './listingInstalledMajor';
 import type { ListingInstalledRoutine } from './listingInstalledRoutine';
 import type { ListingKind } from './listingKind';
+import type { ListingPendingVersion } from './listingPendingVersion';
 import type { ListingScope } from './listingScope';
 import type { Version } from './version';
 
@@ -28,8 +29,10 @@ export interface Listing {
   installedRoutine?: ListingInstalledRoutine;
   /** What it publishes. */
   kind: ListingKind;
-  /** Its newest version. */
+  /** Its newest approved version. A global listing not yet approved, which
+only Macro's publishers see, shows the version waiting for review. */
   latestVersion: Version;
+  pendingVersion?: ListingPendingVersion;
   /** Who published it. */
   publisher: string;
   /** Unlisted: only those who installed it still see it. */

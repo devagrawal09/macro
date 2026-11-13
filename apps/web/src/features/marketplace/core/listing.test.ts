@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasApprovedVersion,
   isInstalled,
   isPublisher,
   type Listing,
@@ -45,6 +46,16 @@ describe('marketplace listings', () => {
     expect(updateAvailable(listing({ latestVersion, installedMajor: 1 }))).toBe(
       true
     );
+  });
+
+  it('has an approved version unless its first one waits for review', () => {
+    expect(hasApprovedVersion(listing())).toBe(true);
+    expect(
+      hasApprovedVersion(listing({ pendingVersion: { major: 1, minor: 1 } }))
+    ).toBe(true);
+    expect(
+      hasApprovedVersion(listing({ pendingVersion: { major: 1, minor: 0 } }))
+    ).toBe(false);
   });
 
   it('knows a listing’s publisher', () => {

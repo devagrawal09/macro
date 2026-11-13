@@ -1,3 +1,4 @@
+import type { PendingVersion } from '@service-agent-harness/generated/schemas';
 import {
   cleanup,
   fireEvent,
@@ -14,6 +15,7 @@ import type {
   ListingsFilter,
   MarketplaceRoutines,
   MarketplaceSource,
+  PendingList,
 } from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
@@ -56,14 +58,43 @@ function fakeSource(
       loadMoreFailed: () => false,
       loadMore: vi.fn(async () => {}),
       retry: vi.fn(async () => {}),
+      globalPublisher: () => false,
       ...list,
     }),
     install: vi.fn(async (id: string) => listing({ id, installedMajor: 1 })),
     uninstall: vi.fn(async () => {}),
     unlist: vi.fn(async () => {}),
+    pending: () => fakePending([]),
+    review: vi.fn<MarketplaceSource['review']>(async (_id, request) => ({
+      state: request.decision === 'approve' ? 'approved' : 'rejected',
+      updates: { updated: 0, detached: 0, failed: 0 },
+    })),
     ...overrides,
+  } satisfies MarketplaceSource;
+}
+
+function fakePending(versions: PendingVersion[]): PendingList {
+  return {
+    versions: () => versions,
+    loading: () => false,
+    failed: () => false,
+    retry: vi.fn(async () => {}),
   };
 }
+
+const pendingVersion = (
+  overrides: Partial<PendingVersion> = {}
+): PendingVersion => ({
+  listingId: 'board',
+  kind: 'artifact',
+  title: 'Launch board',
+  description: 'Tracks launches.',
+  publisher: 'macro|ada@example.com',
+  version: { major: 1, minor: 1 },
+  approvedVersion: { major: 1, minor: 0 },
+  publishedAt: '2026-11-01T10:00:00Z',
+  ...overrides,
+});
 
 function fakeRoutines(
   overrides: Partial<MarketplaceRoutines> = {}
@@ -71,6 +102,7 @@ function fakeRoutines(
   return {
     fill: vi.fn(async () => ({ timezone: 'America/New_York', enabled: false })),
     open: vi.fn(),
+    triggerLines: () => [],
     ...overrides,
   };
 }
@@ -409,6 +441,131 @@ describe('Marketplace', () => {
         enabled: false,
         variables: { board: 'choice' },
       });
+    });
+  });
+
+  describe('global listings and review', () => {
+    it('shows a pending version to a publisher and offers no Install before approval', () => {
+      const source = fakeSource(
+        () => [
+          listing({
+            id: 'board',
+            scope: { kind: 'global' },
+            latestVersion: { major: 1, minor: 0 },
+            pendingVersion: { major: 1, minor: 0 },
+          }),
+        ],
+        {},
+        { globalPublisher: () => true }
+      );
+      renderMarketplace(source);
+
+      const card = screen.getByRole('article', {
+        name: 'Marketplace page: Launch dashboard',
+      });
+      expect(within(card).getByText('Macro')).toBeTruthy();
+      expect(within(card).getByText('v1.0 in review')).toBeTruthy();
+      expect(
+        within(card).queryByRole('button', { name: 'Install' })
+      ).toBeNull();
+    });
+
+    it('offers Review only to Macro’s publishers', () => {
+      renderMarketplace(fakeSource(() => []));
+      expect(screen.queryByRole('radio', { name: 'Review' })).toBeNull();
+      cleanup();
+
+      renderMarketplace(
+        fakeSource(() => [], {}, { globalPublisher: () => true })
+      );
+      expect(screen.getByRole('radio', { name: 'Review' })).toBeTruthy();
+    });
+
+    it('approves another publisher’s version, and never one’s own', async () => {
+      const source = fakeSource(
+        () => [],
+        {
+          pending: () =>
+            fakePending([
+              pendingVersion(),
+              pendingVersion({
+                listingId: 'mine',
+                title: 'My digest',
+                kind: 'routine',
+                publisher: 'macro|grace@example.com',
+                version: { major: 1, minor: 0 },
+                approvedVersion: undefined,
+              }),
+            ]),
+        },
+        { globalPublisher: () => true }
+      );
+      renderMarketplace(source);
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Review' }));
+      const mine = screen.getByRole('article', {
+        name: 'Waiting for review: My digest v1.0',
+      });
+      expect(within(mine).getByText('New listing')).toBeTruthy();
+      expect(
+        within(mine)
+          .getByRole('button', { name: 'Approve' })
+          .hasAttribute('disabled')
+      ).toBe(true);
+      expect(
+        within(mine)
+          .getByRole('button', { name: 'Reject' })
+          .hasAttribute('disabled')
+      ).toBe(true);
+
+      const theirs = screen.getByRole('article', {
+        name: 'Waiting for review: Launch board v1.1',
+      });
+      expect(within(theirs).getByText('Update from v1.0')).toBeTruthy();
+      fireEvent.click(within(theirs).getByRole('button', { name: 'Approve' }));
+      await vi.waitFor(() =>
+        expect(source.review).toHaveBeenCalledWith(
+          'board',
+          {
+            version: { major: 1, minor: 1 },
+            decision: 'approve',
+            reason: undefined,
+          },
+          expect.anything()
+        )
+      );
+    });
+
+    it('rejects a version with the reason the reviewer gives', async () => {
+      const source = fakeSource(
+        () => [],
+        { pending: () => fakePending([pendingVersion()]) },
+        { globalPublisher: () => true }
+      );
+      renderMarketplace(source);
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Review' }));
+      const card = screen.getByRole('article', {
+        name: 'Waiting for review: Launch board v1.1',
+      });
+      fireEvent.click(within(card).getByRole('button', { name: 'Reject' }));
+      fireEvent.input(
+        within(card).getByRole('textbox', { name: 'Reason (optional)' }),
+        { target: { value: '  It shows internal data.  ' } }
+      );
+      fireEvent.click(within(card).getByRole('button', { name: 'Reject' }));
+
+      await vi.waitFor(() =>
+        expect(source.review).toHaveBeenCalledWith(
+          'board',
+          {
+            version: { major: 1, minor: 1 },
+            decision: 'reject',
+            reason: 'It shows internal data.',
+          },
+          expect.anything()
+        )
+      );
     });
   });
 });

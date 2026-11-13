@@ -12,4 +12,10 @@ export const marketplaceKeys = createQueryKeys('marketplace', {
   routine: (listingId: string) => ({
     queryKey: [listingId],
   }),
+  /** The versions waiting for review. */
+  pendingVersions: null,
+  /** One pending version as a reviewer reads it. */
+  review: (listingId: string) => ({
+    queryKey: [listingId],
+  }),
 });

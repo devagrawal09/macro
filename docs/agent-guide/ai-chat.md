@@ -528,7 +528,8 @@ the shimmer.
   installed routine goes to Agents → Routines instead, closing the settings
   sheet on a phone. On touch the
   tabs, card buttons, **More actions** (which opens by tap) and its rows are
-  44px.
+  44px. Macro's own listings (badge **Macro**) are reviewed first: see
+  [Marketplace review](#marketplace-review).
 - Ask the agent to connect an MCP server by URL (for example "connect the MCP
   server at https://mcp.example.com/mcp"). It calls **ConnectMcpServer**, which
   adds a public `https` server to Connections and renders a **Connected MCP
@@ -2802,3 +2803,41 @@ require an intentional CLI refresh; ordinary memory reads do not invoke a model.
 Opening a row clears its unread state immediately; direct details mark read when
 ready. See [reading items](notifications.md#reading-items) for failure, keyboard,
 mobile, and email inbox checks.
+
+## Marketplace review
+
+Members of Macro's publisher team (the harness's
+`MARKETPLACE_PUBLISHER_TEAM_ID`; unset, nobody) publish pages and routines to
+everyone, and each such version waits for a second member's approval:
+
+- The listings response's `globalPublisher` says whether the viewer is one.
+  Only then does the publish dialog (from an HTML page's file menu or a
+  routine's menu) show **My team** / **Everyone (Macro)** on a first publish
+  (`POST /marketplace/listings` with `scope: "global"`); the toast says
+  **Sent … for review**. An update to a global listing says another publisher
+  reviews it; while one version waits, the dialog says so and won't publish
+  another (`409`).
+- Until approved, a version exists only for publishers: Browse and Installed
+  show other people the newest approved version, installs build and update
+  from it, and a new global listing is invisible to them. Publishers see the
+  card's **v1.1 in review** badge, and a new listing without **Install**.
+- Publishers get a **Review** tab (`GET /marketplace/review`) listing pending
+  versions oldest first: title, kind, version, **New listing** or **Update
+  from v1.0**, and **Preview**, **Reject**, **Approve**. Both decisions are
+  disabled on your own version ("another publisher reviews it"). **Reject**
+  opens a **Reason (optional)** field and a second **Reject**
+  (`POST /marketplace/review/{id}` with `{ version, decision, reason }`).
+  Approving sends the minor routine updates and live version messages
+  installers would have had on publish; rejecting a new listing's first
+  version unlists it, so its source can be published again.
+- **Preview** (`GET /marketplace/review/{id}`) replaces the tabs, with
+  **Back**. A page shows "Programs are turned off while you review", its
+  **Programs** ids, the **Page** rendered with every run refused, and its
+  **Source**. A routine shows its name, **What it asks of installs** (the
+  interface changes against the newest approved version, or all of it for a
+  new listing), **Starts**, **Required apps** and **Steps** (code and
+  instructions as text).
+- To verify, set `MARKETPLACE_PUBLISHER_TEAM_ID` to a local team with two
+  members: publish to everyone as one, check a third account outside the
+  team can't see it, then approve as the other member.
+

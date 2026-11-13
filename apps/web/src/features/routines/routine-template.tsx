@@ -56,7 +56,8 @@ import { ActivateTemplateDialog } from './views/activate-template-dialog';
 import { RoutineTemplateView } from './views/routine-template-view';
 import { ShareRoutineDialog } from './views/share-template-dialog';
 
-function triggerLines(trigger: ActionTrigger): string[] {
+/** A routine's trigger as people read it, one line per trigger. */
+export function routineTriggerLines(trigger: ActionTrigger): string[] {
   return (parseRoutineTriggers(trigger) ?? []).map(describeTrigger);
 }
 
@@ -172,7 +173,7 @@ function ActivateTemplate(
       authorName={
         getDisplayName(tryMacroId(props.template.author)) || 'its author'
       }
-      triggers={triggerLines(props.template.trigger)}
+      triggers={routineTriggerLines(props.template.trigger)}
       instructions={
         <TemplateWork
           task={activation.request()?.task ?? props.template.task}
@@ -255,7 +256,7 @@ function FillTemplate(
       actionLabel={props.labels.action}
       pendingLabel={props.labels.pending}
       footnote={props.labels.footnote}
-      triggers={triggerLines(props.template.trigger)}
+      triggers={routineTriggerLines(props.template.trigger)}
       instructions={
         <TemplateWork
           task={activation.request()?.task ?? props.template.task}
@@ -406,7 +407,7 @@ function EnabledRoutineTemplatePage(props: {
                 getDisplayName(tryMacroId(current().author)) || 'Someone'
               }
               canActivate={current().author !== userId()}
-              triggers={triggerLines(current().trigger)}
+              triggers={routineTriggerLines(current().trigger)}
               references={activation.references()}
               instructions={
                 <TemplateWork
@@ -571,7 +572,7 @@ export function RoutineTemplateCard(props: { routineId: string }) {
           authorName={
             getDisplayName(tryMacroId(template().author)) || 'Someone'
           }
-          triggers={triggerLines(template().trigger)}
+          triggers={routineTriggerLines(template().trigger)}
           activeCount={template().active_count}
           canActivate={template().author !== userId()}
           onView={() => open(template().id)}

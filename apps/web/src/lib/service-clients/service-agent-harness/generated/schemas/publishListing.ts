@@ -4,7 +4,9 @@
  * agent_harness_service
  * OpenAPI spec version: 0.1.0
  */
+
 import type { ListingSource } from './listingSource';
+import type { PublishScope } from './publishScope';
 
 /**
  * Publish a page or routine to the caller's team.
@@ -12,6 +14,9 @@ import type { ListingSource } from './listingSource';
 export interface PublishListing {
   /** What it does, in a few lines. */
   description?: string;
+  /** Who sees it: the caller's team (the default), or everyone once
+another member of Macro's publisher team approves it. */
+  scope?: PublishScope;
   /** What it is published from. */
   source: ListingSource;
   /** The listing's name. */

@@ -36,12 +36,15 @@ import type {
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
   MarketplaceListings,
+  PendingVersions,
   PreviewAgentSessionsResponse,
   PublishedVersion,
   PublishListing,
   PublishListingVersion,
   PullRequestSessionsResponse,
   PullRequestsSessionsResponse,
+  ReviewOutcome,
+  ReviewVersion,
   RunDocumentProgram,
   SandboxSize,
   SandboxSizeBody,
@@ -52,6 +55,7 @@ import type {
   ToolApprovalAnswerDto,
   UpdateSharePermissionRequestV2,
   UserExecutionReceipt,
+  VersionReview,
   WarmAgentSessionResponse,
 } from './generated/schemas';
 import {
@@ -68,6 +72,7 @@ export type {
   InstallListing,
   PublishListing,
   PublishListingVersion,
+  ReviewVersion,
   RunDocumentProgram,
   SandboxSize,
   SandboxSizeBody,
@@ -616,7 +621,11 @@ export const agentHarnessServiceClient = {
     );
   },
 
-  /** Publish a stored HTML document or a routine the caller owns to their team, as 1.0. */
+  /**
+   * Publish a stored HTML document or a routine the caller owns, as 1.0: to
+   * their team, or with `scope: 'global'` to everyone once another of
+   * Macro's publishers approves it.
+   */
   publishListing(request: PublishListing) {
     return fetchWithToken<Listing, PublishListingErrorCode>(
       `${agentHarnessHost}/marketplace/listings`,
@@ -721,6 +730,38 @@ export const agentHarnessServiceClient = {
         body: JSON.stringify(request),
         signal,
         errorResponseHandler: documentProgramError,
+      }
+    );
+  },
+
+  /** The versions waiting for review: Macro's publishers only. */
+  listPendingVersions(signal?: AbortSignal) {
+    return fetchWithToken<PendingVersions>(
+      `${agentHarnessHost}/marketplace/review`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /**
+   * A listing's pending version as a reviewer reads it: a page's build and
+   * source, or a routine's snapshot and interface changes. Nothing runs.
+   */
+  getVersionReview(listingId: string, signal?: AbortSignal) {
+    return fetchWithToken<VersionReview>(
+      `${agentHarnessHost}/marketplace/review/${listingId}`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
+    );
+  },
+
+  /** Approve or reject a listing's pending version; never one's own. */
+  reviewVersion(listingId: string, request: ReviewVersion) {
+    return fetchWithToken<ReviewOutcome>(
+      `${agentHarnessHost}/marketplace/review/${listingId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        errorResponseHandler: marketplaceError,
       }
     );
   },

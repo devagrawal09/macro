@@ -49,10 +49,13 @@ export const agentHarnessBacklog = [
   // The marketplace is a prototype: its routes may still change shape.
   'getInstalledListingBuild',
   'getMarketplaceListingRoutine',
+  'getMarketplaceVersionReview',
   'installMarketplaceListing',
   'listMarketplaceListings',
+  'listMarketplacePendingVersions',
   'publishMarketplaceListing',
   'publishMarketplaceListingVersion',
+  'reviewMarketplaceVersion',
   'uninstallMarketplaceListing',
   'unlistMarketplaceListing',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];

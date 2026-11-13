@@ -71,5 +71,22 @@ export function installedRoutineState(
   return routine.updateFailed ? 'update_failed' : 'following';
 }
 
-/** The two lists of the marketplace page. */
-export type MarketplaceTab = 'browse' | 'installed';
+/**
+ * Whether the listing has a version people may install. A global listing
+ * whose first version waits for review, which only Macro's publishers see,
+ * has none.
+ */
+export function hasApprovedVersion(listing: Listing): boolean {
+  const pending = listing.pendingVersion;
+  return (
+    !pending ||
+    pending.major !== listing.latestVersion.major ||
+    pending.minor !== listing.latestVersion.minor
+  );
+}
+
+/**
+ * The lists of the marketplace page. Review shows only to Macro's
+ * publishers.
+ */
+export type MarketplaceTab = 'browse' | 'installed' | 'review';

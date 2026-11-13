@@ -11,6 +11,9 @@ import type { MarketplaceListingsNextCursor } from './marketplaceListingsNextCur
  * A page of the listings the caller may see.
  */
 export interface MarketplaceListings {
+  /** The caller belongs to Macro's publisher team: they may publish to
+everyone and review other publishers' versions. */
+  globalPublisher: boolean;
   /** Their team's and everyone's, newest first. */
   listings: Listing[];
   /** Send as `cursor` for the next page; absent on the last page. */

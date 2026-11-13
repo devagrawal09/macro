@@ -30,6 +30,7 @@ import type {
 import type { Listing, ListingKind } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { marketplaceKeys } from './keys';
+import { createPendingList, useReviewVersionMutation } from './review';
 
 export type { PublishListingErrorCode };
 
@@ -210,7 +211,10 @@ export function useUnlistListingMutation(
   }));
 }
 
-/** Publishes a stored HTML document or a routine to the viewer's team, as 1.0. */
+/**
+ * Publishes a stored HTML document or a routine as 1.0: to the viewer's
+ * team, or to everyone once another of Macro's publishers approves it.
+ */
 export function usePublishListingMutation(
   callbacks?: MutationCallbacks<Listing, Error, PublishAction>
 ) {
@@ -224,15 +228,27 @@ export function usePublishListingMutation(
         onSuccess: async (listing) => {
           // Its source now has this listing: publishing it again offers an
           // update before the refetch lands.
+          const key = marketplaceKeys.listings(
+            sourceListingRequest(listing.kind, listing.sourceId)
+          ).queryKey;
           queryClient.setQueryData<
             InfiniteData<MarketplaceListings, string | undefined>
-          >(
-            marketplaceKeys.listings(
-              sourceListingRequest(listing.kind, listing.sourceId)
-            ).queryKey,
-            { pages: [{ listings: [listing] }], pageParams: [undefined] }
-          );
-          await invalidateListings();
+          >(key, (current) => ({
+            pages: [
+              {
+                listings: [listing],
+                globalPublisher: current?.pages[0]?.globalPublisher ?? false,
+              },
+            ],
+            pageParams: [undefined],
+          }));
+          await Promise.all([
+            invalidateListings(),
+            // A global listing waits for review.
+            queryClient.invalidateQueries({
+              queryKey: marketplaceKeys.pendingVersions.queryKey,
+            }),
+          ]);
         },
       },
       callbacks
@@ -276,9 +292,13 @@ export function usePublishListingVersionMutation(
       {
         onSuccess: async ({ listing }) => {
           setListing(listing);
-          // A minor version replaces the page every install shows.
+          // A minor version replaces the page every install shows; a global
+          // one waits for review first.
           await Promise.all([
             invalidateListings(),
+            queryClient.invalidateQueries({
+              queryKey: marketplaceKeys.pendingVersions.queryKey,
+            }),
             queryClient.invalidateQueries({
               queryKey: marketplaceKeys.installedBuild(listing.id).queryKey,
             }),
@@ -320,6 +340,8 @@ function createListingList(
     retry: async () => {
       await query.refetch();
     },
+    globalPublisher: () =>
+      !query.isPending && (query.data?.pages[0]?.globalPublisher ?? false),
   };
 }
 
@@ -330,6 +352,7 @@ export function createMarketplaceSource(
   const install = useInstallListingMutation();
   const uninstall = useUninstallListingMutation();
   const unlist = useUnlistListingMutation();
+  const review = useReviewVersionMutation();
 
   return {
     list: (filter) => createListingList(filter, enabled),
@@ -339,5 +362,9 @@ export function createMarketplaceSource(
       uninstall.mutateAsync({ listingId, parentSpan }),
     unlist: (listingId, parentSpan) =>
       unlist.mutateAsync({ listingId, parentSpan }),
+    pending: (pendingEnabled) =>
+      createPendingList(() => enabled() && pendingEnabled()),
+    review: (listingId, request, parentSpan) =>
+      review.mutateAsync({ listingId, request, parentSpan }),
   };
 }

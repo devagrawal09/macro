@@ -9,7 +9,7 @@ import type { Listing } from '../core/listing';
 import type { MarketplaceListView } from '../primitives/marketplace-list';
 
 /** The card grid: as many 15rem columns as fit, like the routine templates. */
-function CardGrid(props: {
+export function CardGrid(props: {
   role?: 'list';
   label?: string;
   children: JSX.Element;
