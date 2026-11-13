@@ -4,7 +4,7 @@ import {
   isPublisher,
   type Listing,
   listingsForTab,
-  ownListingForDocument,
+  ownListingForSource,
   updateAvailable,
   versionLabel,
 } from './listing';
@@ -14,7 +14,7 @@ const listing = (overrides: Partial<Listing> = {}): Listing => ({
   kind: 'artifact',
   scope: { kind: 'team', teamId: 'team' },
   publisher: 'macro|ada@example.com',
-  sourceDocumentId: 'document',
+  sourceId: 'document',
   title: 'Launch dashboard',
   description: '',
   latestVersion: { major: 1, minor: 0 },
@@ -74,17 +74,28 @@ describe('marketplace listings', () => {
   it('finds the live listing a person publishes a document’s versions to', () => {
     const mine = listing({ id: 'mine' });
     const listings = [
-      listing({ id: 'other-document', sourceDocumentId: 'other' }),
+      listing({ id: 'other-document', sourceId: 'other' }),
+      listing({ id: 'a-routine', kind: 'routine' }),
       listing({ id: 'unlisted', removed: true }),
       listing({ id: 'theirs', publisher: 'macro|grace@example.com' }),
       mine,
     ];
 
     expect(
-      ownListingForDocument(listings, 'document', 'macro|ada@example.com')
+      ownListingForSource(
+        listings,
+        'artifact',
+        'document',
+        'macro|ada@example.com'
+      )
     ).toBe(mine);
     expect(
-      ownListingForDocument(listings, 'document', 'macro|linus@example.com')
+      ownListingForSource(
+        listings,
+        'artifact',
+        'document',
+        'macro|linus@example.com'
+      )
     ).toBeUndefined();
   });
 });

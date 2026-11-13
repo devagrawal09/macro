@@ -10,6 +10,7 @@ import DotsIcon from '@icon/system/regular/dots-three.svg';
 import ShareIcon from '@icon/system/regular/share-network.svg';
 import SparkleIcon from '@icon/system/regular/sparkle.svg';
 import TrashIcon from '@icon/system/regular/trash-simple.svg';
+import UploadIcon from '@icon/system/regular/upload-simple.svg';
 import { Button, cn, Dropdown, ToggleSwitch, Tooltip } from '@ui';
 import { type Accessor, createSignal, Match, Show, Switch } from 'solid-js';
 import { CodeReviewNotice } from '../components/routine-code-review';
@@ -123,6 +124,8 @@ export function RoutineDetailView(props: {
   onDelete(): void;
   onCopyPrompt(prompt: string): Promise<void>;
   onShare?(): void;
+  /** Publishes it to the team marketplace, where the marketplace is on. */
+  onPublish?(): void;
   /** Opens an agent conversation about this routine. */
   onCompose?(): void;
   onOpenTemplate?(templateId: string): void;
@@ -271,6 +274,14 @@ export function RoutineDetailView(props: {
                         <ShareIcon class="size-4" />
                         Share
                       </Dropdown.Item>
+                    </Show>
+                    <Show when={props.onPublish}>
+                      {(publish) => (
+                        <Dropdown.Item onSelect={publish()}>
+                          <UploadIcon class="size-4" />
+                          {t('marketplace.publishAction')}
+                        </Dropdown.Item>
+                      )}
                     </Show>
                     <Show when={routine().parent}>
                       <Dropdown.Item

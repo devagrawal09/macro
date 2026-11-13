@@ -1,14 +1,74 @@
+import { openAgentsPage } from '@app/features/agents-view/primitives/open-page';
+import { variableKey } from '@app/features/routines/core/template';
+import { openFillTemplateDialog } from '@app/features/routines/routine-template';
 import { t } from '@app/lib/i18n';
+import { useSplitLayout } from '@components/app/split-layout/layout';
 import { useUserId } from '@core/context/user';
 import { idToDisplayName } from '@core/user';
 import EmptyStateNoAccessGraphic from '@design/empty-state-no-access.svg';
 import { useIsTeamAdmin } from '@queries/team/teams';
 import { EmptyStatePanel } from '@ui';
-import { Match, Switch } from 'solid-js';
+import { getOwner, Match, Switch } from 'solid-js';
 import { ListingsSkeleton } from './components/listing-grid';
-import { createMarketplaceSource } from './queries/listings';
+import type {
+  MarketplaceRoutines,
+  RoutineFillRequest,
+} from './context/marketplace-source';
+import { installFills } from './core/routine-fills';
+import {
+  createMarketplaceSource,
+  fetchListingRoutine,
+} from './queries/listings';
 import { useMarketplaceFlag } from './use-marketplace-flag';
 import { MarketplaceView } from './views/marketplace-view';
+
+/**
+ * Routine listings over the routines feature: its template dialog asks for
+ * fills, and an installed routine opens in Agents → Routines.
+ */
+function createMarketplaceRoutines(): MarketplaceRoutines {
+  const owner = getOwner();
+  const layout = useSplitLayout();
+
+  const fill = async ({ listing, missing }: RoutineFillRequest) => {
+    const { routine } = await fetchListingRoutine(listing.id);
+    const only = missing && new Set(missing.map(variableKey));
+    const update = only !== undefined;
+    const filled = await openFillTemplateDialog({
+      template: routine,
+      only,
+      labels: {
+        title: update
+          ? t('marketplace.fillUpdateTitle', { title: listing.title })
+          : t('marketplace.fillInstallTitle', { title: listing.title }),
+        byline: t('marketplace.fillByline', {
+          name: idToDisplayName(listing.publisher),
+        }),
+        action: update
+          ? t('marketplace.fillUpdate')
+          : t('marketplace.fillInstall'),
+        pending: update
+          ? t('marketplace.fillUpdating')
+          : t('marketplace.fillInstalling'),
+        footnote: t('marketplace.fillFootnote'),
+      },
+      owner,
+      key: `marketplace-fill:${listing.id}`,
+    });
+    if (!filled) return undefined;
+
+    // A new major keeps the time zone stored at install.
+    return installFills({
+      decisions: filled.decisions,
+      timezone: update ? undefined : filled.timezone,
+    });
+  };
+
+  return {
+    fill,
+    open: (routineId) => openAgentsPage(layout, 'routines', { routineId }),
+  };
+}
 
 function Marketplace() {
   const flag = useMarketplaceFlag();
@@ -17,10 +77,12 @@ function Marketplace() {
   const source = createMarketplaceSource(
     () => flag().enabled && Boolean(userId())
   );
+  const routines = createMarketplaceRoutines();
 
   return (
     <MarketplaceView
       source={source}
+      routines={routines}
       userId={userId()}
       isTeamAdmin={isTeamAdmin}
       publisherName={idToDisplayName}

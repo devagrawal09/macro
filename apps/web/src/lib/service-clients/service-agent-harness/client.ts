@@ -29,11 +29,14 @@ import type {
   DocumentBuildResponse,
   ExecutionRecord,
   InstalledListingBuild,
+  InstallListing,
   Listing,
+  ListingRoutine,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
   MarketplaceListings,
   PreviewAgentSessionsResponse,
+  PublishedVersion,
   PublishListing,
   PublishListingVersion,
   PullRequestSessionsResponse,
@@ -44,6 +47,7 @@ import type {
   SessionAutoArchiveResponse,
   SessionPullRequestsResponse,
   SharePermissionV2,
+  TemplateVariable,
   ToolApprovalAnswerDto,
   UpdateSharePermissionRequestV2,
   UserExecutionReceipt,
@@ -60,6 +64,7 @@ export type {
   AutoArchivePreferencesBody,
   CodingPreferencesBody,
   DocumentBuildResponse,
+  InstallListing,
   PublishListing,
   PublishListingVersion,
   RunDocumentProgram,
@@ -117,6 +122,60 @@ export type PublishListingErrorCode =
   | 'PUBLISH_CONFLICT'
   | 'PAGE_UNCHANGED'
   | 'PAGE_DOES_NOT_BUILD';
+
+/**
+ * A routine install the server can't fill in yet: `missing` are the
+ * variables to ask the person about, then send again.
+ */
+export type MissingRoutineFillsError = {
+  code: 'ROUTINE_MISSING_FILLS';
+  message: string;
+  missing: TemplateVariable[];
+};
+
+/** Whether a failed install asks for routine fills. */
+export function isMissingRoutineFills(
+  error: unknown
+): error is MissingRoutineFillsError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ROUTINE_MISSING_FILLS' &&
+    'missing' in error &&
+    Array.isArray(error.missing)
+  );
+}
+
+/** An install's errors: a 422 lists the routine's variables needing fills. */
+const installListingError: ErrorResponseHandler<
+  'ROUTINE_MISSING_FILLS'
+> = async (response) => {
+  if (
+    response.status !== 422 ||
+    !response.headers.get('content-type')?.includes('application/json')
+  )
+    return marketplaceError(response);
+
+  const body: unknown = await response.json();
+  const missing =
+    typeof body === 'object' && body !== null && 'missing' in body
+      ? body.missing
+      : undefined;
+  const message =
+    typeof body === 'object' &&
+    body !== null &&
+    'message' in body &&
+    typeof body.message === 'string'
+      ? body.message
+      : 'This routine needs a few choices first.';
+  const error: MissingRoutineFillsError = {
+    code: 'ROUTINE_MISSING_FILLS',
+    message,
+    missing: Array.isArray(missing) ? missing : [],
+  };
+  return error;
+};
 
 /** The marketplace answers its refusals as JSON `{ message }`. */
 async function marketplaceMessage(response: Response): Promise<string> {
@@ -544,7 +603,7 @@ export const agentHarnessServiceClient = {
     );
   },
 
-  /** Publish a stored HTML document the caller owns to their team, as 1.0. */
+  /** Publish a stored HTML document or a routine the caller owns to their team, as 1.0. */
   publishListing(request: PublishListing) {
     return fetchWithToken<Listing, PublishListingErrorCode>(
       `${agentHarnessHost}/marketplace/listings`,
@@ -557,9 +616,13 @@ export const agentHarnessServiceClient = {
     );
   },
 
-  /** Publish a listing's page, as it is stored now, as its next version. */
+  /**
+   * Publish a listing's source, as it is stored now, as its next version.
+   * The answer says which bump applied: a routine that asks something new of
+   * its installs is always a major version.
+   */
   publishListingVersion(listingId: string, request: PublishListingVersion) {
-    return fetchWithToken<Listing, PublishListingErrorCode>(
+    return fetchWithToken<PublishedVersion, PublishListingErrorCode>(
       `${agentHarnessHost}/marketplace/listings/${listingId}/versions`,
       {
         method: 'POST',
@@ -578,11 +641,30 @@ export const agentHarnessServiceClient = {
     ).then((result) => result.map(() => undefined));
   },
 
-  /** Install a listing, or move the caller's install to its newest major. */
-  installListing(listingId: string) {
-    return fetchWithToken<Listing>(
+  /**
+   * Install a listing, or move the caller's install to its newest major. A
+   * routine is filled in from `request` and the fills stored before; a 422
+   * (`ROUTINE_MISSING_FILLS`) lists the variables still to ask about.
+   */
+  installListing(listingId: string, request?: InstallListing) {
+    return fetchWithToken<Listing, 'ROUTINE_MISSING_FILLS'>(
       `${agentHarnessHost}/marketplace/listings/${listingId}/install`,
-      { method: 'PUT', errorResponseHandler: marketplaceError }
+      {
+        method: 'PUT',
+        ...(request && {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        }),
+        errorResponseHandler: installListingError,
+      }
+    );
+  },
+
+  /** A routine listing's newest version, to fill in before installing it. */
+  getMarketplaceListingRoutine(listingId: string, signal?: AbortSignal) {
+    return fetchWithToken<ListingRoutine>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/routine`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
     );
   },
 

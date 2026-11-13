@@ -7,8 +7,12 @@ import {
 } from '@solidjs/testing-library';
 import { createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MarketplaceSource } from '../context/marketplace-source';
+import type {
+  MarketplaceRoutines,
+  MarketplaceSource,
+} from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
+import { MissingRoutineFills } from '../core/routine-fills';
 import { MarketplaceView } from './marketplace-view';
 
 afterEach(cleanup);
@@ -18,7 +22,7 @@ const listing = (overrides: Partial<Listing>): Listing => ({
   kind: 'artifact',
   scope: { kind: 'team', teamId: 'team' },
   publisher: 'macro|ada@example.com',
-  sourceDocumentId: 'document',
+  sourceId: 'document',
   title: 'Launch dashboard',
   description: 'Tracks the launch.',
   latestVersion: { major: 1, minor: 0 },
@@ -45,10 +49,24 @@ function fakeSource(
   };
 }
 
-function renderMarketplace(source: MarketplaceSource) {
+function fakeRoutines(
+  overrides: Partial<MarketplaceRoutines> = {}
+): MarketplaceRoutines {
+  return {
+    fill: vi.fn(async () => ({ timezone: 'America/New_York', enabled: false })),
+    open: vi.fn(),
+    ...overrides,
+  };
+}
+
+function renderMarketplace(
+  source: MarketplaceSource,
+  routines: MarketplaceRoutines = fakeRoutines()
+) {
   render(() => (
     <MarketplaceView
       source={source}
+      routines={routines}
       userId="macro|grace@example.com"
       isTeamAdmin={() => false}
       publisherName={() => 'Ada Lovelace'}
@@ -128,5 +146,132 @@ describe('Marketplace', () => {
     ).getAllByRole('article');
     expect(cards).toHaveLength(1);
     expect(cards[0].textContent).toContain('Release notes');
+  });
+
+  describe('routine listings', () => {
+    const digest = (overrides: Partial<Listing> = {}) =>
+      listing({
+        id: 'digest',
+        kind: 'routine',
+        title: 'Weekly digest',
+        ...overrides,
+      });
+
+    it('marks a routine and asks for its fills before installing it', async () => {
+      const source = fakeSource(() => [digest()]);
+      const routines = fakeRoutines({
+        fill: vi.fn(async () => ({
+          timezone: 'America/New_York',
+          enabled: false,
+          variables: { board: 'shared' as const },
+        })),
+      });
+      renderMarketplace(source, routines);
+
+      const card = screen.getByRole('article', {
+        name: 'Marketplace page: Weekly digest',
+      });
+      expect(within(card).getByText('Routine')).toBeTruthy();
+
+      fireEvent.click(within(card).getByRole('button', { name: 'Install' }));
+      await vi.waitFor(() =>
+        expect(source.install).toHaveBeenCalledWith(
+          'digest',
+          expect.anything(),
+          {
+            timezone: 'America/New_York',
+            enabled: false,
+            variables: { board: 'shared' },
+          }
+        )
+      );
+      expect(routines.fill).toHaveBeenCalledWith({
+        listing: expect.objectContaining({ id: 'digest' }),
+      });
+    });
+
+    it('installs nothing when the person closes the fill dialog', async () => {
+      const source = fakeSource(() => [digest()]);
+      const routines = fakeRoutines({ fill: vi.fn(async () => undefined) });
+      renderMarketplace(source, routines);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+      await vi.waitFor(() => expect(routines.fill).toHaveBeenCalled());
+      expect(source.install).not.toHaveBeenCalled();
+    });
+
+    it('opens the routine an install made, and says when updates are paused', () => {
+      const source = fakeSource(() => [
+        digest({
+          installedMajor: 1,
+          installedRoutine: {
+            routineId: 'routine-1',
+            detached: true,
+            updateFailed: false,
+          },
+        }),
+      ]);
+      const routines = fakeRoutines();
+      renderMarketplace(source, routines);
+
+      const card = screen.getByRole('article', {
+        name: 'Marketplace page: Weekly digest',
+      });
+      expect(
+        within(card).getByText(
+          'You edited this routine, so updates are paused.'
+        )
+      ).toBeTruthy();
+
+      fireEvent.click(within(card).getByRole('button', { name: 'Open' }));
+      expect(routines.open).toHaveBeenCalledWith('routine-1');
+    });
+
+    it('asks only for what a new major added, then takes it', async () => {
+      const board = {
+        kind: 'item' as const,
+        id: 'board',
+        block_name: 'md',
+        label: 'Board',
+        fill: 'choice' as const,
+      };
+      const install = vi
+        .fn<MarketplaceSource['install']>()
+        .mockRejectedValueOnce(new MissingRoutineFills([board]))
+        .mockResolvedValueOnce(digest({ installedMajor: 2 }));
+      const source = fakeSource(
+        () => [
+          digest({
+            installedMajor: 1,
+            latestVersion: { major: 2, minor: 0 },
+            installedRoutine: {
+              routineId: 'routine-1',
+              detached: false,
+              updateFailed: false,
+            },
+          }),
+        ],
+        { install }
+      );
+      const routines = fakeRoutines({
+        fill: vi.fn(async () => ({
+          enabled: false,
+          variables: { board: 'choice' as const },
+        })),
+      });
+      renderMarketplace(source, routines);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+      await vi.waitFor(() => expect(install).toHaveBeenCalledTimes(2));
+      expect(install).toHaveBeenNthCalledWith(1, 'digest', expect.anything());
+      expect(routines.fill).toHaveBeenCalledWith({
+        listing: expect.objectContaining({ id: 'digest' }),
+        missing: [board],
+      });
+      expect(install).toHaveBeenNthCalledWith(2, 'digest', expect.anything(), {
+        enabled: false,
+        variables: { board: 'choice' },
+      });
+    });
   });
 });

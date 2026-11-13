@@ -37,9 +37,10 @@ import { StepsOutline } from './components/routine-steps-outline';
 import { TemplateCard } from './components/template-card';
 import { programSteps } from './core/routine-steps';
 import { describeTrigger } from './core/routine-triggers';
-import type { Activator } from './core/template';
+import type { Activator, ReferenceChoice } from './core/template';
 import {
   createTemplateActivation,
+  type TemplateContent,
   templatePrompt,
 } from './primitives/template-activation';
 import { parseRoutineTriggers } from './queries/routine-trigger-mapping';
@@ -187,6 +188,116 @@ function ActivateTemplate(
       onActivate={() => fireAndForget(activate(), 'routines')}
     />
   );
+}
+
+/** What a person decided while filling in a routine someone else built. */
+export type TemplateFills = {
+  /** Keep or leave out each reference they decided on, by variable key. */
+  decisions: ReadonlyMap<string, ReferenceChoice>;
+  /** Their time zone, which schedules filled in as them run in. */
+  timezone: string;
+};
+
+/** Labels for filling in a template from another surface. */
+export type FillTemplateLabels = {
+  title: string;
+  byline: string;
+  action: string;
+  pending: string;
+  footnote: string;
+};
+
+/**
+ * Filling in a template for a surface that saves the routine itself, such as
+ * a marketplace install: the same references and decisions as activating
+ * one, handed back instead of saved. With `only`, just those variables need
+ * a decision, and only their decisions are handed back.
+ */
+function FillTemplate(
+  props: ManagedDialogProps & {
+    template: TemplateContent;
+    only?: ReadonlySet<string>;
+    labels: FillTemplateLabels;
+    onFilled(fills: TemplateFills): void;
+  }
+) {
+  const activator = useActivator();
+  const access = useReferenceAccess(() =>
+    itemReferences(props.template.variables)
+  );
+  const activation = createTemplateActivation({
+    template: () => props.template,
+    activator,
+    access,
+  });
+  const asked = (key: string) => !props.only || props.only.has(key);
+  const references = () =>
+    activation.references().filter((reference) => asked(reference.key));
+  const undecided = () =>
+    activation.undecided().filter((reference) => asked(reference.key));
+
+  const submit = () => {
+    const decisions = new Map(
+      [...activation.choices()].filter(([key]) => asked(key))
+    );
+    props.onFilled({ decisions, timezone: getDefaultTimezone() });
+    props.onOpenChange(false);
+  };
+
+  return (
+    <ActivateTemplateDialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      name={props.template.name}
+      authorName=""
+      title={props.labels.title}
+      byline={props.labels.byline}
+      actionLabel={props.labels.action}
+      pendingLabel={props.labels.pending}
+      footnote={props.labels.footnote}
+      triggers={triggerLines(props.template.trigger)}
+      instructions={
+        <TemplateWork
+          task={activation.request()?.task ?? props.template.task}
+          prompt={activation.prompt()}
+        />
+      }
+      references={references()}
+      choices={activation.choices()}
+      onChoose={activation.choose}
+      undecided={undecided().length}
+      pending={false}
+      onActivate={submit}
+    />
+  );
+}
+
+/**
+ * Asks the viewer to fill in `template`; resolves with their decisions, or
+ * nothing when they close it.
+ */
+export async function openFillTemplateDialog(args: {
+  template: TemplateContent;
+  only?: ReadonlySet<string>;
+  labels: FillTemplateLabels;
+  owner: ReturnType<typeof getOwner>;
+  key: string;
+}): Promise<TemplateFills | undefined> {
+  let filled: TemplateFills | undefined;
+  const handle = openDialog<ComponentProps<typeof FillTemplate>>(
+    FillTemplate,
+    {
+      template: args.template,
+      only: args.only,
+      labels: args.labels,
+      onFilled: (fills) => {
+        filled = fills;
+      },
+    },
+    { owner: args.owner, key: args.key }
+  );
+  await handle.closed;
+  return filled;
 }
 
 /** Opens activation for a template; `onActivated` gets the new routine. */

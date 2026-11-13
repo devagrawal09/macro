@@ -88,6 +88,14 @@ export function ActivateTemplateDialog(props: {
   pending: boolean;
   error?: string;
   onActivate(): void;
+  /** In place of “Activate for me: {name}”, by another surface. */
+  title?: string;
+  /** In place of “Template by {author}”. */
+  byline?: string;
+  actionLabel?: string;
+  pendingLabel?: string;
+  /** In place of the line saying the routine runs on its own schedule. */
+  footnote?: string;
 }) {
   const byState = (...states: TemplateReference['state'][]) =>
     props.references.filter((reference) => states.includes(reference.state));
@@ -103,10 +111,10 @@ export function ActivateTemplateDialog(props: {
         <ActionDialogShell hideBorder class="max-h-[85dvh] bg-transparent">
           <ActionDialogShell.Header class="flex flex-wrap items-center gap-2 space-y-0 border-b border-edge-divider px-5 py-3">
             <ActionDialogShell.Title class="text-base">
-              Activate for me: {props.name}
+              {props.title ?? `Activate for me: ${props.name}`}
             </ActionDialogShell.Title>
             <Badge variant="outline" size="xs">
-              Template by {props.authorName}
+              {props.byline ?? `Template by ${props.authorName}`}
             </Badge>
           </ActionDialogShell.Header>
           <div class="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[3fr_2fr]">
@@ -192,7 +200,8 @@ export function ActivateTemplateDialog(props: {
                 fallback={
                   props.undecided > 0
                     ? `Decide on ${props.undecided} ${props.undecided === 1 ? 'reference' : 'references'} to activate.`
-                    : 'Your routine runs as you, on its own schedule.'
+                    : (props.footnote ??
+                      'Your routine runs as you, on its own schedule.')
                 }
               >
                 {(error) => <span class="text-failure">{error()}</span>}
@@ -210,7 +219,9 @@ export function ActivateTemplateDialog(props: {
                 disabled={props.undecided > 0 || props.pending}
                 onClick={() => props.onActivate()}
               >
-                {props.pending ? 'Activating…' : 'Activate'}
+                {props.pending
+                  ? (props.pendingLabel ?? 'Activating…')
+                  : (props.actionLabel ?? 'Activate')}
               </Button>
             </div>
           </ActionDialogShell.Footer>

@@ -3,12 +3,16 @@ import { toast } from '@core/component/Toast/Toast';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
 import { Telemetry } from '@macro-inc/observability';
-import type { VersionBump } from '@service-agent-harness/generated/schemas';
+import type {
+  ListingSource,
+  TemplateVariable,
+  VersionBump,
+} from '@service-agent-harness/generated/schemas';
 import { ActionDialogShell, Button, Dialog, Tabs, TextField } from '@ui';
 import { createSignal, Show } from 'solid-js';
 import {
   type Listing,
-  ownListingForDocument,
+  ownListingForSource,
   versionLabel,
 } from '../core/listing';
 import {
@@ -19,44 +23,74 @@ import {
 } from '../queries/listings';
 import { useMarketplaceFlag } from '../use-marketplace-flag';
 
+/** What is published: an HTML document, or a routine. */
+export type PublishTarget =
+  | {
+      kind: 'artifact';
+      id: string;
+      /** The editor has changes whose save hasn't landed. */
+      unsaved: boolean;
+    }
+  | {
+      kind: 'routine';
+      id: string;
+      /** Its references, marked as when sharing it as a template. */
+      variables(): Promise<TemplateVariable[]>;
+    };
+
+async function listingSource(target: PublishTarget): Promise<ListingSource> {
+  if (target.kind === 'artifact')
+    return { kind: 'artifact', documentId: target.id };
+
+  return {
+    kind: 'routine',
+    routineId: target.id,
+    variables: await target.variables(),
+  };
+}
+
 /**
- * Publishing an HTML document to the marketplace. The first time, it names
- * the listing and publishes version 1.0; after that, it publishes the page
- * as a minor update (every install gets it at once) or a major one (each
- * person chooses when to take it). The server publishes the saved file, so
- * it waits for the editor's changes to save.
+ * Publishing an HTML document or a routine to the marketplace. The first
+ * time, it names the listing and publishes version 1.0; after that, it
+ * publishes the source as a minor update (every install gets it at once) or
+ * a major one (each person chooses when to take it). The server publishes
+ * what is saved, so it waits for the editor's changes to save. A routine
+ * update that changes what installs rely on is published as a major update
+ * whatever was chosen, and the toast says so.
  */
 export function PublishListingDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  documentId: string;
+  target: PublishTarget;
   /** Starts the listing's title. */
-  documentName: string;
+  name: string;
   userId: string | undefined;
-  /** The editor has changes whose save hasn't landed. */
-  unsaved: boolean;
 }) {
   const flag = useMarketplaceFlag();
   const listings = useListingsQuery(() => flag().enabled);
+  const unsaved = () =>
+    props.target.kind === 'artifact' && props.target.unsaved;
+  const routine = () => props.target.kind === 'routine';
   // A pending load's data read would suspend the dialog.
   const existing = () =>
     listings.isPending
       ? undefined
-      : ownListingForDocument(
+      : ownListingForSource(
           listings.data?.listings ?? [],
-          props.documentId,
+          props.target.kind,
+          props.target.id,
           props.userId
         );
   const publish = usePublishListingMutation();
   const publishVersion = usePublishListingVersionMutation();
-  const [title, setTitle] = createSignal(props.documentName);
+  const [title, setTitle] = createSignal(props.name);
   const [description, setDescription] = createSignal('');
   const [bump, setBump] = createSignal<VersionBump>('minor');
   const [refusal, setRefusal] = createSignal<string>();
   const pending = () => publish.isPending || publishVersion.isPending;
   const blocked = () =>
     pending() ||
-    props.unsaved ||
+    unsaved() ||
     listings.isPending ||
     (!existing() && title().trim() === '');
 
@@ -73,28 +107,43 @@ export function PublishListingDialog(props: {
     Telemetry.span(
       current ? 'marketplace.publish_version' : 'marketplace.publish',
       async (span) => {
-        span.setAttr('document.id', props.documentId);
+        span.setAttr('marketplace.kind', props.target.kind);
+        span.setAttr(
+          props.target.kind === 'artifact' ? 'document.id' : 'routine.id',
+          props.target.id
+        );
         if (current) {
           span.setAttr('marketplace.listing_id', current.id);
           span.setAttr('marketplace.bump', bump());
         }
         setRefusal(undefined);
-        const result = await catchToResult(() =>
-          current
-            ? publishVersion.mutateAsync({
-                listingId: current.id,
-                request: { documentId: props.documentId, bump: bump() },
-                parentSpan: span,
-              })
-            : publish.mutateAsync({
-                request: {
-                  documentId: props.documentId,
-                  title: title().trim(),
-                  description: description().trim(),
-                },
-                parentSpan: span,
-              })
-        );
+        const target = props.target;
+        const result = await catchToResult(async () => {
+          const source = await listingSource(target);
+          if (current) {
+            const requested = bump();
+            const published = await publishVersion.mutateAsync({
+              listingId: current.id,
+              request: { source, bump: requested },
+              parentSpan: span,
+            });
+            return {
+              listing: published.listing,
+              forced: published.bump !== requested,
+              updated: published.updates.updated,
+            };
+          }
+
+          const listing = await publish.mutateAsync({
+            request: {
+              source,
+              title: title().trim(),
+              description: description().trim(),
+            },
+            parentSpan: span,
+          });
+          return { listing, forced: false, updated: 0 };
+        });
 
         if (result.isErr()) {
           span.error('Publishing to the marketplace failed');
@@ -112,23 +161,49 @@ export function PublishListingDialog(props: {
           } else if (refused('PAGE_DOES_NOT_BUILD')) {
             setRefusal(t('marketplace.publishDoesNotBuild'));
           } else if (refused('PUBLISH_CONFLICT')) {
-            setRefusal(t('marketplace.publishConflict'));
+            setRefusal(
+              routine()
+                ? t('marketplace.publishRoutineConflict')
+                : t('marketplace.publishConflict')
+            );
           } else {
             setRefusal(t('marketplace.publishFailed'));
           }
           return;
         }
 
-        const listing = result.value;
+        const { listing, forced, updated } = result.value;
         span.setAttr('marketplace.listing_id', listing.id);
-        toast.success(
-          current
-            ? t('marketplace.publishedVersionToast', {
-                title: listing.title,
-                version: versionLabel(listing.latestVersion),
-              })
-            : t('marketplace.publishedToast', { title: listing.title })
-        );
+        span.setAttr('marketplace.forced_major', forced);
+        const version = versionLabel(listing.latestVersion);
+
+        if (!current) {
+          toast.success(
+            t('marketplace.publishedToast', { title: listing.title })
+          );
+        } else if (forced) {
+          toast.success(
+            t('marketplace.publishedForcedMajorToast', {
+              title: listing.title,
+              version,
+            }),
+            { subtext: t('marketplace.publishedForcedMajorSubtext') }
+          );
+        } else {
+          toast.success(
+            t('marketplace.publishedVersionToast', {
+              title: listing.title,
+              version,
+            }),
+            updated > 0
+              ? {
+                  subtext: t('marketplace.publishedRoutineUpdates', {
+                    count: updated,
+                  }),
+                }
+              : undefined
+          );
+        }
         props.onOpenChange(false);
       }
     );
@@ -161,7 +236,9 @@ export function PublishListingDialog(props: {
                       {t('marketplace.publishTitle')}
                     </ActionDialogShell.Title>
                     <ActionDialogShell.Description>
-                      {t('marketplace.publishDescription')}
+                      {routine()
+                        ? t('marketplace.publishRoutineDescription')
+                        : t('marketplace.publishDescription')}
                     </ActionDialogShell.Description>
                   </ActionDialogShell.Header>
                   <TextField value={title()} onChange={setTitle}>
@@ -219,9 +296,11 @@ export function PublishListingDialog(props: {
                       }}
                     />
                     <p class="text-sm text-ink-muted">
-                      {bump() === 'minor'
-                        ? t('marketplace.publishMinorHint')
-                        : t('marketplace.publishMajorHint')}
+                      {bump() === 'major'
+                        ? t('marketplace.publishMajorHint')
+                        : routine()
+                          ? t('marketplace.publishRoutineMinorHint')
+                          : t('marketplace.publishMinorHint')}
                     </p>
                   </div>
                 </>
@@ -234,7 +313,7 @@ export function PublishListingDialog(props: {
                 </p>
               )}
             </Show>
-            <Show when={props.unsaved && !pending()}>
+            <Show when={unsaved() && !pending()}>
               <p role="status" class="text-sm text-ink-muted">
                 {t('marketplace.publishWaitingForSave')}
               </p>

@@ -1,6 +1,7 @@
 import { openAgentsPage } from '@app/features/agents-view/primitives/open-page';
 import { openChatWithInput } from '@app/features/chat/ChatWithAgentButton';
 import { openBulkEditModal } from '@app/features/entity/bulk-edit/BulkEditEntityModal';
+import { usePublishRoutineToMarketplace } from '@app/features/marketplace/publish-to-marketplace';
 import { useFeatureFlag } from '@app/lib/analytics/posthog';
 import { t } from '@app/lib/i18n';
 import { useSplitLayout } from '@components/app/split-layout/layout';
@@ -25,6 +26,7 @@ import {
   createChatHistoryMetadata,
 } from './queries/history-metadata';
 import { createRoutineDetailSource } from './queries/routine-sources';
+import { routineTemplateVariables } from './queries/templates';
 import { createRoutineConnectedApps, RoutineApps } from './routine-apps';
 import { RoutineExecutionPicker } from './routine-execution-picker';
 import { RoutinePromptEditor } from './routine-prompt-editor';
@@ -112,6 +114,16 @@ export function RoutineDetail(props: {
       owner
     );
   };
+  // Only a routine the viewer owns is published: its copies run as whoever
+  // installs them.
+  const publish = usePublishRoutineToMarketplace({
+    id: () => {
+      const routine = source.routine();
+      return routine && routine.ownerId === userId() ? routine.id : undefined;
+    },
+    name: () => source.routine()?.name ?? '',
+    variables: routineTemplateVariables,
+  });
   const systemSkills = useSystemSkillsQuery();
   /**
    * Ask AI, as on other surfaces: a new conversation with this routine and
@@ -180,6 +192,7 @@ export function RoutineDetail(props: {
           else toast.alert('Could not copy prompt');
         }}
         onShare={sharing().enabled ? share : undefined}
+        onPublish={publish()}
         onCompose={compose}
         onOpenTemplate={sharing().enabled ? open : undefined}
         onOpenRoutine={open}

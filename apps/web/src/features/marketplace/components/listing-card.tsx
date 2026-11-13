@@ -3,6 +3,7 @@ import DotsIcon from '@icon/system/regular/dots-three.svg';
 import { Badge, Button, Card, Dropdown } from '@ui';
 import { Show } from 'solid-js';
 import {
+  installedRoutineState,
   isInstalled,
   type Listing,
   updateAvailable,
@@ -38,6 +39,11 @@ export function ListingCard(props: {
       <Card.Header class="flex-1">
         <Card.Metadata class="gap-x-1.5">
           <Badge variant="outline" size="xs">
+            {props.listing.kind === 'routine'
+              ? t('marketplace.kindRoutine')
+              : t('marketplace.kindArtifact')}
+          </Badge>
+          <Badge variant="outline" size="xs">
             {versionLabel(props.listing.latestVersion)}
           </Badge>
           <Badge variant="outline" size="xs">
@@ -60,6 +66,16 @@ export function ListingCard(props: {
         <span class="truncate text-xs text-ink-extra-muted">
           {t('marketplace.byPublisher', { name: props.publisherName })}
         </span>
+        <Show when={installedRoutineState(props.listing) === 'detached'}>
+          <p role="status" class="text-xs text-ink-muted">
+            {t('marketplace.routineDetached')}
+          </p>
+        </Show>
+        <Show when={installedRoutineState(props.listing) === 'update_failed'}>
+          <p role="status" class="text-xs text-ink-muted">
+            {t('marketplace.routineUpdateFailed')}
+          </p>
+        </Show>
       </Card.Header>
       <Card.Footer>
         <span class="text-xs text-ink-muted tabular-nums">

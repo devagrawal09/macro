@@ -8,12 +8,18 @@ export default {
   unavailable: 'The marketplace isn’t available',
   browseEmptyTitle: 'Nothing published yet',
   browseEmptyDescription:
-    'Pages your team publishes appear here. To publish one, open an HTML page you own and choose “Publish to marketplace…” from its menu.',
+    'Pages and routines your team publishes appear here. To publish one, open an HTML page or a routine you own and choose “Publish to marketplace…” from its menu.',
   installedEmptyTitle: 'Nothing installed yet',
-  installedEmptyDescription: 'Pages you install from Browse appear here.',
+  installedEmptyDescription:
+    'Pages and routines you install from Browse appear here.',
   listingLabel: 'Marketplace page: {{title}}',
   byPublisher: 'by {{name}}',
   installs: { one: '{{count}} install', other: '{{count}} installs' },
+  kindArtifact: 'Artifact',
+  kindRoutine: 'Routine',
+  routineDetached: 'You edited this routine, so updates are paused.',
+  routineUpdateFailed:
+    'The latest update couldn’t reach your routine. The next update tries again.',
   scopeTeam: 'Team',
   scopeGlobal: 'Macro',
   unlisted: 'Unlisted',
@@ -26,6 +32,9 @@ export default {
   unlistConfirmTitle: 'Unlist “{{title}}”?',
   unlistConfirmBody:
     'It leaves Browse, so nobody new can install it. People who already installed it keep it.',
+  uninstallRoutineTitle: 'Uninstall “{{title}}”?',
+  uninstallRoutineBody:
+    'Your routine stays yours and keeps its settings, but it no longer gets updates.',
   installedToast: 'Installed {{title}}',
   installFailed: 'Could not install {{title}}',
   updatedToast: 'Updated {{title}} to {{version}}',
@@ -43,6 +52,8 @@ export default {
   publishTitle: 'Publish to marketplace',
   publishDescription:
     'Your team can install this page. It is published as it is saved now, as version 1.0.',
+  publishRoutineDescription:
+    'Your team can install their own copy of this routine. It is published as it is saved now, as version 1.0.',
   publishFieldTitle: 'Title',
   publishFieldDescription: 'Description',
   publishFieldDescriptionPlaceholder: 'What this page does, in a few lines',
@@ -52,16 +63,37 @@ export default {
   publishBumpLabel: 'Kind of update',
   publishMinor: 'Minor update',
   publishMinorHint: 'Everyone who installed it gets it right away.',
+  publishRoutineMinorHint:
+    'Everyone’s copy is updated right away, unless they edited it.',
   publishMajor: 'Major update',
   publishMajorHint: 'People choose when to update.',
   publishUpdateSubmit: 'Publish update',
   publishWaitingForSave: 'Waiting for your latest changes to save…',
   publishedToast: 'Published {{title}} to the marketplace',
   publishedVersionToast: 'Published {{title}} {{version}}',
+  publishedForcedMajorToast:
+    'Published {{title}} {{version}} as a major update',
+  publishedForcedMajorSubtext:
+    'It changes what people fill in, connect or start it with, so each person chooses when to update.',
+  publishedRoutineUpdates: {
+    one: 'Updated {{count}} installed routine.',
+    other: 'Updated {{count}} installed routines.',
+  },
   publishUnchanged: 'Nothing changed since {{version}}.',
   publishDoesNotBuild:
     'This page has build problems. Fix the problems shown in its preview, then publish again.',
   publishConflict:
     'Could not publish. You need to be on a team, and a page can have only one listing.',
+  publishRoutineConflict:
+    'Could not publish. You need to be on a team, and a routine can have only one listing.',
   publishFailed: 'Could not publish. Please try again.',
+  fillInstallTitle: 'Install {{title}}',
+  fillUpdateTitle: 'Update {{title}}',
+  fillByline: 'From the marketplace, by {{name}}',
+  fillInstall: 'Install',
+  fillInstalling: 'Installing…',
+  fillUpdate: 'Update',
+  fillUpdating: 'Updating…',
+  fillFootnote:
+    'Your copy runs as you. It starts switched off: turn it on when it looks right.',
 };

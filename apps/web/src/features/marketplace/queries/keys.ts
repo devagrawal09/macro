@@ -5,4 +5,7 @@ export const marketplaceKeys = createQueryKeys('marketplace', {
   installedBuild: (listingId: string) => ({
     queryKey: [listingId],
   }),
+  routine: (listingId: string) => ({
+    queryKey: [listingId],
+  }),
 });

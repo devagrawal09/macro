@@ -4,21 +4,30 @@ import { queryClient } from '@queries/client';
 import { type MutationCallbacks, withCallbacks } from '@queries/utils';
 import {
   agentHarnessServiceClient,
+  type InstallListing,
+  isMissingRoutineFills,
   type PublishListing,
   type PublishListingErrorCode,
   type PublishListingVersion,
 } from '@service-agent-harness/client';
-import type { MarketplaceListings } from '@service-agent-harness/generated/schemas';
+import type {
+  MarketplaceListings,
+  PublishedVersion,
+} from '@service-agent-harness/generated/schemas';
 import { queryOptions, useMutation, useQuery } from '@tanstack/solid-query';
 import type { Accessor } from 'solid-js';
 import type { MarketplaceSource } from '../context/marketplace-source';
 import type { Listing } from '../core/listing';
+import { MissingRoutineFills } from '../core/routine-fills';
 import { marketplaceKeys } from './keys';
 
 export type { PublishListingErrorCode };
 
 /** An action on one listing, sent in the trace of the span that started it. */
 export type ListingAction = { listingId: string; parentSpan?: TraceContext };
+
+/** An install, with a routine's fills when it is one. */
+export type InstallAction = ListingAction & { request?: InstallListing };
 
 /** A first publish, sent in the trace of the span that started it. */
 export type PublishAction = {
@@ -86,17 +95,27 @@ function setListing(listing: Listing) {
   );
 }
 
+/**
+ * Sends an install; a routine that still needs fills fails as
+ * `MissingRoutineFills`, naming them.
+ */
+async function sendInstall(args: InstallAction): Promise<Listing> {
+  const result = await inTrace(args.parentSpan, () =>
+    agentHarnessServiceClient.installListing(args.listingId, args.request)
+  );
+  if (result.isOk()) return result.value;
+
+  const missing = result.error.find(isMissingRoutineFills);
+  if (missing) throw new MissingRoutineFills(missing.missing);
+  return throwOnErr(async () => result);
+}
+
 /** Installs a listing, or moves the viewer's install to its newest major. */
 export function useInstallListingMutation(
-  callbacks?: MutationCallbacks<Listing, Error, ListingAction>
+  callbacks?: MutationCallbacks<Listing, Error, InstallAction>
 ) {
   return useMutation(() => ({
-    mutationFn: (args: ListingAction) =>
-      inTrace(args.parentSpan, () =>
-        throwOnErr(() =>
-          agentHarnessServiceClient.installListing(args.listingId)
-        )
-      ),
+    mutationFn: sendInstall,
     ...withCallbacks(
       {
         onSuccess: async (listing) => {
@@ -174,9 +193,27 @@ export function usePublishListingMutation(
   }));
 }
 
-/** Publishes a listing's page, as it is stored now, as its next version. */
+/**
+ * A routine listing's newest version, to fill in before installing it.
+ * Fetched when asked: the fill dialog opens on a click.
+ */
+export async function fetchListingRoutine(listingId: string) {
+  return queryClient.fetchQuery({
+    queryKey: marketplaceKeys.routine(listingId).queryKey,
+    staleTime: 0,
+    queryFn: ({ signal }) =>
+      throwOnErr(() =>
+        agentHarnessServiceClient.getMarketplaceListingRoutine(
+          listingId,
+          signal
+        )
+      ),
+  });
+}
+
+/** Publishes a listing's source, as it is stored now, as its next version. */
 export function usePublishListingVersionMutation(
-  callbacks?: MutationCallbacks<Listing, Error, PublishVersionAction>
+  callbacks?: MutationCallbacks<PublishedVersion, Error, PublishVersionAction>
 ) {
   return useMutation(() => ({
     mutationFn: (args: PublishVersionAction) =>
@@ -190,7 +227,7 @@ export function usePublishListingVersionMutation(
       ),
     ...withCallbacks(
       {
-        onSuccess: async (listing) => {
+        onSuccess: async ({ listing }) => {
           setListing(listing);
           // A minor version replaces the page every install shows.
           await Promise.all([
@@ -223,8 +260,8 @@ export function createMarketplaceSource(
     retry: async () => {
       await query.refetch();
     },
-    install: (listingId, parentSpan) =>
-      install.mutateAsync({ listingId, parentSpan }),
+    install: (listingId, parentSpan, request) =>
+      install.mutateAsync({ listingId, parentSpan, request }),
     uninstall: (listingId, parentSpan) =>
       uninstall.mutateAsync({ listingId, parentSpan }),
     unlist: (listingId, parentSpan) =>

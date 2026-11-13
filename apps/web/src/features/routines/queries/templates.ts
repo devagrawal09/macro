@@ -13,6 +13,7 @@ import type {
   ActionConfiguration,
   RoutineTemplate,
   ScheduledAction,
+  TemplateVariable,
 } from '@service-scheduled-action/generated/schemas';
 import { blockNameToItemType } from '@service-storage/itemType';
 import {
@@ -91,6 +92,21 @@ export async function publishRoutineTemplate(
   );
   setTemplate(scheduleId, template);
   return template;
+}
+
+/**
+ * A routine's references as sharing marks them by default, for publishing it
+ * somewhere it is filled in by each person, such as the marketplace.
+ */
+export async function routineTemplateVariables(
+  scheduleId: string
+): Promise<TemplateVariable[]> {
+  const routine = await queryClient.fetchQuery(routineQueryOptions(scheduleId));
+  return templateShareBody({
+    draft: draftFromSchedule(routine),
+    authorId: routine.owner,
+    shared: null,
+  }).variables;
 }
 
 export function useUnshareTemplateMutation(

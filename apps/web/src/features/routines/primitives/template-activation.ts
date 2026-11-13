@@ -18,6 +18,12 @@ import {
   variableKey,
 } from '../core/template';
 
+/** What filling in a template reads: a shared template or a listing's routine. */
+export type TemplateContent = Pick<
+  RoutineTemplate,
+  'name' | 'description' | 'trigger' | 'task' | 'variables'
+>;
+
 export type TemplateReference = {
   key: string;
   variable: TemplateVariable;
@@ -61,7 +67,7 @@ function filledTask(
  * decide on, and the routine their decisions produce.
  */
 export function createTemplateActivation(args: {
-  template: Accessor<RoutineTemplate>;
+  template: Accessor<TemplateContent>;
   activator: Accessor<Activator | undefined>;
   /** Whether the activator can open each mentioned item, by item ID. */
   access: Accessor<ReadonlyMap<string, boolean>>;

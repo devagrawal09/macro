@@ -12,7 +12,10 @@ import { confirmDialog, Tabs } from '@ui';
 import { createSignal, Show } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
-import type { MarketplaceSource } from '../context/marketplace-source';
+import type {
+  MarketplaceRoutines,
+  MarketplaceSource,
+} from '../context/marketplace-source';
 import {
   isInstalled,
   isPublisher,
@@ -21,16 +24,21 @@ import {
   type MarketplaceTab,
   versionLabel,
 } from '../core/listing';
+import { MissingRoutineFills } from '../core/routine-fills';
 import { createMarketplaceList } from '../primitives/marketplace-list';
 import { InstalledPageView } from './installed-page-view';
 
+/** The person closed a routine's fill dialog: nothing happened. */
+const CANCELLED = Symbol('cancelled');
+
 /**
  * The marketplace: what the viewer's team published (Browse) and what the
- * viewer installed (Installed), as cards. Opening an installed listing shows
- * its page in place of the lists.
+ * viewer installed (Installed), as cards. Opening an installed page shows it
+ * in place of the lists; opening an installed routine opens the routine.
  */
 export function MarketplaceView(props: {
   source: MarketplaceSource;
+  routines: MarketplaceRoutines;
   userId: string | undefined;
   /** Whether the viewer is an admin of that team. */
   isTeamAdmin: (teamId: string) => boolean;
@@ -71,6 +79,7 @@ export function MarketplaceView(props: {
         return next;
       });
 
+      if (result.isOk() && result.value === CANCELLED) return;
       if (result.isErr()) {
         span.error(`${name} failed`);
         toast.failure(messages.failed);
@@ -79,8 +88,47 @@ export function MarketplaceView(props: {
       toast.success(messages.done);
     });
 
-  /** Show an installed listing's page; its flow joins this interaction. */
+  /**
+   * Install a routine listing, or take its newest major: the server fills it
+   * in from what is stored, and asks through a 422 for what it can't, which
+   * the person fills in before it is sent again. A first install always asks.
+   */
+  const installRoutine = async (
+    listing: Listing,
+    span: Span,
+    first: boolean
+  ) => {
+    if (first) {
+      const request = await props.routines.fill({ listing });
+      if (!request) return CANCELLED;
+      return props.source.install(listing.id, span, request);
+    }
+
+    try {
+      return await props.source.install(listing.id, span);
+    } catch (error) {
+      if (!(error instanceof MissingRoutineFills)) throw error;
+      span.setAttr('marketplace.missing_fills', error.missing.length);
+      const request = await props.routines.fill({
+        listing,
+        missing: error.missing,
+      });
+      if (!request) return CANCELLED;
+      return props.source.install(listing.id, span, request);
+    }
+  };
+
+  /**
+   * Show an installed listing: its page in place, or the routine it made.
+   * A page's flow joins this interaction.
+   */
   const open = (listing: Listing) => {
+    const routine = listing.installedRoutine;
+    if (routine) {
+      props.routines.open(routine.routineId);
+      return;
+    }
+
     const interaction = beginInteraction('marketplace.open', {
       attributes: { 'marketplace.listing_id': listing.id },
       closeOnJoin: true,
@@ -96,7 +144,10 @@ export function MarketplaceView(props: {
     act(
       'marketplace.install',
       listing,
-      (span) => props.source.install(listing.id, span),
+      (span) =>
+        listing.kind === 'routine'
+          ? installRoutine(listing, span, true)
+          : props.source.install(listing.id, span),
       {
         done: t('marketplace.installedToast', { title: listing.title }),
         failed: t('marketplace.installFailed', { title: listing.title }),
@@ -107,7 +158,10 @@ export function MarketplaceView(props: {
     act(
       'marketplace.update',
       listing,
-      (span) => props.source.install(listing.id, span),
+      (span) =>
+        listing.kind === 'routine'
+          ? installRoutine(listing, span, false)
+          : props.source.install(listing.id, span),
       {
         done: t('marketplace.updatedToast', {
           title: listing.title,
@@ -116,8 +170,18 @@ export function MarketplaceView(props: {
         failed: t('marketplace.updateFailed', { title: listing.title }),
       }
     );
-  const uninstall = (listing: Listing) =>
-    act(
+  const uninstall = async (listing: Listing) => {
+    // The routine an install made stays the person's own: say so first.
+    if (listing.installedRoutine) {
+      const confirmed = await confirmDialog({
+        title: t('marketplace.uninstallRoutineTitle', { title: listing.title }),
+        body: t('marketplace.uninstallRoutineBody'),
+        confirmLabel: t('marketplace.uninstall'),
+      });
+      if (!confirmed) return;
+    }
+
+    await act(
       'marketplace.uninstall',
       listing,
       (span) => props.source.uninstall(listing.id, span),
@@ -126,6 +190,7 @@ export function MarketplaceView(props: {
         failed: t('marketplace.uninstallFailed', { title: listing.title }),
       }
     );
+  };
   const unlist = async (listing: Listing) => {
     const confirmed = await confirmDialog({
       title: t('marketplace.unlistConfirmTitle', { title: listing.title }),
