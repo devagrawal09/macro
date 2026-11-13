@@ -50,6 +50,7 @@ export const agentHarnessBacklog = [
   'getInstalledListingBuild',
   'getMarketplaceListingRoutine',
   'installMarketplaceListing',
+  'listMarketplaceListingVersions',
   'listMarketplaceListings',
   'publishMarketplaceListing',
   'publishMarketplaceListingVersion',

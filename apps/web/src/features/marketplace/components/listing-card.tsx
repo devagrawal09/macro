@@ -24,6 +24,8 @@ export function ListingCard(props: {
   onUpdate(): void;
   onUninstall(): void;
   onUnlist(): void;
+  /** Show its details and version history. */
+  onDetails(): void;
 }) {
   const installed = () => isInstalled(props.listing);
   const unlistable = () => props.canUnlist && !props.listing.removed;
@@ -118,41 +120,45 @@ export function ListingCard(props: {
               {t('marketplace.open')}
             </Button>
           </Show>
-          <Show when={installed() || unlistable()}>
-            <Dropdown placement="bottom-end">
-              <Dropdown.Trigger
-                variant="ghost"
-                size="icon-sm"
-                class="touch:min-h-11 touch:min-w-11"
-                disabled={props.busy}
-                aria-label={t('marketplace.moreActions', {
-                  title: props.listing.title,
-                })}
-              >
-                <DotsIcon class="size-4" />
-              </Dropdown.Trigger>
-              <Dropdown.Content class="min-w-36 max-w-64">
-                <Dropdown.Group>
-                  <Show when={installed()}>
-                    <Dropdown.Item
-                      class="touch:min-h-11"
-                      onSelect={() => props.onUninstall()}
-                    >
-                      {t('marketplace.uninstall')}
-                    </Dropdown.Item>
-                  </Show>
-                  <Show when={unlistable()}>
-                    <Dropdown.Item
-                      class="text-failure-ink touch:min-h-11"
-                      onSelect={() => props.onUnlist()}
-                    >
-                      {t('marketplace.unlist')}
-                    </Dropdown.Item>
-                  </Show>
-                </Dropdown.Group>
-              </Dropdown.Content>
-            </Dropdown>
-          </Show>
+          <Dropdown placement="bottom-end">
+            <Dropdown.Trigger
+              variant="ghost"
+              size="icon-sm"
+              class="touch:min-h-11 touch:min-w-11"
+              disabled={props.busy}
+              aria-label={t('marketplace.moreActions', {
+                title: props.listing.title,
+              })}
+            >
+              <DotsIcon class="size-4" />
+            </Dropdown.Trigger>
+            <Dropdown.Content class="min-w-36 max-w-64">
+              <Dropdown.Group>
+                <Dropdown.Item
+                  class="touch:min-h-11"
+                  onSelect={() => props.onDetails()}
+                >
+                  {t('marketplace.versionHistory')}
+                </Dropdown.Item>
+                <Show when={installed()}>
+                  <Dropdown.Item
+                    class="touch:min-h-11"
+                    onSelect={() => props.onUninstall()}
+                  >
+                    {t('marketplace.uninstall')}
+                  </Dropdown.Item>
+                </Show>
+                <Show when={unlistable()}>
+                  <Dropdown.Item
+                    class="text-failure-ink touch:min-h-11"
+                    onSelect={() => props.onUnlist()}
+                  >
+                    {t('marketplace.unlist')}
+                  </Dropdown.Item>
+                </Show>
+              </Dropdown.Group>
+            </Dropdown.Content>
+          </Dropdown>
         </Card.Actions>
       </Card.Footer>
     </Card>

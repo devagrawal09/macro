@@ -27,7 +27,7 @@ import type {
   ListingsFilter,
   MarketplaceSource,
 } from '../context/marketplace-source';
-import type { Listing, ListingKind } from '../core/listing';
+import type { Listing, ListingKind, ListingVersion } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { marketplaceKeys } from './keys';
 
@@ -258,6 +258,28 @@ export async function fetchListingRoutine(listingId: string) {
   });
 }
 
+/**
+ * A listing's versions, newest first, with what each changed. Fetched when
+ * asked, by the details dialog or an update's confirmation, and always
+ * fetched fresh: a version may have just been published.
+ */
+export async function fetchListingVersions(
+  listingId: string
+): Promise<readonly ListingVersion[]> {
+  const { versions } = await queryClient.fetchQuery({
+    queryKey: marketplaceKeys.versions(listingId).queryKey,
+    staleTime: 0,
+    queryFn: ({ signal }) =>
+      throwOnErr(() =>
+        agentHarnessServiceClient.listMarketplaceListingVersions(
+          listingId,
+          signal
+        )
+      ),
+  });
+  return versions;
+}
+
 /** Publishes a listing's source, as it is stored now, as its next version. */
 export function usePublishListingVersionMutation(
   callbacks?: MutationCallbacks<PublishedVersion, Error, PublishVersionAction>
@@ -339,5 +361,6 @@ export function createMarketplaceSource(
       uninstall.mutateAsync({ listingId, parentSpan }),
     unlist: (listingId, parentSpan) =>
       unlist.mutateAsync({ listingId, parentSpan }),
+    versions: fetchListingVersions,
   };
 }

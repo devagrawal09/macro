@@ -4,12 +4,16 @@
  * agent_harness_service
  * OpenAPI spec version: 0.1.0
  */
+
 import type { ListingSource } from './listingSource';
+import type { PublishListingChangelog } from './publishListingChangelog';
 
 /**
  * Publish a page or routine to the caller's team.
  */
 export interface PublishListing {
+  /** What version 1.0 says about itself, at most 2000 characters. */
+  changelog?: PublishListingChangelog;
   /** What it does, in a few lines. */
   description?: string;
   /** What it is published from. */

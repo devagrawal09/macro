@@ -4,7 +4,7 @@ import type {
   TemplateVariable,
 } from '@service-agent-harness/generated/schemas';
 import type { Accessor } from 'solid-js';
-import type { Listing } from '../core/listing';
+import type { Listing, ListingVersion } from '../core/listing';
 
 /** Which listings a marketplace list reads. */
 export type ListingsFilter = {
@@ -49,6 +49,8 @@ export type MarketplaceSource = {
   uninstall(listingId: string, parentSpan?: TraceContext): Promise<void>;
   /** Hide a listing from Browse; people who installed it keep it. */
   unlist(listingId: string, parentSpan?: TraceContext): Promise<void>;
+  /** A listing's versions, newest first, with what each one changed. */
+  versions(listingId: string): Promise<readonly ListingVersion[]>;
 };
 
 /** What the person decided while filling in a routine to install. */

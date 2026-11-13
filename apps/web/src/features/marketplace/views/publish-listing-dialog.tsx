@@ -23,6 +23,9 @@ import {
 } from '../queries/listings';
 import { useMarketplaceFlag } from '../use-marketplace-flag';
 
+/** Longest changelog the server takes, as `MAX_CHANGELOG_CHARS` in `crates/marketplace`. */
+const MAX_CHANGELOG_CHARS = 2000;
+
 /** What is published: an HTML document, or a routine. */
 export type PublishTarget =
   | {
@@ -88,6 +91,9 @@ export function PublishListingDialog(props: {
   const publishVersion = usePublishListingVersionMutation();
   const [title, setTitle] = createSignal(props.name);
   const [description, setDescription] = createSignal('');
+  const [changelog, setChangelog] = createSignal('');
+  /** What the person said changed; nothing when they left it blank. */
+  const changelogText = () => changelog().trim() || undefined;
   const [bump, setBump] = createSignal<VersionBump>('minor');
   const [refusal, setRefusal] = createSignal<string>();
   const pending = () => publish.isPending || publishVersion.isPending;
@@ -127,7 +133,7 @@ export function PublishListingDialog(props: {
             const requested = bump();
             const published = await publishVersion.mutateAsync({
               listingId: current.id,
-              request: { source, bump: requested },
+              request: { source, bump: requested, changelog: changelogText() },
               parentSpan: span,
             });
             return {
@@ -142,6 +148,7 @@ export function PublishListingDialog(props: {
               source,
               title: title().trim(),
               description: description().trim(),
+              changelog: changelogText(),
             },
             parentSpan: span,
           });
@@ -309,6 +316,16 @@ export function PublishListingDialog(props: {
                 </>
               )}
             </Show>
+            <TextField value={changelog()} onChange={setChangelog}>
+              <TextField.Label>
+                {t('marketplace.publishFieldChangelog')}
+              </TextField.Label>
+              <TextField.TextArea
+                placeholder={t('marketplace.publishFieldChangelogPlaceholder')}
+                maxLength={MAX_CHANGELOG_CHARS}
+                readOnly={pending()}
+              />
+            </TextField>
             <Show when={refusal()}>
               {(message) => (
                 <p role="alert" class="text-sm text-failure-ink">

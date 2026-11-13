@@ -6,6 +6,7 @@ import {
   ownListingForSource,
   updateAvailable,
   versionLabel,
+  versionsBetween,
 } from './listing';
 
 const listing = (overrides: Partial<Listing> = {}): Listing => ({
@@ -27,6 +28,34 @@ const listing = (overrides: Partial<Listing> = {}): Listing => ({
 describe('marketplace listings', () => {
   it('writes a version as people read it', () => {
     expect(versionLabel({ major: 2, minor: 13 })).toBe('v2.13');
+  });
+
+  it('finds the versions an update brings, newest first', () => {
+    const entry = (major: number, minor: number) => ({
+      version: { major, minor },
+      forcedMajor: false,
+      createdAt: '2026-11-01T10:00:00Z',
+    });
+    const history = [
+      entry(1, 0),
+      entry(1, 1),
+      entry(2, 0),
+      entry(2, 1),
+      entry(3, 0),
+    ];
+
+    const brought = versionsBetween(
+      history,
+      { major: 1, minor: 1 },
+      { major: 2, minor: 1 }
+    ).map((item) => versionLabel(item.version));
+    const unknownStart = versionsBetween(history, undefined, {
+      major: 1,
+      minor: 1,
+    }).map((item) => versionLabel(item.version));
+
+    expect(brought).toEqual(['v2.1', 'v2.0']);
+    expect(unknownStart).toEqual(['v1.1', 'v1.0']);
   });
 
   it('counts a listing as installed only on a major the viewer is on', () => {

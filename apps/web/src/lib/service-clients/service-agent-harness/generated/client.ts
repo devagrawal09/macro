@@ -59,6 +59,7 @@ import type {
   ListAgentRepositoryBranchesParams,
   Listing,
   ListingRoutine,
+  ListingVersions,
   ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
@@ -5261,6 +5262,72 @@ export const getMarketplaceListingRoutine = async (
     status: res.status,
     headers: res.headers,
   } as getMarketplaceListingRoutineResponse;
+};
+
+/**
+ * @summary The listing's versions, newest first: each one's changelog, when it was
+published, and whether the server made a routine version major. Anyone
+who sees the listing sees them.
+ */
+export type listMarketplaceListingVersionsResponse200 = {
+  data: ListingVersions;
+  status: 200;
+};
+
+export type listMarketplaceListingVersionsResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type listMarketplaceListingVersionsResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type listMarketplaceListingVersionsResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type listMarketplaceListingVersionsResponseSuccess =
+  listMarketplaceListingVersionsResponse200 & {
+    headers: Headers;
+  };
+export type listMarketplaceListingVersionsResponseError = (
+  | listMarketplaceListingVersionsResponse401
+  | listMarketplaceListingVersionsResponse404
+  | listMarketplaceListingVersionsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listMarketplaceListingVersionsResponse =
+  | listMarketplaceListingVersionsResponseSuccess
+  | listMarketplaceListingVersionsResponseError;
+
+export const getListMarketplaceListingVersionsUrl = (id: string) => {
+  return `/marketplace/listings/${id}/versions`;
+};
+
+export const listMarketplaceListingVersions = async (
+  id: string,
+  options?: RequestInit
+): Promise<listMarketplaceListingVersionsResponse> => {
+  const res = await fetch(getListMarketplaceListingVersionsUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listMarketplaceListingVersionsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listMarketplaceListingVersionsResponse;
 };
 
 /**

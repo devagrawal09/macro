@@ -7,6 +7,7 @@
 import type { ListingId } from './listingId';
 import type { ListingInstalledMajor } from './listingInstalledMajor';
 import type { ListingInstalledRoutine } from './listingInstalledRoutine';
+import type { ListingInstalledVersion } from './listingInstalledVersion';
 import type { ListingKind } from './listingKind';
 import type { ListingScope } from './listingScope';
 import type { Version } from './version';
@@ -26,6 +27,7 @@ export interface Listing {
   /** The major version the person asking is on, when they installed it. */
   installedMajor?: ListingInstalledMajor;
   installedRoutine?: ListingInstalledRoutine;
+  installedVersion?: ListingInstalledVersion;
   /** What it publishes. */
   kind: ListingKind;
   /** Its newest version. */

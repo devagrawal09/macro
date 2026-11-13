@@ -32,6 +32,7 @@ import type {
   InstallListing,
   Listing,
   ListingRoutine,
+  ListingVersions,
   ListMarketplaceListingsParams,
   LoadAgentModelsRequest,
   LoadAgentModelsResponse,
@@ -643,6 +644,17 @@ export const agentHarnessServiceClient = {
         body: JSON.stringify(request),
         errorResponseHandler: publishListingError('PAGE_UNCHANGED'),
       }
+    );
+  },
+
+  /**
+   * A listing's versions, newest first, with what each one changed. Anyone
+   * who sees the listing sees them.
+   */
+  listMarketplaceListingVersions(listingId: string, signal?: AbortSignal) {
+    return fetchWithToken<ListingVersions>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/versions`,
+      { method: 'GET', signal, errorResponseHandler: marketplaceError }
     );
   },
 

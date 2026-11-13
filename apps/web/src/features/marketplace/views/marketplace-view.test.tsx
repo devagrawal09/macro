@@ -8,7 +8,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { ImperativeDialogHost } from '@ui';
 import { createSignal } from 'solid-js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ListingList,
   ListingsFilter,
@@ -18,6 +18,11 @@ import type {
 import type { Listing } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { MarketplaceView } from './marketplace-view';
+
+// jsdom has no scrollTo, which opening and closing a dialog or menu reaches.
+beforeEach(() => {
+  vi.stubGlobal('scrollTo', vi.fn());
+});
 
 afterEach(() => {
   cleanup();
@@ -61,8 +66,24 @@ function fakeSource(
     install: vi.fn(async (id: string) => listing({ id, installedMajor: 1 })),
     uninstall: vi.fn(async () => {}),
     unlist: vi.fn(async () => {}),
+    versions: vi.fn(async () => []),
     ...overrides,
   };
+}
+
+/** A history entry, as the server answers it. */
+const entry = (major: number, minor: number, changelog?: string) => ({
+  version: { major, minor },
+  changelog,
+  forcedMajor: false,
+  createdAt: '2026-11-01T10:00:00Z',
+});
+
+/** Confirms the update dialog that opened, by its title. */
+async function confirmUpdate(title: string, action: string) {
+  const confirm = await screen.findByRole('dialog', { name: title });
+  fireEvent.click(within(confirm).getByRole('button', { name: action }));
+  return confirm;
 }
 
 function fakeRoutines(
@@ -79,6 +100,7 @@ function renderMarketplace(
   source: MarketplaceSource,
   routines: MarketplaceRoutines = fakeRoutines()
 ) {
+  render(() => <ImperativeDialogHost />);
   render(() => (
     <MarketplaceView
       source={source}
@@ -117,7 +139,7 @@ describe('Marketplace', () => {
     expect(within(card).queryByRole('button', { name: 'Install' })).toBeNull();
   });
 
-  it('offers a waiting major version as Update, and takes it by installing again', () => {
+  it('offers a waiting major version as Update, and takes it by installing again', async () => {
     const source = fakeSource(() => [
       listing({
         id: 'dashboard',
@@ -146,12 +168,86 @@ describe('Marketplace', () => {
     fireEvent.click(
       within(behind).getByRole('button', { name: 'Update to v2' })
     );
-    expect(source.install).toHaveBeenCalledWith('dashboard', expect.anything());
+    await confirmUpdate('Update “Launch dashboard” to v2.0?', 'Update to v2');
+    await vi.waitFor(() =>
+      expect(source.install).toHaveBeenCalledWith(
+        'dashboard',
+        expect.anything()
+      )
+    );
+  });
+
+  it('shows what the versions an update brings changed before taking it', async () => {
+    const versions = vi.fn(async () => [
+      entry(2, 1, 'Sorts by owner'),
+      entry(2, 0, 'Adds a timeline'),
+      entry(1, 1, 'Tidier columns'),
+      entry(1, 0, 'First cut'),
+    ]);
+    const source = fakeSource(
+      () => [
+        listing({
+          id: 'dashboard',
+          installedMajor: 1,
+          installedVersion: { major: 1, minor: 1 },
+          latestVersion: { major: 2, minor: 1 },
+        }),
+      ],
+      { versions }
+    );
+    renderMarketplace(source);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+    const confirm = await screen.findByRole('dialog', {
+      name: 'Update “Launch dashboard” to v2.1?',
+    });
+    const changes = within(confirm).getByRole('list', { name: 'What changed' });
+    expect(
+      within(changes)
+        .getAllByRole('listitem')
+        .map((item) => item.getAttribute('aria-label'))
+    ).toEqual(['v2.1', 'v2.0']);
+    expect(within(changes).getByText('Adds a timeline')).toBeTruthy();
+    expect(within(confirm).queryByText('Tidier columns')).toBeNull();
+    expect(versions).toHaveBeenCalledWith('dashboard');
+    expect(source.install).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(confirm).getByRole('button', { name: 'Update to v2' })
+    );
+    await vi.waitFor(() => expect(source.install).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows a listing’s version history from its More actions', async () => {
+    const versions = vi.fn(async () => [
+      entry(1, 1, 'Tidier columns'),
+      entry(1, 0),
+    ]);
+    const source = fakeSource(() => [listing({ id: 'dashboard' })], {
+      versions,
+    });
+    renderMarketplace(source);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Version history' })
+    );
+    const details = await screen.findByRole('dialog', {
+      name: 'Launch dashboard',
+    });
+    const history = await within(details).findByRole('list', {
+      name: 'Version history',
+    });
+    expect(within(history).getByText('Tidier columns')).toBeTruthy();
+    expect(
+      within(history).getByText('No notes for this version.')
+    ).toBeTruthy();
+    expect(versions).toHaveBeenCalledWith('dashboard');
   });
 
   it('opens a card’s More actions menu with a tap', async () => {
-    // jsdom has no scrollTo, which opening the menu reaches.
-    vi.stubGlobal('scrollTo', vi.fn());
     const source = fakeSource(() => [
       listing({ id: 'dashboard', installedMajor: 1 }),
     ]);
@@ -342,7 +438,6 @@ describe('Marketplace', () => {
             },
           }),
         ]);
-        render(() => <ImperativeDialogHost />);
         renderMarketplace(source);
 
         const card = screen.getByRole('article', {
@@ -354,6 +449,9 @@ describe('Marketplace', () => {
         const confirm = await screen.findByRole('dialog', {
           name: 'Update “Weekly digest” to v2.0?',
         });
+        expect(
+          within(confirm).getByText(/Updating replaces your edits/)
+        ).toBeTruthy();
         expect(source.install).not.toHaveBeenCalled();
 
         fireEvent.click(within(confirm).getByRole('button', { name: choice }));
@@ -399,6 +497,7 @@ describe('Marketplace', () => {
       renderMarketplace(source, routines);
 
       fireEvent.click(screen.getByRole('button', { name: 'Update to v2' }));
+      await confirmUpdate('Update “Weekly digest” to v2.0?', 'Update to v2');
       await vi.waitFor(() => expect(install).toHaveBeenCalledTimes(2));
       expect(install).toHaveBeenNthCalledWith(1, 'digest', expect.anything());
       expect(routines.fill).toHaveBeenCalledWith({

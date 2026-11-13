@@ -16,6 +16,7 @@ import { confirmDialog, Tabs } from '@ui';
 import { createSignal, Show } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
+import { UpdateChanges } from '../components/update-changes';
 import type {
   MarketplaceRoutines,
   MarketplaceSource,
@@ -27,10 +28,12 @@ import {
   listingTeamId,
   type MarketplaceTab,
   versionLabel,
+  versionsBetween,
 } from '../core/listing';
 import { MissingRoutineFills } from '../core/routine-fills';
 import { createMarketplaceList } from '../primitives/marketplace-list';
 import { InstalledPageView } from './installed-page-view';
+import { ListingDetailsDialog } from './listing-details-dialog';
 
 /** The person closed a routine's fill dialog: nothing happened. */
 const CANCELLED = Symbol('cancelled');
@@ -61,6 +64,11 @@ export function MarketplaceView(props: {
   );
   const search = () => (tab() === 'browse' ? typedSearch() : '');
   const [openId, setOpenId] = createSignal<string>();
+  const [detailsId, setDetailsId] = createSignal<string>();
+  const detailsListing = () => {
+    const id = detailsId();
+    return list.listings().find((listing) => listing.id === id);
+  };
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
   const list = props.source.list(() => ({
     installed: tab() === 'installed',
@@ -181,28 +189,39 @@ export function MarketplaceView(props: {
       }
     );
   /**
-   * A routine its person edited is refilled from the new major, replacing
-   * their edits: ask first.
+   * Ask before updating, showing what the versions between the viewer's and
+   * the newest changed. A routine its person edited is refilled from the new
+   * major, replacing their edits, which the question says too.
    */
-  const confirmReplacingEdits = (listing: Listing) =>
-    confirmDialog({
-      title: t('marketplace.updateEditedTitle', {
+  const confirmUpdate = async (listing: Listing) => {
+    const target = listing.latestVersion;
+    const history = await catchToResult(() =>
+      props.source.versions(listing.id)
+    );
+    const changes = history.isOk()
+      ? versionsBetween(
+          history.value,
+          listing.installedVersion ?? undefined,
+          target
+        )
+      : undefined;
+    const replacesEdits = Boolean(listing.installedRoutine?.detached);
+
+    return confirmDialog({
+      title: t('marketplace.updateConfirmTitle', {
         title: listing.title,
-        version: versionLabel(listing.latestVersion),
+        version: versionLabel(target),
       }),
-      body: t('marketplace.updateEditedBody'),
-      confirmLabel: t('marketplace.updateTo', {
-        major: listing.latestVersion.major,
-      }),
-      tone: 'danger',
+      body: <UpdateChanges changes={changes} replacesEdits={replacesEdits} />,
+      confirmLabel: t('marketplace.updateTo', { major: target.major }),
+      tone: replacesEdits ? 'danger' : undefined,
     });
+  };
 
   // Installing again moves the install to the newest major.
   const update = async (listing: Listing) => {
-    if (listing.installedRoutine?.detached) {
-      const confirmed = await confirmReplacingEdits(listing);
-      if (!confirmed) return;
-    }
+    const confirmed = await confirmUpdate(listing);
+    if (!confirmed) return;
 
     await act(
       'marketplace.update',
@@ -330,10 +349,23 @@ export function MarketplaceView(props: {
                   onUnlist={() =>
                     fireAndForget(unlist(listing()), 'marketplace')
                   }
+                  onDetails={() => setDetailsId(listing().id)}
                 />
               )}
             </ListingGrid>
           </div>
+          <Show when={detailsListing()}>
+            {(listing) => (
+              <ListingDetailsDialog
+                listing={listing()}
+                publisherName={props.publisherName(listing().publisher)}
+                versions={props.source.versions}
+                onOpenChange={(open) => {
+                  if (!open) setDetailsId(undefined);
+                }}
+              />
+            )}
+          </Show>
         </div>
       }
     >

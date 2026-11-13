@@ -2441,6 +2441,7 @@ export type Listing = {
      */
     installedMajor?: number | null;
     installedRoutine?: null | InstalledRoutine;
+    installedVersion?: null | Version;
     /**
      * What it publishes.
      */
@@ -2532,6 +2533,39 @@ export type ListingSource = {
      * Its user-specific parts, marked as when sharing it as a template.
      */
     variables?: Array<TemplateVariable>;
+};
+
+/**
+ * One version in a listing's history.
+ */
+export type ListingVersion = {
+    /**
+     * What its publisher said changed; absent when they said nothing.
+     */
+    changelog?: string | null;
+    /**
+     * When it was published.
+     */
+    createdAt: string;
+    /**
+     * A routine version the server made major because what installs rely
+     * on changed, whatever bump was asked.
+     */
+    forcedMajor: boolean;
+    /**
+     * Its version.
+     */
+    version: Version;
+};
+
+/**
+ * A listing's versions.
+ */
+export type ListingVersions = {
+    /**
+     * Every version, newest first.
+     */
+    versions: Array<ListingVersion>;
 };
 
 /**
@@ -2870,6 +2904,10 @@ export type PropertySelector = {
  */
 export type PublishListing = {
     /**
+     * What version 1.0 says about itself, at most 2000 characters.
+     */
+    changelog?: string | null;
+    /**
      * What it does, in a few lines.
      */
     description?: string;
@@ -2893,6 +2931,10 @@ export type PublishListingVersion = {
      * version whatever is asked.
      */
     bump: VersionBump;
+    /**
+     * What changed, for installers to read: at most 2000 characters.
+     */
+    changelog?: string | null;
     /**
      * What the listing was published from.
      */
@@ -6036,6 +6078,30 @@ export type GetMarketplaceListingRoutineResponses = {
 };
 
 export type GetMarketplaceListingRoutineResponse = GetMarketplaceListingRoutineResponses[keyof GetMarketplaceListingRoutineResponses];
+
+export type ListMarketplaceListingVersionsData = {
+    body?: never;
+    path: {
+        /**
+         * The listing
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/versions';
+};
+
+export type ListMarketplaceListingVersionsErrors = {
+    401: unknown;
+    404: unknown;
+    500: unknown;
+};
+
+export type ListMarketplaceListingVersionsResponses = {
+    200: ListingVersions;
+};
+
+export type ListMarketplaceListingVersionsResponse = ListMarketplaceListingVersionsResponses[keyof ListMarketplaceListingVersionsResponses];
 
 export type PublishMarketplaceListingVersionData = {
     body: PublishListingVersion;

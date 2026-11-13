@@ -1,14 +1,39 @@
 import type {
   Listing,
   ListingKind,
+  ListingVersion,
   Version,
 } from '@service-agent-harness/generated/schemas';
 
-export type { Listing, ListingKind };
+export type { Listing, ListingKind, ListingVersion };
 
 /** A version as people read it: `v1.2`. */
 export function versionLabel(version: Version): string {
   return `v${version.major}.${version.minor}`;
+}
+
+/** Orders versions oldest first: negative when `a` came before `b`. */
+export function compareVersions(a: Version, b: Version): number {
+  return a.major === b.major ? a.minor - b.minor : a.major - b.major;
+}
+
+/**
+ * The versions after `from` up to and including `to`, newest first: what
+ * taking `to` brings someone who has `from`. Everything up to `to` when
+ * `from` is unknown.
+ */
+export function versionsBetween(
+  versions: readonly ListingVersion[],
+  from: Version | undefined,
+  to: Version
+): ListingVersion[] {
+  return versions
+    .filter(
+      (entry) =>
+        compareVersions(entry.version, to) <= 0 &&
+        (from === undefined || compareVersions(entry.version, from) > 0)
+    )
+    .sort((a, b) => compareVersions(b.version, a.version));
 }
 
 /** Whether the viewer installed the listing. */

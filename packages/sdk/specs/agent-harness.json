@@ -4432,6 +4432,44 @@
       }
     },
     "/marketplace/listings/{id}/versions": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "The listing's versions, newest first: each one's changelog, when it was\npublished, and whether the server made a routine version major. Anyone\nwho sees the listing sees them.",
+        "operationId": "list_marketplace_listing_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The listing",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingVersions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      },
       "post": {
         "tags": ["marketplace"],
         "summary": "Publish the listing's source as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. A routine whose variables, required apps,\ntrigger kinds or knobs changed takes a major version whatever was asked,\nand the answer says which bump applied. A minor routine version updates\neach installed routine its person hasn't edited, after the version is\nstored. `409` means nothing changed.",
@@ -8030,6 +8068,17 @@
               }
             ]
           },
+          "installedVersion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Version",
+                "description": "The version the person asking has: the one their page shows, or the\none their routine was last filled in from."
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/ListingKind",
             "description": "What it publishes."
@@ -8166,6 +8215,44 @@
           }
         ],
         "description": "What a listing is published from."
+      },
+      "ListingVersion": {
+        "type": "object",
+        "description": "One version in a listing's history.",
+        "required": ["version", "forcedMajor", "createdAt"],
+        "properties": {
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What its publisher said changed; absent when they said nothing."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was published."
+          },
+          "forcedMajor": {
+            "type": "boolean",
+            "description": "A routine version the server made major because what installs rely\non changed, whatever bump was asked."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "Its version."
+          }
+        }
+      },
+      "ListingVersions": {
+        "type": "object",
+        "description": "A listing's versions.",
+        "required": ["versions"],
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ListingVersion"
+            },
+            "description": "Every version, newest first."
+          }
+        }
       },
       "LoadAgentModelsRequest": {
         "type": "object",
@@ -8637,6 +8724,10 @@
         "description": "Publish a page or routine to the caller's team.",
         "required": ["source", "title"],
         "properties": {
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What version 1.0 says about itself, at most 2000 characters."
+          },
           "description": {
             "type": "string",
             "description": "What it does, in a few lines."
@@ -8659,6 +8750,10 @@
           "bump": {
             "$ref": "#/components/schemas/VersionBump",
             "description": "Whether installs get it at once (`minor`) or wait (`major`). A\nroutine that asks something new of its installs takes a major\nversion whatever is asked."
+          },
+          "changelog": {
+            "type": ["string", "null"],
+            "description": "What changed, for installers to read: at most 2000 characters."
           },
           "source": {
             "$ref": "#/components/schemas/ListingSource",
