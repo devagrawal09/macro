@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 mod access;
 mod changes;
+mod drafts;
 #[cfg(test)]
 mod specs;
 
