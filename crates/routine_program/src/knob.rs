@@ -120,7 +120,7 @@ impl Knob {
     /// Its TypeScript type in the step's `knobs`. A choice is the union of
     /// its options, so code comparing against an option that doesn't exist
     /// fails the check.
-    pub(crate) fn ts_type(&self) -> String {
+    pub fn ts_type(&self) -> String {
         match self {
             Self::Text { .. } | Self::Question { .. } => "string".to_owned(),
             Self::Number { .. } => "number".to_owned(),

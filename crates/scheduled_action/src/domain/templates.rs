@@ -22,6 +22,9 @@ use super::event_trigger::ActionTrigger;
 use super::models::{ActionConfiguration, ActionPolicyError, ScheduledAction};
 use super::ports::{RoutineTemplateRepo, RoutineTemplateService, ScheduledActionService};
 
+pub mod fill;
+pub mod interface;
+
 #[cfg(test)]
 mod test;
 
@@ -69,6 +72,27 @@ pub enum TemplateVariable {
         timezone: Tz,
         fill: VariableFill,
     },
+}
+
+/// The key of the one time zone variable a template can have.
+pub const TIME_ZONE_KEY: &str = "time_zone";
+
+impl TemplateVariable {
+    /// What a variable is keyed by within one template: the mentioned
+    /// person's or item's id, or [`TIME_ZONE_KEY`].
+    pub fn key(&self) -> &str {
+        match self {
+            Self::User { id, .. } | Self::Item { id, .. } => id,
+            Self::TimeZone { .. } => TIME_ZONE_KEY,
+        }
+    }
+
+    /// How its author marked it to be filled.
+    pub fn fill(&self) -> VariableFill {
+        match self {
+            Self::User { fill, .. } | Self::Item { fill, .. } | Self::TimeZone { fill, .. } => *fill,
+        }
+    }
 }
 
 /// What the owner supplies when sharing; the rest is snapshotted from the routine.
@@ -122,11 +146,49 @@ pub enum TemplateInputError {
 
 impl ShareRoutineTemplate {
     fn into_snapshot(self, action: &ScheduledAction, action_id: Uuid) -> Result<TemplateSnapshot> {
-        if self.description.chars().count() > MAX_DESCRIPTION_CHARS {
-            return Err(TemplateInputError::DescriptionTooLong.into());
+        let RoutineSnapshot {
+            name,
+            description,
+            trigger,
+            task,
+            variables,
+        } = RoutineSnapshot::of(action, &self.description, self.variables)?;
+        Ok(TemplateSnapshot {
+            action_id,
+            name,
+            description,
+            trigger,
+            task,
+            variables,
+        })
+    }
+}
+
+/// A routine as someone else gets it: what a template and a marketplace
+/// listing's version both store.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RoutineSnapshot {
+    pub name: String,
+    pub description: String,
+    pub trigger: ActionTrigger,
+    #[schema(value_type = routine_program::RoutineTask)]
+    pub task: Value,
+    pub variables: Vec<TemplateVariable>,
+}
+
+impl RoutineSnapshot {
+    /// The routine as its owner shares it, with `variables` marked.
+    pub fn of(
+        action: &ScheduledAction,
+        description: &str,
+        variables: Vec<TemplateVariable>,
+    ) -> Result<Self, TemplateInputError> {
+        if description.chars().count() > MAX_DESCRIPTION_CHARS {
+            return Err(TemplateInputError::DescriptionTooLong);
         }
-        if self.variables.len() > MAX_VARIABLES {
-            return Err(TemplateInputError::TooManyVariables.into());
+        if variables.len() > MAX_VARIABLES {
+            return Err(TemplateInputError::TooManyVariables);
         }
         // Writing as its owner is the owner's choice alone; whoever activates
         // the template starts attributed to the agent and opts in themselves.
@@ -134,13 +196,12 @@ impl ShareRoutineTemplate {
         if let Value::Object(fields) = &mut task {
             fields.remove("dangerously_operate_as_user");
         }
-        Ok(TemplateSnapshot {
-            action_id,
+        Ok(Self {
             name: action.name.clone(),
-            description: self.description.trim().to_owned(),
+            description: description.trim().to_owned(),
             trigger: action.trigger.clone(),
             task,
-            variables: self.variables,
+            variables,
         })
     }
 }
