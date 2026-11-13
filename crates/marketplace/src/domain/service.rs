@@ -21,11 +21,13 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
-    Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery, ListingText,
-    MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing, PublishSource, PublishedPage,
-    PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineUpdates,
-    RoutineVersion, Version, VersionBump, VersionNotice,
+    AddedVersion, Audience, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
+    InstalledPage, Listing, ListingContent, ListingId, ListingKind, ListingQuery, ListingScope,
+    ListingText, MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing, PendingVersion, PublishScope,
+    PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, ReviewDecision,
+    ReviewOutcome, ReviewPreview, ReviewState, RoutineCopy, RoutineInstall, RoutineUpdate,
+    RoutineUpdates, RoutineVersion, Version, VersionBump, VersionNotice, ViewerListings,
+    interface_changes,
 };
 use crate::domain::ports::{
     ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
@@ -39,6 +41,9 @@ const UPDATE_CONCURRENCY: usize = 8;
 /// its code.
 const CLAIM_STALE_AFTER_SECS: u32 = 120;
 
+/// Most pending versions the review list shows.
+const MAX_PENDING_VERSIONS: u16 = 100;
+
 /// The marketplace service over its repository, page builder, routines,
 /// rollout and version notifier.
 pub struct MarketplaceServiceImpl<Listings, P, Ro, R, N> {
@@ -47,6 +52,9 @@ pub struct MarketplaceServiceImpl<Listings, P, Ro, R, N> {
     routines: Arc<Ro>,
     rollout: R,
     notifier: N,
+    /// Macro's publisher team, whose members publish to everyone and review
+    /// each other's versions. Without one, nobody publishes to everyone.
+    publisher_team: Option<Uuid>,
 }
 
 impl<Listings, P, Ro, R, N> MarketplaceServiceImpl<Listings, P, Ro, R, N>
@@ -72,7 +80,58 @@ where
             routines,
             rollout,
             notifier,
+            publisher_team: None,
         }
+    }
+
+    /// Let the members of `team` publish to everyone and review each other's
+    /// versions. `None` lets nobody.
+    pub fn with_publisher_team(mut self, team: Option<Uuid>) -> Self {
+        self.publisher_team = team;
+        self
+    }
+
+    /// Who the caller is, as listing visibility needs it.
+    fn audience(&self, member: Option<&Membership>) -> Audience {
+        let team = member.map(|member| member.team_id);
+        Audience {
+            team,
+            global_publisher: team.is_some() && team == self.publisher_team,
+        }
+    }
+
+    /// The caller's audience, refused unless they are a global publisher.
+    fn global_publisher(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+    ) -> Result<Audience, MarketplaceError> {
+        let audience = self.audience(membership(user, team)?.as_ref());
+        if audience.global_publisher {
+            Ok(audience)
+        } else {
+            Err(MarketplaceError::NotGlobalPublisher)
+        }
+    }
+
+    /// A version that just became live, for everyone who sees its listing:
+    /// a minor routine version updates the installs on its major, then its
+    /// installers are told.
+    async fn go_live(
+        &self,
+        id: ListingId,
+        version: Version,
+        content: ListingContent,
+    ) -> RoutineUpdates {
+        let updates = match content {
+            ListingContent::Routine(routine) if version.minor > 0 => {
+                self.update_installs(id, version, routine.snapshot).await
+            }
+            _ => RoutineUpdates::default(),
+        };
+        // After the updates, so a list the notice refetches shows them.
+        self.notify_installers(id, version).await;
+        updates
     }
 
     /// Tell the installers a new version concerns, so their open pages and
@@ -135,11 +194,11 @@ where
     async fn listing(
         &self,
         user: &MacroUserIdStr<'static>,
-        team: Option<Uuid>,
+        audience: Audience,
         id: ListingId,
     ) -> Result<Listing, MarketplaceError> {
         self.listings
-            .listing(user, team, id)
+            .listing(user, audience, id)
             .await
             .map_err(internal)?
             .ok_or(MarketplaceError::NotFound)
@@ -187,7 +246,7 @@ where
         }
     }
 
-    /// Fill the listing's newest routine version in as the caller's own and
+    /// Fill the listing's newest approved routine version in as the caller's own and
     /// save it: a new routine, or the one their install made, which then
     /// follows minor versions again even if they had edited it.
     async fn install_routine(
@@ -515,13 +574,18 @@ where
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         query: ListingQuery,
-    ) -> Result<ListingPage, MarketplaceError> {
+    ) -> Result<ViewerListings, MarketplaceError> {
         self.admit(user).await?;
-        let team = membership(user, team)?.map(|member| member.team_id);
-        self.listings
-            .listings(user, team, &query)
+        let audience = self.audience(membership(user, team)?.as_ref());
+        let page = self
+            .listings
+            .listings(user, audience, &query)
             .await
-            .map_err(internal)
+            .map_err(internal)?;
+        Ok(ViewerListings {
+            page,
+            global_publisher: audience.global_publisher,
+        })
     }
 
     #[tracing::instrument(
@@ -532,6 +596,7 @@ where
             listing_id = tracing::field::Empty,
             source_id = tracing::field::Empty,
             kind = %source.kind(),
+            scope = ?scope,
         )
     )]
     async fn publish(
@@ -540,11 +605,17 @@ where
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         source: PublishSource,
         text: ListingText,
+        scope: PublishScope,
     ) -> Result<Listing, MarketplaceError> {
         self.admit(user).await?;
-        let team_id = membership(user, team)?
-            .ok_or(MarketplaceError::NoTeam)?
-            .team_id;
+        let member = membership(user, team)?.ok_or(MarketplaceError::NoTeam)?;
+        let audience = self.audience(Some(&member));
+        // A global listing's first version waits for a second publisher.
+        let (team_id, review) = match scope {
+            PublishScope::Team => (Some(member.team_id), ReviewState::Approved),
+            PublishScope::Global if audience.global_publisher => (None, ReviewState::Pending),
+            PublishScope::Global => return Err(MarketplaceError::NotGlobalPublisher),
+        };
         let text = text.normalized()?;
         let source_id = owned_source(user, source.receipt(), source.kind())?;
         let span = tracing::Span::current();
@@ -562,6 +633,7 @@ where
                 source_id,
                 text,
                 content,
+                review,
             })
             .await
             .map_err(internal)?;
@@ -569,7 +641,7 @@ where
             return Err(MarketplaceError::AlreadyPublished);
         }
 
-        self.listing(user, Some(team_id), id).await
+        self.listing(user, audience, id).await
     }
 
     #[tracing::instrument(
@@ -593,10 +665,20 @@ where
         bump: VersionBump,
     ) -> Result<PublishedVersion, MarketplaceError> {
         self.admit(user).await?;
-        let team = membership(user, team)?.map(|member| member.team_id);
-        let listing = self.listing(user, team, id).await?;
+        let audience = self.audience(membership(user, team)?.as_ref());
+        let listing = self.listing(user, audience, id).await?;
         if listing.publisher != *user {
             return Err(MarketplaceError::Forbidden);
+        }
+        // A global listing's versions are reviewed, and published only by
+        // someone still on the publisher team.
+        let review = match listing.scope {
+            ListingScope::Team { .. } => ReviewState::Approved,
+            ListingScope::Global if audience.global_publisher => ReviewState::Pending,
+            ListingScope::Global => return Err(MarketplaceError::NotGlobalPublisher),
+        };
+        if listing.pending_version.is_some() {
+            return Err(MarketplaceError::ReviewPending);
         }
         let same_source = source.kind() == listing.kind
             && owned_source(user, source.receipt(), source.kind())? == listing.source_id;
@@ -609,6 +691,7 @@ where
         let content = self.content(source, &listing.description).await?;
         let bump = match &content {
             ListingContent::Page(_) => bump,
+            // Against what installs have: the newest approved version.
             ListingContent::Routine(routine) => {
                 let newest = self
                     .listings
@@ -623,29 +706,28 @@ where
 
         let added = self
             .listings
-            .add_version(id, bump, &content)
+            .add_version(id, bump, &content, review)
             .await
             .map_err(internal)?;
         let version = match added {
             AddedVersion::Added(version) => version,
             AddedVersion::Unchanged => return Err(MarketplaceError::Unchanged),
+            AddedVersion::ReviewPending => return Err(MarketplaceError::ReviewPending),
             AddedVersion::Missing => return Err(MarketplaceError::NotFound),
         };
 
-        // The version is stored: updating installs can't fail the publish.
-        let updates = match (content, bump) {
-            (ListingContent::Routine(routine), VersionBump::Minor) => {
-                self.update_installs(id, version, routine.snapshot).await
-            }
-            _ => RoutineUpdates::default(),
+        // The version is stored: updating installs can't fail the publish. A
+        // pending one goes live when it is approved.
+        let updates = match review {
+            ReviewState::Approved => self.go_live(id, version, content).await,
+            ReviewState::Pending | ReviewState::Rejected => RoutineUpdates::default(),
         };
-        // After the updates, so a list the notice refetches shows them.
-        self.notify_installers(id, version).await;
 
         Ok(PublishedVersion {
-            listing: self.listing(user, team, id).await?,
+            listing: self.listing(user, audience, id).await?,
             bump,
             updates,
+            review,
         })
     }
 
@@ -657,9 +739,9 @@ where
         id: ListingId,
     ) -> Result<RoutineVersion, MarketplaceError> {
         self.admit(user).await?;
-        let team = membership(user, team)?.map(|member| member.team_id);
-        let listing = self.listing(user, team, id).await?;
-        if listing.kind != ListingKind::Routine {
+        let audience = self.audience(membership(user, team)?.as_ref());
+        let listing = self.listing(user, audience, id).await?;
+        if listing.kind != ListingKind::Routine || !listing.has_approved_version() {
             return Err(MarketplaceError::NotFound);
         }
 
@@ -679,8 +761,8 @@ where
     ) -> Result<(), MarketplaceError> {
         self.admit(user).await?;
         let member = membership(user, team)?;
-        let team = member.as_ref().map(|member| member.team_id);
-        let listing = self.listing(user, team, id).await?;
+        let audience = self.audience(member.as_ref());
+        let listing = self.listing(user, audience, id).await?;
 
         let publisher = listing.publisher == *user;
         let team_admin = member
@@ -705,10 +787,14 @@ where
         request: InstallRequest,
     ) -> Result<Listing, MarketplaceError> {
         self.admit(user).await?;
-        let team = membership(user, team)?.map(|member| member.team_id);
+        let audience = self.audience(membership(user, team)?.as_ref());
         // Seeing it is what allows installing it; an unlisted listing is
-        // seen only by those who already did.
-        let listing = self.listing(user, team, id).await?;
+        // seen only by those who already did. Only an approved version
+        // installs.
+        let listing = self.listing(user, audience, id).await?;
+        if !listing.has_approved_version() {
+            return Err(MarketplaceError::NotFound);
+        }
 
         match listing.kind {
             ListingKind::Artifact => self
@@ -718,7 +804,7 @@ where
                 .map_err(internal)?,
             ListingKind::Routine => self.install_routine(user, id, request).await?,
         }
-        self.listing(user, team, id).await
+        self.listing(user, audience, id).await
     }
 
     #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
@@ -759,5 +845,122 @@ where
     ) -> Result<UserExecutionReceipt, MarketplaceError> {
         let page = self.installed_page(user, team, id).await?;
         Ok(self.pages.run(user, &page.html, request, cancel).await?)
+    }
+
+    #[tracing::instrument(err, skip_all, fields(team_id = tracing::field::Empty))]
+    async fn pending_versions(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+    ) -> Result<Vec<PendingVersion>, MarketplaceError> {
+        self.admit(user).await?;
+        self.global_publisher(user, team)?;
+        self.listings
+            .pending_versions(MAX_PENDING_VERSIONS)
+            .await
+            .map_err(internal)
+    }
+
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
+    async fn review_preview(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> Result<ReviewPreview, MarketplaceError> {
+        self.admit(user).await?;
+        self.global_publisher(user, team)?;
+        let review = self
+            .listings
+            .pending_review(id)
+            .await
+            .map_err(internal)?
+            .ok_or(MarketplaceError::NotFound)?;
+
+        match review.content {
+            // Built, never run: no route runs a pending version's programs.
+            ListingContent::Page(page) => Ok(ReviewPreview::Page {
+                pending: review.pending,
+                build: self.pages.build(&page.html).await?,
+                html: page.html,
+            }),
+            ListingContent::Routine(routine) => {
+                let approved = self
+                    .listings
+                    .routine_version(id, None)
+                    .await
+                    .map_err(internal)?;
+                Ok(ReviewPreview::Routine {
+                    pending: review.pending,
+                    interface_changes: interface_changes(
+                        approved.as_ref().map(|approved| &approved.snapshot),
+                        &routine.snapshot,
+                    ),
+                    snapshot: routine.snapshot,
+                })
+            }
+        }
+    }
+
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(
+            listing_id = %id,
+            version = %version,
+            outcome = tracing::field::Empty,
+            team_id = tracing::field::Empty,
+            routines_updated = tracing::field::Empty,
+            routines_detached = tracing::field::Empty,
+            routines_failed = tracing::field::Empty,
+        )
+    )]
+    async fn review(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+        version: Version,
+        decision: ReviewDecision,
+    ) -> Result<ReviewOutcome, MarketplaceError> {
+        self.admit(user).await?;
+        self.global_publisher(user, team)?;
+        let decision = decision.normalized()?;
+        let review = self
+            .listings
+            .pending_review(id)
+            .await
+            .map_err(internal)?
+            .filter(|review| review.pending.version == version)
+            .ok_or(MarketplaceError::NotFound)?;
+        if review.pending.publisher == *user {
+            return Err(MarketplaceError::OwnVersion);
+        }
+
+        let decided = self
+            .listings
+            .decide_review(id, version, user, &decision)
+            .await
+            .map_err(internal)?;
+        // Another reviewer decided first.
+        if !decided {
+            return Err(MarketplaceError::NotFound);
+        }
+        let state = decision.state();
+        tracing::Span::current().record("outcome", tracing::field::display(state));
+
+        let updates = match decision {
+            ReviewDecision::Approve => self.go_live(id, version, review.content).await,
+            ReviewDecision::Reject { .. } => {
+                // A new listing nobody may see goes, so its source can be
+                // published again.
+                if review.pending.approved_version.is_none() {
+                    self.listings.remove_listing(id).await.map_err(internal)?;
+                }
+                RoutineUpdates::default()
+            }
+        };
+
+        Ok(ReviewOutcome { state, updates })
     }
 }

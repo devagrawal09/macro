@@ -209,6 +209,13 @@ The binary allocates with mimalloc (`#[global_allocator]` in `src/main.rs`):
 glibc malloc kept freed memory resident as fragmentation under this
 workload. Tests and the library keep the system allocator.
 
+`MARKETPLACE_PUBLISHER_TEAM_ID` (optional, a team UUID) is Macro's
+marketplace publisher team: its members publish listings to everyone, and
+each such version waits for another member's approval. Unset, nobody
+publishes to everyone. Set it in Doppler's harness `dev` and `prd` configs
+(and `local/lcl_personal` to try review locally); it has no `BootStubEnv`
+placeholder because an absent value boots with the feature off.
+
 `AGENT_SESSION_IDLE_TIMEOUT_SECS` (default 900, so no Doppler key) is how long
 a session's command worker waits before it releases a quiet session from
 memory and exits; lower it only to exercise the release end to end. Values

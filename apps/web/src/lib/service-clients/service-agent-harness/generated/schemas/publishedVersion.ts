@@ -6,6 +6,7 @@
  */
 
 import type { Listing } from './listing';
+import type { ReviewState } from './reviewState';
 import type { RoutineUpdates } from './routineUpdates';
 import type { VersionBump } from './versionBump';
 
@@ -18,6 +19,9 @@ version whatever was asked. */
   bump: VersionBump;
   /** The listing with its new version. */
   listing: Listing;
+  /** `pending` for a global listing's version, which reaches nobody until
+another publisher approves it. */
+  review: ReviewState;
   /** Installs a minor routine version reached. */
   updates: RoutineUpdates;
 }

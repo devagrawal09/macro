@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE marketplace_listing_version\n            SET review_state = $4,\n                reviewed_by = $5,\n                reviewed_at = now(),\n                rejection_reason = $6\n            WHERE listing_id = $1\n              AND major = $2\n              AND minor = $3\n              AND review_state = 'pending'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eff357642314b4ef0594446330f58b00d58ba900a48b7c5fcf96715091f59d9e"
+}

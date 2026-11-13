@@ -5,6 +5,7 @@ import { catchToResult } from '@core/util/result';
 import { Telemetry } from '@macro-inc/observability';
 import type {
   ListingSource,
+  PublishScope,
   TemplateVariable,
   VersionBump,
 } from '@service-agent-harness/generated/schemas';
@@ -57,6 +58,9 @@ async function listingSource(target: PublishTarget): Promise<ListingSource> {
  * what is saved, so it waits for the editor's changes to save. A routine
  * update that changes what installs rely on is published as a major update
  * whatever was chosen, and the toast says so.
+ *
+ * Macro's publishers may also publish to everyone: each such version waits
+ * for another publisher's review, and the next waits until it is decided.
  */
 export function PublishListingDialog(props: {
   open: boolean;
@@ -89,12 +93,18 @@ export function PublishListingDialog(props: {
   const [title, setTitle] = createSignal(props.name);
   const [description, setDescription] = createSignal('');
   const [bump, setBump] = createSignal<VersionBump>('minor');
+  const [scope, setScope] = createSignal<PublishScope>('team');
+  const globalPublisher = () =>
+    !listings.isPending && (listings.data?.pages[0]?.globalPublisher ?? false);
+  // A version still waiting for review holds back the next.
+  const waiting = () => existing()?.pendingVersion ?? undefined;
   const [refusal, setRefusal] = createSignal<string>();
   const pending = () => publish.isPending || publishVersion.isPending;
   const blocked = () =>
     pending() ||
     unsaved() ||
     listings.isPending ||
+    waiting() !== undefined ||
     (!existing() && title().trim() === '');
 
   const close = (open: boolean) => {
@@ -134,18 +144,27 @@ export function PublishListingDialog(props: {
               listing: published.listing,
               forced: published.bump !== requested,
               updated: published.updates.updated,
+              inReview: published.review === 'pending',
             };
           }
 
+          const chosen = globalPublisher() ? scope() : 'team';
+          span.setAttr('marketplace.scope', chosen);
           const listing = await publish.mutateAsync({
             request: {
               source,
               title: title().trim(),
               description: description().trim(),
+              scope: chosen,
             },
             parentSpan: span,
           });
-          return { listing, forced: false, updated: 0 };
+          return {
+            listing,
+            forced: false,
+            updated: 0,
+            inReview: chosen === 'global',
+          };
         });
 
         if (result.isErr()) {
@@ -175,12 +194,23 @@ export function PublishListingDialog(props: {
           return;
         }
 
-        const { listing, forced, updated } = result.value;
+        const { listing, forced, updated, inReview } = result.value;
         span.setAttr('marketplace.listing_id', listing.id);
         span.setAttr('marketplace.forced_major', forced);
+        span.setAttr('marketplace.in_review', inReview);
         const version = versionLabel(listing.latestVersion);
 
-        if (!current) {
+        if (inReview) {
+          toast.success(
+            t('marketplace.publishedForReviewToast', {
+              title: listing.title,
+              version: versionLabel(
+                listing.pendingVersion ?? listing.latestVersion
+              ),
+            }),
+            { subtext: t('marketplace.publishedForReviewSubtext') }
+          );
+        } else if (!current) {
           toast.success(
             t('marketplace.publishedToast', { title: listing.title })
           );
@@ -244,6 +274,35 @@ export function PublishListingDialog(props: {
                         : t('marketplace.publishDescription')}
                     </ActionDialogShell.Description>
                   </ActionDialogShell.Header>
+                  <Show when={globalPublisher()}>
+                    <div class="flex flex-col gap-2">
+                      <Tabs
+                        aria-label={t('marketplace.publishScopeLabel')}
+                        fullWidth
+                        disabled={pending()}
+                        options={[
+                          {
+                            value: 'team' as const,
+                            label: t('marketplace.publishScopeTeam'),
+                          },
+                          {
+                            value: 'global' as const,
+                            label: t('marketplace.publishScopeGlobal'),
+                          },
+                        ]}
+                        value={scope()}
+                        onChange={(next) => {
+                          setScope(next);
+                          setRefusal(undefined);
+                        }}
+                      />
+                      <Show when={scope() === 'global'}>
+                        <p class="text-sm text-ink-muted">
+                          {t('marketplace.publishScopeGlobalHint')}
+                        </p>
+                      </Show>
+                    </div>
+                  </Show>
                   <TextField value={title()} onChange={setTitle}>
                     <TextField.Label>
                       {t('marketplace.publishFieldTitle')}
@@ -305,6 +364,11 @@ export function PublishListingDialog(props: {
                           ? t('marketplace.publishRoutineMinorHint')
                           : t('marketplace.publishMinorHint')}
                     </p>
+                    <Show when={current().scope.kind === 'global'}>
+                      <p class="text-sm text-ink-muted">
+                        {t('marketplace.publishGlobalUpdateHint')}
+                      </p>
+                    </Show>
                   </div>
                 </>
               )}
@@ -313,6 +377,15 @@ export function PublishListingDialog(props: {
               {(message) => (
                 <p role="alert" class="text-sm text-failure-ink">
                   {message()}
+                </p>
+              )}
+            </Show>
+            <Show when={waiting()}>
+              {(version) => (
+                <p role="status" class="text-sm text-ink-muted">
+                  {t('marketplace.publishWaitingForReview', {
+                    version: versionLabel(version()),
+                  })}
                 </p>
               )}
             </Show>

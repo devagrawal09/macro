@@ -38,8 +38,10 @@ use uuid::Uuid;
 
 use crate::domain::{
     models::{
-        InstallRequest, InstalledBuild, Listing, ListingId, ListingKind, ListingQuery, ListingText,
-        ListingsShown, MarketplaceError, PublishSource, PublishedVersion, Version, VersionBump,
+        InstallRequest, InstalledBuild, InterfaceChange, Listing, ListingId, ListingKind,
+        ListingQuery, ListingText, ListingsShown, MarketplaceError, PendingVersion, PublishScope,
+        PublishSource, PublishedVersion, ReviewDecision, ReviewOutcome, ReviewPreview, Version,
+        VersionBump,
     },
     ports::MarketplaceService,
 };
@@ -128,6 +130,15 @@ where
             "/marketplace/listings/{id}/install/code-executions",
             post(run_installed_listing_program::<S, Access, Auth>),
         )
+        .route(
+            "/marketplace/review",
+            get(list_marketplace_pending_versions::<S, Access, Auth>),
+        )
+        .route(
+            "/marketplace/review/{id}",
+            get(get_marketplace_version_review::<S, Access, Auth>)
+                .post(review_marketplace_version::<S, Access, Auth>),
+        )
         .with_state(state)
 }
 
@@ -139,6 +150,9 @@ pub struct MarketplaceListings {
     pub listings: Vec<Listing>,
     /// Send as `cursor` for the next page; absent on the last page.
     pub next_cursor: Option<String>,
+    /// The caller belongs to Macro's publisher team: they may publish to
+    /// everyone and review other publishers' versions.
+    pub global_publisher: bool,
 }
 
 /// Which page of listings to read.
@@ -195,6 +209,10 @@ pub struct PublishListing {
     /// What it does, in a few lines.
     #[serde(default)]
     pub description: String,
+    /// Who sees it: the caller's team (the default), or everyone once
+    /// another member of Macro's publisher team approves it.
+    #[serde(default)]
+    pub scope: PublishScope,
 }
 
 /// Publish a listing's source as its next version.
@@ -275,15 +293,101 @@ impl From<InstalledBuild> for InstalledListingBuild {
     }
 }
 
+/// The versions waiting for review, oldest first.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingVersions {
+    /// Each pending version, at most 100.
+    pub versions: Vec<PendingVersion>,
+}
+
+/// A pending version as a reviewer reads it. Nothing in it runs: a page is
+/// rendered with its programs refused.
+#[derive(Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VersionReview {
+    /// A page: its build and its source, which holds each program's code.
+    #[serde(rename_all = "camelCase")]
+    Artifact {
+        /// The version.
+        pending: PendingVersion,
+        /// The page to render with programs refused, or why it doesn't build.
+        page: DocumentBuildResponse,
+        /// The version's source.
+        html: String,
+    },
+    /// A routine: its snapshot and what it changes for installs.
+    #[serde(rename_all = "camelCase")]
+    Routine {
+        /// The version.
+        pending: PendingVersion,
+        /// The routine as installs would get it, before filling in.
+        routine: RoutineSnapshot,
+        /// What it asks of installs beyond the newest approved version, or
+        /// no longer asks; all of it for a new listing.
+        interface_changes: Vec<InterfaceChange>,
+    },
+}
+
+impl From<ReviewPreview> for VersionReview {
+    fn from(preview: ReviewPreview) -> Self {
+        match preview {
+            ReviewPreview::Page {
+                pending,
+                build,
+                html,
+            } => Self::Artifact {
+                pending,
+                page: build.into(),
+                html,
+            },
+            ReviewPreview::Routine {
+                pending,
+                snapshot,
+                interface_changes,
+            } => Self::Routine {
+                pending,
+                routine: snapshot,
+                interface_changes,
+            },
+        }
+    }
+}
+
+/// What a reviewer decides about a pending version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    /// It goes live for everyone.
+    Approve,
+    /// It never does.
+    Reject,
+}
+
+/// Approve or reject a listing's pending version.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewVersion {
+    /// The version reviewed; another one waiting answers `404`.
+    pub version: Version,
+    /// The decision.
+    pub decision: ReviewVerdict,
+    /// Why it was rejected, for its publisher.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 impl IntoResponse for MarketplaceError {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::Forbidden | Self::NotGlobalPublisher | Self::OwnVersion => StatusCode::FORBIDDEN,
             Self::Invalid(_) | Self::RoutineRejected(_) => StatusCode::BAD_REQUEST,
-            Self::NoTeam | Self::AlreadyPublished | Self::Unchanged | Self::InstallInProgress => {
-                StatusCode::CONFLICT
-            }
+            Self::NoTeam
+            | Self::AlreadyPublished
+            | Self::Unchanged
+            | Self::InstallInProgress
+            | Self::ReviewPending => StatusCode::CONFLICT,
             Self::DoesNotBuild | Self::MissingFills(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Page(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -393,16 +497,19 @@ where
         )
         .await?;
     Ok(Json(MarketplaceListings {
-        listings: page.listings,
-        next_cursor: page.next.map(|cursor| cursor.encode()),
+        listings: page.page.listings,
+        next_cursor: page.page.next.map(|cursor| cursor.encode()),
+        global_publisher: page.global_publisher,
     }))
 }
 
 #[utoipa::path(post, path = "/marketplace/listings", tag = "marketplace", operation_id = "publish_marketplace_listing",
     request_body = PublishListing,
     responses((status = 201, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse), (status = 413), (status = 422, body = ErrorResponse), (status = 500), (status = 503)))]
-/// Publish an HTML document or a routine the caller owns to their team's
-/// marketplace, as version 1.0. `409` means the caller has no team or the
+/// Publish an HTML document or a routine the caller owns as version 1.0: to
+/// their team's marketplace, or with `scope: global` to everyone once another
+/// member of Macro's publisher team approves it. `403` means a global publish
+/// by someone outside that team; `409` means the caller has no team or the
 /// source already has a listing; `422` means the page doesn't build.
 #[tracing::instrument(err, skip_all)]
 pub async fn publish_marketplace_listing<S, Access, Auth>(
@@ -428,6 +535,7 @@ where
                 title: body.title,
                 description: body.description,
             },
+            body.scope,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(listing)))
@@ -443,7 +551,9 @@ where
 /// trigger kinds or knobs changed takes a major version whatever was asked,
 /// and the answer says which bump applied. A minor routine version updates
 /// each installed routine its person hasn't edited, after the version is
-/// stored. `409` means nothing changed.
+/// stored. A global listing's version waits for review (`review: pending`)
+/// and reaches nobody until approved. `409` means nothing changed, or another
+/// version is still waiting for review.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn publish_marketplace_listing_version<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,
@@ -669,4 +779,99 @@ where
         )
         .await?;
     Ok(Json(receipt))
+}
+
+#[utoipa::path(get, path = "/marketplace/review", tag = "marketplace", operation_id = "list_marketplace_pending_versions",
+    responses((status = 200, body = PendingVersions), (status = 401), (status = 403, body = ErrorResponse), (status = 404), (status = 500)))]
+/// The versions waiting for review, oldest first. Only members of Macro's
+/// publisher team may list them.
+#[tracing::instrument(err, skip_all)]
+pub async fn list_marketplace_pending_versions<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<PendingVersions>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let versions = state
+        .service
+        .pending_versions(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+        )
+        .await?;
+    Ok(Json(PendingVersions { versions }))
+}
+
+#[utoipa::path(get, path = "/marketplace/review/{id}", tag = "marketplace", operation_id = "get_marketplace_version_review",
+    params(("id" = Uuid, Path, description = "A listing with a version waiting for review")),
+    responses((status = 200, body = VersionReview), (status = 401), (status = 403, body = ErrorResponse), (status = 404), (status = 500), (status = 503)))]
+/// The listing's pending version as a reviewer reads it: a page's build and
+/// source, or a routine's snapshot and interface changes. No route runs a
+/// pending version's programs.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn get_marketplace_version_review<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<VersionReview>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let preview = state
+        .service
+        .review_preview(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+        )
+        .await?;
+    Ok(Json(preview.into()))
+}
+
+#[utoipa::path(post, path = "/marketplace/review/{id}", tag = "marketplace", operation_id = "review_marketplace_version",
+    params(("id" = Uuid, Path, description = "A listing with a version waiting for review")),
+    request_body = ReviewVersion,
+    responses((status = 200, body = ReviewOutcome), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 500)))]
+/// Approve or reject the listing's pending version. A member of Macro's
+/// publisher team other than the version's publisher may. Approving makes it
+/// live: a minor routine version updates installs, and installers are told.
+/// Rejecting a new listing's first version unlists it. `403` for the
+/// version's own publisher; `404` when that version no longer waits.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn review_marketplace_version<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+    Json(body): Json<ReviewVersion>,
+) -> Result<Json<ReviewOutcome>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let decision = match body.decision {
+        ReviewVerdict::Approve => ReviewDecision::Approve,
+        ReviewVerdict::Reject => ReviewDecision::Reject {
+            reason: body.reason,
+        },
+    };
+    let outcome = state
+        .service
+        .review(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+            body.version,
+            decision,
+        )
+        .await?;
+    Ok(Json(outcome))
 }

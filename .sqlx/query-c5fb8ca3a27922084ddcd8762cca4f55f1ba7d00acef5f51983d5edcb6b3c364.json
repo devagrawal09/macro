@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM marketplace_listing_version\n                WHERE listing_id = $1 AND review_state = 'pending'\n            ) AS \"pending!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c5fb8ca3a27922084ddcd8762cca4f55f1ba7d00acef5f51983d5edcb6b3c364"
+}

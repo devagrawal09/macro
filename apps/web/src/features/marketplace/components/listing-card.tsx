@@ -3,6 +3,7 @@ import DotsIcon from '@icon/system/regular/dots-three.svg';
 import { Badge, Button, Card, Dropdown } from '@ui';
 import { Show } from 'solid-js';
 import {
+  hasApprovedVersion,
   installedRoutineState,
   isInstalled,
   type Listing,
@@ -56,6 +57,16 @@ export function ListingCard(props: {
               {t('marketplace.unlisted')}
             </Badge>
           </Show>
+          {/* Only Macro's publishers see a version waiting for review. */}
+          <Show when={props.listing.pendingVersion}>
+            {(pending) => (
+              <Badge variant="ghost" size="xs">
+                {t('marketplace.inReview', {
+                  version: versionLabel(pending()),
+                })}
+              </Badge>
+            )}
+          </Show>
         </Card.Metadata>
         <Card.Title>{props.listing.title}</Card.Title>
         <Show when={props.listing.description}>
@@ -85,15 +96,17 @@ export function ListingCard(props: {
           <Show
             when={installed()}
             fallback={
-              <Button
-                variant="primary"
-                size="sm"
-                class="touch:min-h-11"
-                disabled={props.busy}
-                onClick={() => props.onInstall()}
-              >
-                {t('marketplace.install')}
-              </Button>
+              <Show when={hasApprovedVersion(props.listing)}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  class="touch:min-h-11"
+                  disabled={props.busy}
+                  onClick={() => props.onInstall()}
+                >
+                  {t('marketplace.install')}
+                </Button>
+              </Show>
             }
           >
             <Show when={updateAvailable(props.listing)}>

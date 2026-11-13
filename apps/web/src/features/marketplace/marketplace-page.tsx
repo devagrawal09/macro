@@ -1,6 +1,9 @@
 import { openAgentsPage } from '@app/features/agents-view/primitives/open-page';
 import { variableKey } from '@app/features/routines/core/template';
-import { openFillTemplateDialog } from '@app/features/routines/routine-template';
+import {
+  openFillTemplateDialog,
+  routineTriggerLines,
+} from '@app/features/routines/routine-template';
 import { SettingsPage } from '@app/features/settings/primitives';
 import { t } from '@app/lib/i18n';
 import { useSplitLayout } from '@components/app/split-layout/layout';
@@ -70,6 +73,7 @@ function createMarketplaceRoutines(onOpened?: () => void): MarketplaceRoutines {
 
   return {
     fill,
+    triggerLines: routineTriggerLines,
     open: (routineId) => {
       openAgentsPage(layout, 'routines', { routineId });
       onOpened?.();

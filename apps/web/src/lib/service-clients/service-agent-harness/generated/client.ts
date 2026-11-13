@@ -65,6 +65,7 @@ import type {
   MarketplaceListings,
   MissingRoutineFills,
   OpenInApp,
+  PendingVersions,
   PresentView,
   PreviewAgentSessionsRequest,
   PreviewAgentSessionsResponse,
@@ -78,7 +79,9 @@ import type {
   RenameAgentSessionRequest,
   RetryAgentConversationTurnRequest,
   ReviewDecision,
+  ReviewOutcome,
   ReviewRecord,
+  ReviewVersion,
   RunDocumentProgram,
   SandboxSizeBody,
   SearchConnectedAppToolsParams,
@@ -91,6 +94,7 @@ import type {
   UnlinkAgentSessionPullRequestParams,
   UpdateSharePermissionRequestV2,
   UserExecutionReceipt,
+  VersionReview,
   WarmAgentSessionRequest,
   WarmAgentSessionResponse,
   WorkRegistrationResponse,
@@ -4692,8 +4696,10 @@ export const listMarketplaceListings = async (
 };
 
 /**
- * @summary Publish an HTML document or a routine the caller owns to their team's
-marketplace, as version 1.0. `409` means the caller has no team or the
+ * @summary Publish an HTML document or a routine the caller owns as version 1.0: to
+their team's marketplace, or with `scope: global` to everyone once another
+member of Macro's publisher team approves it. `403` means a global publish
+by someone outside that team; `409` means the caller has no team or the
 source already has a listing; `422` means the page doesn't build.
  */
 export type publishMarketplaceListingResponse201 = {
@@ -5270,7 +5276,9 @@ for each person to take it. A routine whose variables, required apps,
 trigger kinds or knobs changed takes a major version whatever was asked,
 and the answer says which bump applied. A minor routine version updates
 each installed routine its person hasn't edited, after the version is
-stored. `409` means nothing changed.
+stored. A global listing's version waits for review (`review: pending`)
+and reaches nobody until approved. `409` means nothing changed, or another
+version is still waiting for review.
  */
 export type publishMarketplaceListingVersionResponse201 = {
   data: PublishedVersion;
@@ -5370,6 +5378,237 @@ export const publishMarketplaceListingVersion = async (
     status: res.status,
     headers: res.headers,
   } as publishMarketplaceListingVersionResponse;
+};
+
+/**
+ * @summary The versions waiting for review, oldest first. Only members of Macro's
+publisher team may list them.
+ */
+export type listMarketplacePendingVersionsResponse200 = {
+  data: PendingVersions;
+  status: 200;
+};
+
+export type listMarketplacePendingVersionsResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type listMarketplacePendingVersionsResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type listMarketplacePendingVersionsResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type listMarketplacePendingVersionsResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type listMarketplacePendingVersionsResponseSuccess =
+  listMarketplacePendingVersionsResponse200 & {
+    headers: Headers;
+  };
+export type listMarketplacePendingVersionsResponseError = (
+  | listMarketplacePendingVersionsResponse401
+  | listMarketplacePendingVersionsResponse403
+  | listMarketplacePendingVersionsResponse404
+  | listMarketplacePendingVersionsResponse500
+) & {
+  headers: Headers;
+};
+
+export type listMarketplacePendingVersionsResponse =
+  | listMarketplacePendingVersionsResponseSuccess
+  | listMarketplacePendingVersionsResponseError;
+
+export const getListMarketplacePendingVersionsUrl = () => {
+  return `/marketplace/review`;
+};
+
+export const listMarketplacePendingVersions = async (
+  options?: RequestInit
+): Promise<listMarketplacePendingVersionsResponse> => {
+  const res = await fetch(getListMarketplacePendingVersionsUrl(), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listMarketplacePendingVersionsResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as listMarketplacePendingVersionsResponse;
+};
+
+/**
+ * @summary The listing's pending version as a reviewer reads it: a page's build and
+source, or a routine's snapshot and interface changes. No route runs a
+pending version's programs.
+ */
+export type getMarketplaceVersionReviewResponse200 = {
+  data: VersionReview;
+  status: 200;
+};
+
+export type getMarketplaceVersionReviewResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type getMarketplaceVersionReviewResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type getMarketplaceVersionReviewResponse404 = {
+  data: void;
+  status: 404;
+};
+
+export type getMarketplaceVersionReviewResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type getMarketplaceVersionReviewResponse503 = {
+  data: void;
+  status: 503;
+};
+
+export type getMarketplaceVersionReviewResponseSuccess =
+  getMarketplaceVersionReviewResponse200 & {
+    headers: Headers;
+  };
+export type getMarketplaceVersionReviewResponseError = (
+  | getMarketplaceVersionReviewResponse401
+  | getMarketplaceVersionReviewResponse403
+  | getMarketplaceVersionReviewResponse404
+  | getMarketplaceVersionReviewResponse500
+  | getMarketplaceVersionReviewResponse503
+) & {
+  headers: Headers;
+};
+
+export type getMarketplaceVersionReviewResponse =
+  | getMarketplaceVersionReviewResponseSuccess
+  | getMarketplaceVersionReviewResponseError;
+
+export const getGetMarketplaceVersionReviewUrl = (id: string) => {
+  return `/marketplace/review/${id}`;
+};
+
+export const getMarketplaceVersionReview = async (
+  id: string,
+  options?: RequestInit
+): Promise<getMarketplaceVersionReviewResponse> => {
+  const res = await fetch(getGetMarketplaceVersionReviewUrl(id), {
+    ...options,
+    method: 'GET',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getMarketplaceVersionReviewResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as getMarketplaceVersionReviewResponse;
+};
+
+/**
+ * @summary Approve or reject the listing's pending version. A member of Macro's
+publisher team other than the version's publisher may. Approving makes it
+live: a minor routine version updates installs, and installers are told.
+Rejecting a new listing's first version unlists it. `403` for the
+version's own publisher; `404` when that version no longer waits.
+ */
+export type reviewMarketplaceVersionResponse200 = {
+  data: ReviewOutcome;
+  status: 200;
+};
+
+export type reviewMarketplaceVersionResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type reviewMarketplaceVersionResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type reviewMarketplaceVersionResponse403 = {
+  data: ErrorResponse;
+  status: 403;
+};
+
+export type reviewMarketplaceVersionResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type reviewMarketplaceVersionResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type reviewMarketplaceVersionResponseSuccess =
+  reviewMarketplaceVersionResponse200 & {
+    headers: Headers;
+  };
+export type reviewMarketplaceVersionResponseError = (
+  | reviewMarketplaceVersionResponse400
+  | reviewMarketplaceVersionResponse401
+  | reviewMarketplaceVersionResponse403
+  | reviewMarketplaceVersionResponse404
+  | reviewMarketplaceVersionResponse500
+) & {
+  headers: Headers;
+};
+
+export type reviewMarketplaceVersionResponse =
+  | reviewMarketplaceVersionResponseSuccess
+  | reviewMarketplaceVersionResponseError;
+
+export const getReviewMarketplaceVersionUrl = (id: string) => {
+  return `/marketplace/review/${id}`;
+};
+
+export const reviewMarketplaceVersion = async (
+  id: string,
+  reviewVersion: ReviewVersion,
+  options?: RequestInit
+): Promise<reviewMarketplaceVersionResponse> => {
+  const res = await fetch(getReviewMarketplaceVersionUrl(id), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(reviewVersion),
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: reviewMarketplaceVersionResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as reviewMarketplaceVersionResponse;
 };
 
 /**

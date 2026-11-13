@@ -4002,7 +4002,7 @@
       },
       "post": {
         "tags": ["marketplace"],
-        "summary": "Publish an HTML document or a routine the caller owns to their team's\nmarketplace, as version 1.0. `409` means the caller has no team or the\nsource already has a listing; `422` means the page doesn't build.",
+        "summary": "Publish an HTML document or a routine the caller owns as version 1.0: to\ntheir team's marketplace, or with `scope: global` to everyone once another\nmember of Macro's publisher team approves it. `403` means a global publish\nby someone outside that team; `409` means the caller has no team or the\nsource already has a listing; `422` means the page doesn't build.",
         "operationId": "publish_marketplace_listing",
         "requestBody": {
           "content": {
@@ -4434,7 +4434,7 @@
     "/marketplace/listings/{id}/versions": {
       "post": {
         "tags": ["marketplace"],
-        "summary": "Publish the listing's source as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. A routine whose variables, required apps,\ntrigger kinds or knobs changed takes a major version whatever was asked,\nand the answer says which bump applied. A minor routine version updates\neach installed routine its person hasn't edited, after the version is\nstored. `409` means nothing changed.",
+        "summary": "Publish the listing's source as its next version. A minor version\nreaches every install on the newest major at once; a major version waits\nfor each person to take it. A routine whose variables, required apps,\ntrigger kinds or knobs changed takes a major version whatever was asked,\nand the answer says which bump applied. A minor routine version updates\neach installed routine its person hasn't edited, after the version is\nstored. A global listing's version waits for review (`review: pending`)\nand reaches nobody until approved. `409` means nothing changed, or another\nversion is still waiting for review.",
         "operationId": "publish_marketplace_listing_version",
         "parameters": [
           {
@@ -4529,6 +4529,172 @@
             "description": ""
           },
           "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/review": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "The versions waiting for review, oldest first. Only members of Macro's\npublisher team may list them.",
+        "operationId": "list_marketplace_pending_versions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingVersions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/marketplace/review/{id}": {
+      "get": {
+        "tags": ["marketplace"],
+        "summary": "The listing's pending version as a reviewer reads it: a page's build and\nsource, or a routine's snapshot and interface changes. No route runs a\npending version's programs.",
+        "operationId": "get_marketplace_version_review",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing with a version waiting for review",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionReview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "tags": ["marketplace"],
+        "summary": "Approve or reject the listing's pending version. A member of Macro's\npublisher team other than the version's publisher may. Approving makes it\nlive: a minor routine version updates installs, and installers are told.\nRejecting a new listing's first version unlists it. `403` for the\nversion's own publisher; `404` when that version no longer waits.",
+        "operationId": "review_marketplace_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "A listing with a version waiting for review",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
             "description": ""
           }
         }
@@ -7902,6 +8068,35 @@
           }
         }
       },
+      "InterfaceChange": {
+        "type": "object",
+        "description": "One part of a routine's interface added or removed by a version.",
+        "required": ["part", "change", "name"],
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/InterfaceChangeKind",
+            "description": "Added or removed."
+          },
+          "name": {
+            "type": "string",
+            "description": "The part as people read it, such as a variable's key and kind."
+          },
+          "part": {
+            "$ref": "#/components/schemas/InterfacePart",
+            "description": "Which part."
+          }
+        }
+      },
+      "InterfaceChangeKind": {
+        "type": "string",
+        "description": "Whether a part of the interface came or went.",
+        "enum": ["added", "removed"]
+      },
+      "InterfacePart": {
+        "type": "string",
+        "description": "A part of a routine's interface.",
+        "enum": ["variable", "app", "trigger", "knob"]
+      },
       "KnobName": {
         "type": "string",
         "description": "How code reads a knob: a lowercase letter, then up to 31 letters or\ndigits, e.g. `dueWithinDays`."
@@ -8036,7 +8231,18 @@
           },
           "latestVersion": {
             "$ref": "#/components/schemas/Version",
-            "description": "Its newest version."
+            "description": "Its newest approved version. A global listing not yet approved, which\nonly Macro's publishers see, shows the version waiting for review."
+          },
+          "pendingVersion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Version",
+                "description": "The version waiting for review, shown only to Macro's publishers."
+              }
+            ]
           },
           "publisher": {
             "type": "string",
@@ -8231,8 +8437,12 @@
       "MarketplaceListings": {
         "type": "object",
         "description": "A page of the listings the caller may see.",
-        "required": ["listings"],
+        "required": ["listings", "globalPublisher"],
         "properties": {
+          "globalPublisher": {
+            "type": "boolean",
+            "description": "The caller belongs to Macro's publisher team: they may publish to\neveryone and review other publishers' versions."
+          },
           "listings": {
             "type": "array",
             "items": {
@@ -8506,6 +8716,75 @@
         ],
         "description": "A JSON text, number, boolean or null that payload values are compared with."
       },
+      "PendingVersion": {
+        "type": "object",
+        "description": "A version waiting for review, as the review list shows it.",
+        "required": [
+          "listingId",
+          "kind",
+          "title",
+          "description",
+          "publisher",
+          "version",
+          "publishedAt"
+        ],
+        "properties": {
+          "approvedVersion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Version",
+                "description": "The listing's newest approved version, absent for a new listing."
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "description": "What it does."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ListingKind",
+            "description": "What the listing publishes."
+          },
+          "listingId": {
+            "$ref": "#/components/schemas/ListingId",
+            "description": "Its listing."
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was published."
+          },
+          "publisher": {
+            "type": "string",
+            "description": "Who published the version, who may not review it."
+          },
+          "title": {
+            "type": "string",
+            "description": "The listing's name."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "The version waiting."
+          }
+        }
+      },
+      "PendingVersions": {
+        "type": "object",
+        "description": "The versions waiting for review, oldest first.",
+        "required": ["versions"],
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingVersion"
+            },
+            "description": "Each pending version, at most 100."
+          }
+        }
+      },
       "PermissionAnswer": {
         "oneOf": [
           {
@@ -8641,6 +8920,10 @@
             "type": "string",
             "description": "What it does, in a few lines."
           },
+          "scope": {
+            "$ref": "#/components/schemas/PublishScope",
+            "description": "Who sees it: the caller's team (the default), or everyone once\nanother member of Macro's publisher team approves it."
+          },
           "source": {
             "$ref": "#/components/schemas/ListingSource",
             "description": "What it is published from."
@@ -8666,10 +8949,15 @@
           }
         }
       },
+      "PublishScope": {
+        "type": "string",
+        "description": "Who a first publish lists to.",
+        "enum": ["team", "global"]
+      },
       "PublishedVersion": {
         "type": "object",
         "description": "A new version and how it was numbered.",
-        "required": ["listing", "bump", "updates"],
+        "required": ["listing", "bump", "updates", "review"],
         "properties": {
           "bump": {
             "$ref": "#/components/schemas/VersionBump",
@@ -8678,6 +8966,10 @@
           "listing": {
             "$ref": "#/components/schemas/Listing",
             "description": "The listing with its new version."
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReviewState",
+            "description": "`pending` for a global listing's version, which reaches nobody until\nanother publisher approves it."
           },
           "updates": {
             "$ref": "#/components/schemas/RoutineUpdates",
@@ -9108,6 +9400,21 @@
         "format": "uuid",
         "description": "Persisted review identity."
       },
+      "ReviewOutcome": {
+        "type": "object",
+        "description": "What a review decided, and the installs an approved minor routine\nversion reached.",
+        "required": ["state", "updates"],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ReviewState",
+            "description": "`approved` or `rejected`."
+          },
+          "updates": {
+            "$ref": "#/components/schemas/RoutineUpdates",
+            "description": "Installs the version reached when it went live."
+          }
+        }
+      },
       "ReviewRecord": {
         "allOf": [
           {
@@ -9183,6 +9490,35 @@
           }
         ],
         "description": "Full UI record, fetched outside the model context."
+      },
+      "ReviewState": {
+        "type": "string",
+        "description": "Where a version stands in review. Team versions are approved as they are\nstored; a global version waits for a second publisher.",
+        "enum": ["pending", "approved", "rejected"]
+      },
+      "ReviewVerdict": {
+        "type": "string",
+        "description": "What a reviewer decides about a pending version.",
+        "enum": ["approve", "reject"]
+      },
+      "ReviewVersion": {
+        "type": "object",
+        "description": "Approve or reject a listing's pending version.",
+        "required": ["version", "decision"],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ReviewVerdict",
+            "description": "The decision."
+          },
+          "reason": {
+            "type": ["string", "null"],
+            "description": "Why it was rejected, for its publisher."
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version",
+            "description": "The version reviewed; another one waiting answers `404`."
+          }
+        }
       },
       "Root": {
         "oneOf": [
@@ -10535,6 +10871,60 @@
         "description": "How a new version follows the newest one.",
         "enum": ["minor", "major"]
       },
+      "VersionReview": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A page: its build and its source, which holds each program's code.",
+            "required": ["pending", "page", "html", "kind"],
+            "properties": {
+              "html": {
+                "type": "string",
+                "description": "The version's source."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["artifact"]
+              },
+              "page": {
+                "$ref": "#/components/schemas/DocumentBuildResponse",
+                "description": "The page to render with programs refused, or why it doesn't build."
+              },
+              "pending": {
+                "$ref": "#/components/schemas/PendingVersion",
+                "description": "The version."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A routine: its snapshot and what it changes for installs.",
+            "required": ["pending", "routine", "interfaceChanges", "kind"],
+            "properties": {
+              "interfaceChanges": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InterfaceChange"
+                },
+                "description": "What it asks of installs beyond the newest approved version, or\nno longer asks; all of it for a new listing."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["routine"]
+              },
+              "pending": {
+                "$ref": "#/components/schemas/PendingVersion",
+                "description": "The version."
+              },
+              "routine": {
+                "$ref": "#/components/schemas/RoutineSnapshot",
+                "description": "The routine as installs would get it, before filling in."
+              }
+            }
+          }
+        ],
+        "description": "A pending version as a reviewer reads it. Nothing in it runs: a page is\nrendered with its programs refused."
+      },
       "WarmAgentSessionRequest": {
         "type": "object",
         "description": "A client-minted id deduplicates warm calls without creating a conversation.",
@@ -10638,7 +11028,7 @@
     },
     {
       "name": "marketplace",
-      "description": "Pages and routines people publish for their team to install"
+      "description": "Pages and routines people publish for their team, or Macro for everyone after review, to install"
     }
   ]
 }

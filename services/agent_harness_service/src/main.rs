@@ -1973,7 +1973,8 @@ async fn run() -> anyhow::Result<()> {
                         marketplace::outbound::conn_gateway_notifier::ConnGatewayVersionNotifier::new(
                             connection_gateway.clone(),
                         ),
-                    )),
+                    )
+                    .with_publisher_team(config.marketplace_publisher_team_id)),
                     entity_access.clone(),
                     MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
                 ),

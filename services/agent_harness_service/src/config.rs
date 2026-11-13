@@ -287,6 +287,10 @@ pub struct Config {
     pub github_sync_app_pem_secret_key: LocalOrRemoteSecret<GithubSyncAppPemSecretKey>,
     /// Lets a team-scoped bot with no acting user own the sessions it creates.
     pub enable_non_user_owners: EnableNonUserOwners,
+    /// Macro's publisher team: its members publish marketplace listings to
+    /// everyone, and each version waits for another member's approval.
+    /// Unset, nobody publishes to everyone.
+    pub marketplace_publisher_team_id: Option<Uuid>,
 }
 
 impl Config {

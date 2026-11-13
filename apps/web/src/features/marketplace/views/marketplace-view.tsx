@@ -12,8 +12,9 @@ import { debouncedDependent } from '@core/util/debounce';
 import { fireAndForget } from '@core/util/fireAndForget';
 import { catchToResult } from '@core/util/result';
 import { type Span, Telemetry } from '@macro-inc/observability';
+import type { PendingVersion } from '@service-agent-harness/generated/schemas';
 import { confirmDialog, Tabs } from '@ui';
-import { createSignal, Show } from 'solid-js';
+import { createSignal, Match, Show, Switch } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
 import type {
@@ -31,6 +32,8 @@ import {
 import { MissingRoutineFills } from '../core/routine-fills';
 import { createMarketplaceList } from '../primitives/marketplace-list';
 import { InstalledPageView } from './installed-page-view';
+import { ReviewList } from './review-list';
+import { ReviewPreviewView } from './review-preview-view';
 
 /** The person closed a routine's fill dialog: nothing happened. */
 const CANCELLED = Symbol('cancelled');
@@ -39,9 +42,11 @@ const CANCELLED = Symbol('cancelled');
 const SEARCH_DEBOUNCE_MS = 300;
 
 /**
- * The marketplace: what the viewer's team published (Browse) and what the
- * viewer installed (Installed), as cards. Opening an installed page shows it
- * in place of the lists; opening an installed routine opens the routine.
+ * The marketplace: what the viewer's team and Macro published (Browse) and
+ * what the viewer installed (Installed), as cards. Opening an installed page
+ * shows it in place of the lists; opening an installed routine opens the
+ * routine. Macro's publishers also get Review: the versions other publishers
+ * sent to everyone, to preview, approve or reject.
  */
 export function MarketplaceView(props: {
   source: MarketplaceSource;
@@ -52,20 +57,27 @@ export function MarketplaceView(props: {
   /** A publisher's name as people read it. */
   publisherName: (publisherId: string) => string;
 }) {
-  const [tab, setTab] = createSignal<MarketplaceTab>('browse');
+  const [chosenTab, setTab] = createSignal<MarketplaceTab>('browse');
   const [searchText, setSearchText] = createSignal('');
   // Browse searches once typing pauses; Installed lists every install.
   const typedSearch = debouncedDependent(
     () => searchText().trim(),
     SEARCH_DEBOUNCE_MS
   );
-  const search = () => (tab() === 'browse' ? typedSearch() : '');
   const [openId, setOpenId] = createSignal<string>();
+  const [reviewing, setReviewing] = createSignal<PendingVersion>();
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
   const list = props.source.list(() => ({
-    installed: tab() === 'installed',
-    search: search(),
+    installed: chosenTab() === 'installed',
+    search: chosenTab() === 'browse' ? typedSearch() : '',
   }));
+  // Review is for Macro's publishers alone; anyone else stays on Browse.
+  const tab = (): MarketplaceTab =>
+    chosenTab() === 'review' && !list.globalPublisher()
+      ? 'browse'
+      : chosenTab();
+  const search = () => (tab() === 'browse' ? typedSearch() : '');
+  const pending = props.source.pending(() => tab() === 'review');
   const view = createMarketplaceList(list, tab, search);
   const [sentinel, setSentinel] = createSignal<HTMLDivElement>();
   const loadMore = () => fireAndForget(list.loadMore(), 'marketplace');
@@ -260,6 +272,56 @@ export function MarketplaceView(props: {
       }
     );
   };
+  /** Approve or reject a pending version, in its own span. */
+  const review = (
+    pendingVersion: PendingVersion,
+    decision: 'approve' | 'reject',
+    reason?: string
+  ) =>
+    Telemetry.span('marketplace.review', async (span) => {
+      span.setAttr('marketplace.listing_id', pendingVersion.listingId);
+      span.setAttr('marketplace.version', versionLabel(pendingVersion.version));
+      span.setAttr('marketplace.decision', decision);
+      const id = pendingVersion.listingId;
+      setBusy((current) => new Set(current).add(id));
+      const result = await catchToResult(() =>
+        props.source.review(
+          id,
+          {
+            version: pendingVersion.version,
+            decision,
+            reason: reason || undefined,
+          },
+          span
+        )
+      );
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+
+      const names = {
+        title: pendingVersion.title,
+        version: versionLabel(pendingVersion.version),
+      };
+      if (result.isErr()) {
+        span.error('marketplace.review failed');
+        toast.failure(
+          decision === 'approve'
+            ? t('marketplace.reviewApproveFailed', names)
+            : t('marketplace.reviewRejectFailed', names)
+        );
+        return;
+      }
+      if (reviewing()?.listingId === id) setReviewing(undefined);
+      toast.success(
+        decision === 'approve'
+          ? t('marketplace.reviewApprovedToast', names)
+          : t('marketplace.reviewRejectedToast', names)
+      );
+    });
+
   const canUnlist = (listing: Listing) => {
     if (isPublisher(listing, props.userId)) return true;
 
@@ -267,36 +329,39 @@ export function MarketplaceView(props: {
     return teamId !== undefined && props.isTeamAdmin(teamId);
   };
 
-  return (
-    <Show
-      when={openListing()}
-      fallback={
-        <div class="flex size-full min-h-0 min-w-0 flex-col">
-          <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3 mobile:px-3">
-            <Tabs
-              aria-label={t('marketplace.tabsLabel')}
-              size={isTouchDevice() ? 'lg' : undefined}
-              options={[
-                { value: 'browse' as const, label: t('marketplace.browse') },
-                {
-                  value: 'installed' as const,
-                  label: t('marketplace.installed'),
-                },
-              ]}
-              value={tab()}
-              onChange={setTab}
-            />
-            <Show when={tab() === 'browse'}>
-              <SearchBar
-                label={t('marketplace.search')}
-                placeholder={t('marketplace.search')}
-                value={searchText()}
-                onValueChange={setSearchText}
-                class="max-w-80 min-w-48 flex-1 mobile:max-w-none"
-              />
-            </Show>
-          </div>
-          <div class="min-h-0 flex-1 overflow-auto touch:pb-(--mobile-content-inset-bottom)">
+  const lists = () => (
+    <div class="flex size-full min-h-0 min-w-0 flex-col">
+      <div class="flex shrink-0 flex-wrap items-center gap-2 px-4 pt-3 mobile:px-3">
+        <Tabs
+          aria-label={t('marketplace.tabsLabel')}
+          size={isTouchDevice() ? 'lg' : undefined}
+          options={[
+            { value: 'browse' as const, label: t('marketplace.browse') },
+            {
+              value: 'installed' as const,
+              label: t('marketplace.installed'),
+            },
+            ...(list.globalPublisher()
+              ? [{ value: 'review' as const, label: t('marketplace.review') }]
+              : []),
+          ]}
+          value={tab()}
+          onChange={setTab}
+        />
+        <Show when={tab() === 'browse'}>
+          <SearchBar
+            label={t('marketplace.search')}
+            placeholder={t('marketplace.search')}
+            value={searchText()}
+            onValueChange={setSearchText}
+            class="max-w-80 min-w-48 flex-1 mobile:max-w-none"
+          />
+        </Show>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto touch:pb-(--mobile-content-inset-bottom)">
+        <Show
+          when={tab() === 'review'}
+          fallback={
             <ListingGrid
               view={view()}
               label={
@@ -333,24 +398,61 @@ export function MarketplaceView(props: {
                 />
               )}
             </ListingGrid>
-          </div>
-        </div>
-      }
-    >
-      {(listing) => (
-        <TraceFlow
-          name="marketplace.installed_page"
-          attributes={{ 'marketplace.listing_id': listing().id }}
-          key={() => listing().id}
+          }
         >
-          <InstalledPageView
-            listing={listing()}
-            busy={busy().has(listing().id)}
-            onBack={() => setOpenId(undefined)}
-            onUpdate={() => fireAndForget(update(listing()), 'marketplace')}
+          <ReviewList
+            list={pending}
+            userId={props.userId}
+            publisherName={props.publisherName}
+            busy={busy()}
+            onPreview={setReviewing}
+            onApprove={(version) =>
+              fireAndForget(review(version, 'approve'), 'marketplace')
+            }
+            onReject={(version, reason) =>
+              fireAndForget(review(version, 'reject', reason), 'marketplace')
+            }
           />
-        </TraceFlow>
-      )}
-    </Show>
+        </Show>
+      </div>
+    </div>
+  );
+
+  return (
+    <Switch fallback={lists()}>
+      <Match when={openListing()}>
+        {(listing) => (
+          <TraceFlow
+            name="marketplace.installed_page"
+            attributes={{ 'marketplace.listing_id': listing().id }}
+            key={() => listing().id}
+          >
+            <InstalledPageView
+              listing={listing()}
+              busy={busy().has(listing().id)}
+              onBack={() => setOpenId(undefined)}
+              onUpdate={() => fireAndForget(update(listing()), 'marketplace')}
+            />
+          </TraceFlow>
+        )}
+      </Match>
+      <Match when={tab() === 'review' && reviewing()}>
+        {(pendingVersion) => (
+          <TraceFlow
+            name="marketplace.review_preview"
+            attributes={{
+              'marketplace.listing_id': pendingVersion().listingId,
+            }}
+            key={() => pendingVersion().listingId}
+          >
+            <ReviewPreviewView
+              pending={pendingVersion()}
+              onBack={() => setReviewing(undefined)}
+              triggerLines={props.routines.triggerLines}
+            />
+          </TraceFlow>
+        )}
+      </Match>
+    </Switch>
   );
 }

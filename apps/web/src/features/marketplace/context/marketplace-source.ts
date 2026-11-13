@@ -1,6 +1,10 @@
 import type { TraceContext } from '@macro-inc/observability';
 import type {
+  ActionTrigger,
   InstallListing,
+  PendingVersion,
+  ReviewOutcome,
+  ReviewVersion,
   TemplateVariable,
 } from '@service-agent-harness/generated/schemas';
 import type { Accessor } from 'solid-js';
@@ -26,6 +30,19 @@ export type ListingList = {
   loadMoreFailed: Accessor<boolean>;
   loadMore(): Promise<void>;
   retry(): Promise<void>;
+  /**
+   * The viewer belongs to Macro's publisher team: they may publish to
+   * everyone and review other publishers' versions.
+   */
+  globalPublisher: Accessor<boolean>;
+};
+
+/** The versions waiting for review, as Macro's publishers see them. */
+export type PendingList = {
+  versions: Accessor<readonly PendingVersion[]>;
+  loading: Accessor<boolean>;
+  failed: Accessor<boolean>;
+  retry(): Promise<void>;
 };
 
 /** The listings the marketplace page shows, and what a person does to them. */
@@ -49,6 +66,17 @@ export type MarketplaceSource = {
   uninstall(listingId: string, parentSpan?: TraceContext): Promise<void>;
   /** Hide a listing from Browse; people who installed it keep it. */
   unlist(listingId: string, parentSpan?: TraceContext): Promise<void>;
+  /**
+   * The versions waiting for review, read while `enabled`. Call it once,
+   * when the view is set up.
+   */
+  pending(enabled: Accessor<boolean>): PendingList;
+  /** Approve or reject a listing's pending version. */
+  review(
+    listingId: string,
+    request: ReviewVersion,
+    parentSpan?: TraceContext
+  ): Promise<ReviewOutcome>;
 };
 
 /** What the person decided while filling in a routine to install. */
@@ -66,4 +94,6 @@ export type MarketplaceRoutines = {
   /** The fills to install with, or nothing when they cancel. */
   fill(request: RoutineFillRequest): Promise<InstallListing | undefined>;
   open(routineId: string): void;
+  /** A routine's trigger as people read it, one line per trigger. */
+  triggerLines(trigger: ActionTrigger): string[];
 };

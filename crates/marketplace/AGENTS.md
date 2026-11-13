@@ -3,15 +3,16 @@
 ## What it is
 
 Part of the Agents workspace: HTML artifacts and routines a person publishes
-for their team to install. A listing's versions are immutable snapshots of a
-page's source or a routine; an install follows the newest minor version of
+for their team to install, or Macro publishes for everyone after a second
+publisher's review. A listing's versions are immutable snapshots of a page's
+source or a routine; an install follows the newest approved minor version of
 the major it is on. A routine install is the installer's own routine, which
 minor versions update until they edit it.
 
 ## Start here
 
-- `src/domain/service.rs`: every rule — who publishes, sees, installs, runs
-  and unlists — over the ports in `src/domain/ports.rs`.
+- `src/domain/service.rs`: every rule — who publishes, reviews, sees,
+  installs, runs and unlists — over the ports in `src/domain/ports.rs`.
 - `src/domain/models.rs`: `Listing`, `Version`, `ListingContent`,
   `RoutineInstall`, `MarketplaceError`.
 - `src/outbound/pg_listing_repo.rs`: the `marketplace_listing`,
@@ -25,8 +26,8 @@ minor versions update until they edit it.
 - `src/outbound/conn_gateway_notifier.rs`: the `VersionNotifier` port, which
   sends installers' open clients `marketplace_listing_version` through the
   connection gateway.
-- `src/inbound/axum_router.rs`: `/marketplace/listings...`, in the harness
-  spec under the `marketplace` tag.
+- `src/inbound/axum_router.rs`: `/marketplace/listings...` and
+  `/marketplace/review...`, in the harness spec under the `marketplace` tag.
 
 ## Scope
 
@@ -47,7 +48,8 @@ minor versions update until they edit it.
 
 ## Checks
 
-- `cargo test -p marketplace` (`SQLX_OFFLINE` unset). The
+- `cargo test -p marketplace` (`SQLX_OFFLINE` unset). Review rules are in
+  `domain/service/test/review.rs`; their SQL in `pg_listing_repo/test.rs`. The
   `scheduled_routines` tests run the adapter over the real scheduler service
   and Postgres, proving an install's task hash survives storage and a no-op
   update.
@@ -98,10 +100,34 @@ minor versions update until they edit it.
   `configuration_revision` and a run in progress keeps its configuration.
 - Uninstalling a routine deletes only the install row: the routine stays the
   person's own.
-- A listing with no `team_id` is seen by everyone: one Macro provides. No
-  route publishes one yet.
-- A minor version is live as soon as it is stored: an install's build reads
-  the newest minor of its major. Publishing then sends
+- A listing with no `team_id` is global: everyone sees it once a version is
+  approved. Only members of the publisher team
+  (`MarketplaceServiceImpl::with_publisher_team`, the harness's
+  `MARKETPLACE_PUBLISHER_TEAM_ID`; `None` lets nobody) publish one
+  (`PublishScope::Global`) or its versions, review, or see what waits; the
+  service decides from the caller's membership receipt (`Audience`). Any
+  member may publish, and any OTHER member approves or rejects
+  (`OwnVersion` otherwise).
+- A version's `review_state` is `approved` for a team version as it is
+  stored, `pending` for a global one. One version waits at a time
+  (`ReviewPending`, a partial unique index). Until approved it doesn't exist
+  outside the publisher team: listings show the newest approved version
+  (publishers also get `pending_version`), installs, builds and
+  `routine_version` read approved versions only, a listing with none is
+  invisible to everyone else, and the forced major compares with the newest
+  approved snapshot. Approving runs what publishing a team version runs
+  (`go_live`: minor routine updates, then notifications); rejecting keeps
+  the row out of the numbering (unique only among non-rejected versions),
+  and rejecting a new listing's first version unlists it so its source can
+  publish again. The `review` span records `listing_id`, `version` and
+  `outcome`, never user ids.
+- No route runs a pending version's programs: `GET /marketplace/review/{id}`
+  returns a page's build and source, or a routine's snapshot and its
+  `interface_changes` against the newest approved version, and the web app
+  renders the page with a `run` that refuses.
+- A minor version is live as soon as it is approved (a team version: when
+  stored): an install's build reads the newest approved minor of its major.
+  Going live then sends
   `marketplace_listing_version` (`{ listingId, version }`, no content) to the
   installers on that major, and the web app refetches an open page's build;
   a run with an older build's `sourceHash` answers `409`, and a return to the
