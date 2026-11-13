@@ -241,10 +241,16 @@ With real Google keys the emulator does not start and Google is used as before.
 `just local-e2e-email` starts an isolated stack this way (instance
 `local-e2e-email` unless `--instance` or `LOCAL_E2E_INSTANCE` names one) and
 runs the email Playwright suite (`apps/web/tests/e2e/local-email.config.ts`)
-against the stack's frontend: each spec signs in with Google as a seeded user
-and delivers mail through the emulator's control API. Sync behavior that needs
-no browser is specified in process instead, in `email_service`'s
-`pubsub::emulated_inbox`.
+against the stack's frontend: each Gmail spec signs in with Google as a seeded
+user, and each Outlook spec (`outlook.live.ts`) signs up with Microsoft as a new
+emulator user and connects that Outlook mailbox on onboarding's work email
+step; specs deliver mail through the emulators' control APIs
+(`GMAIL_EMULATOR_URL`, `OUTLOOK_EMULATOR_URL`). Outlook mail reaches Macro on
+the mailbox sync's two-minute schedule (see below), so the Outlook specs wait
+up to three minutes for it. Sync behavior that needs no browser is specified
+in process instead, in `email_service`'s `pubsub::emulated_inbox` and
+`calendar_service`'s `emulated_calendar`. The recipe takes Playwright's
+arguments, not `--instance`; name the instance with `LOCAL_E2E_INSTANCE`.
 
 ### Microsoft sign-in and Outlook without a Microsoft account
 

@@ -29,8 +29,8 @@ pub enum LocalE2eSuite {
     /// Run Rust first, then Playwright.
     All,
     /// Run the email Playwright suite. The stack runs without Doppler, so
-    /// the Gmail emulator stands in for Google with its seeded users, and
-    /// specs sign in through it.
+    /// the Gmail and Outlook emulators stand in for Google and Microsoft with
+    /// their seeded users, and specs sign in through them.
     Email,
 }
 
@@ -184,8 +184,9 @@ fn seeded(endpoints: &Endpoints) -> Result<BTreeMap<String, String>> {
     Ok(endpoints.test_env())
 }
 
-/// Run the email specs against the stack's frontend and its Gmail emulator,
-/// which seeds its own users (`crates/gmail_emulator/seed.example.yaml`).
+/// Run the email specs against the stack's frontend and its Gmail and Outlook
+/// emulators, which seed their own users (`crates/gmail_emulator/seed.example.yaml`,
+/// `crates/outlook_emulator/seed.example.yaml`).
 fn run_email(
     instance: &Instance,
     endpoints: &Endpoints,
@@ -212,6 +213,10 @@ fn run_email(
         .env(
             "GMAIL_EMULATOR_URL",
             format!("http://localhost:{}", instance.port(Port::GmailEmulator)),
+        )
+        .env(
+            "OUTLOOK_EMULATOR_URL",
+            super::microsoft_emulator::browser_origin(instance),
         );
     require_success(&mut command, "email Playwright suite")
 }
