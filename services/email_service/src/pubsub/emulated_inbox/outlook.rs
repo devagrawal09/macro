@@ -17,6 +17,7 @@ mod access;
 mod attachments;
 mod changes;
 mod drafts;
+mod in_macro;
 #[cfg(test)]
 mod specs;
 
