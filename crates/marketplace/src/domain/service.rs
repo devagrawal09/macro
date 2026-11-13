@@ -12,7 +12,10 @@ use entity_access::domain::models::{
 };
 use futures::StreamExt;
 use macro_user_id::user_id::MacroUserIdStr;
-use scheduled_action::domain::templates::{RoutineSnapshot, fill::RoutineFills};
+use scheduled_action::domain::templates::{
+    RoutineSnapshot,
+    fill::{FilledRoutine, RoutineFills},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -27,6 +30,11 @@ use crate::domain::ports::{ListingRepo, MarketplaceService, Pages, Rollout, Rout
 
 /// How many installed routines a minor version updates at once.
 const UPDATE_CONCURRENCY: usize = 8;
+
+/// How long a first routine install's claim holds without a routine before
+/// another install takes it over: well past a routine's save, which checks
+/// its code.
+const CLAIM_STALE_AFTER_SECS: u32 = 120;
 
 /// The marketplace service over its repository, page builder, routines and
 /// rollout.
@@ -164,21 +172,27 @@ where
             .fill(user, &fills)
             .map_err(|missing| MarketplaceError::MissingFills(missing.0))?;
 
-        let updated = match &existing {
+        let copy = match existing {
             Some(install) => {
-                self.routines
+                match self
+                    .routines
                     .update(user, install.routine_id, &filled, None)
                     .await?
+                {
+                    RoutineUpdate::Updated(task_hash) => RoutineCopy {
+                        routine_id: install.routine_id,
+                        task_hash,
+                    },
+                    // The routine it made is gone: make another.
+                    RoutineUpdate::Edited | RoutineUpdate::Gone => {
+                        self.routines.create(user, &filled, request.enabled).await?
+                    }
+                }
             }
-            None => RoutineUpdate::Gone,
-        };
-        let copy = match (updated, existing) {
-            (RoutineUpdate::Updated(task_hash), Some(install)) => RoutineCopy {
-                routine_id: install.routine_id,
-                task_hash,
-            },
-            // No routine yet, or the one it made is gone: make one.
-            _ => self.routines.create(user, &filled, request.enabled).await?,
+            None => {
+                self.create_claimed(user, id, newest.version.major, &filled, request.enabled)
+                    .await?
+            }
         };
         tracing::Span::current().record("routine_id", tracing::field::display(copy.routine_id));
 
@@ -195,6 +209,36 @@ where
             )
             .await
             .map_err(internal)
+    }
+
+    /// A first install's routine, created only by the request that claims
+    /// the install, so two installs at once make one routine. A claim whose
+    /// routine fails to save is released for the next install to try; one
+    /// left by a stopped process goes stale and is taken over.
+    async fn create_claimed(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        id: ListingId,
+        major: i32,
+        filled: &FilledRoutine,
+        enabled: bool,
+    ) -> Result<RoutineCopy, MarketplaceError> {
+        let claimed = self
+            .listings
+            .claim_routine_install(id, user, major, CLAIM_STALE_AFTER_SECS)
+            .await
+            .map_err(internal)?;
+        if !claimed {
+            return Err(MarketplaceError::InstallInProgress);
+        }
+
+        let created = self.routines.create(user, filled, enabled).await;
+        if created.is_err() {
+            if let Err(error) = self.listings.release_routine_claim(id, user).await {
+                tracing::error!(error = %error, "could not release an install claim");
+            }
+        }
+        created
     }
 
     /// Bring every install on `version`'s major that still follows the

@@ -521,6 +521,9 @@ pub enum MarketplaceError {
     /// The routine's variables left to each person need their fills.
     #[error("choose what to do with {} of this routine's references", .0.len())]
     MissingFills(Vec<TemplateVariable>),
+    /// Another request is installing this routine for the same person.
+    #[error("this routine is already being installed; try again in a moment")]
+    InstallInProgress,
     /// The routine can't be saved as given, such as an app its person
     /// hasn't connected.
     #[error("{0}")]

@@ -63,8 +63,28 @@ pub trait ListingRepo: Send + Sync + 'static {
         user: &MacroUserIdStr<'_>,
     ) -> impl Future<Output = Result<Option<RoutineInstall>, Self::Err>> + Send;
 
+    /// Claim `user`'s first install of the routine listing on `major`, so
+    /// only one install creates their routine: `true` for the claimer.
+    /// `false` while another claim is fresher than `stale_after_secs` or the
+    /// install already has a routine.
+    fn claim_routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        major: i32,
+        stale_after_secs: u32,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// Give up a claim whose routine wasn't created. Leaves an install that
+    /// has a routine alone.
+    fn release_routine_claim(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
     /// Install the routine listing for `user`, or replace their install,
-    /// following updates again.
+    /// following updates again. Ends a claim.
     fn save_routine_install(
         &self,
         id: ListingId,

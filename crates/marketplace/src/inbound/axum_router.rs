@@ -257,7 +257,9 @@ impl IntoResponse for MarketplaceError {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::Invalid(_) | Self::RoutineRejected(_) => StatusCode::BAD_REQUEST,
-            Self::NoTeam | Self::AlreadyPublished | Self::Unchanged => StatusCode::CONFLICT,
+            Self::NoTeam | Self::AlreadyPublished | Self::Unchanged | Self::InstallInProgress => {
+                StatusCode::CONFLICT
+            }
             Self::DoesNotBuild | Self::MissingFills(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Page(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -487,7 +489,7 @@ where
 #[utoipa::path(put, path = "/marketplace/listings/{id}/install", tag = "marketplace", operation_id = "install_marketplace_listing",
     params(("id" = Uuid, Path, description = "The listing")),
     request_body(content = Option<InstallListing>, description = "A routine's fills; an artifact takes none"),
-    responses((status = 200, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 422, body = MissingRoutineFills), (status = 500)))]
+    responses((status = 200, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 403, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse), (status = 422, body = MissingRoutineFills), (status = 500)))]
 /// Put the caller on the listing's newest major version: installs it, or
 /// takes a major version they were waiting on. Repeating it changes nothing
 /// for an artifact.
@@ -495,7 +497,8 @@ where
 /// A routine listing creates the caller's own routine, filled in from the
 /// body and the fills stored when they first installed it; taking a new
 /// major fills in their routine again, replacing any edits, and it follows
-/// minor versions again. `422` lists the variables that still need a fill.
+/// minor versions again. `422` lists the variables that still need a fill;
+/// `409` means another request is installing it for the caller right now.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn install_marketplace_listing<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,

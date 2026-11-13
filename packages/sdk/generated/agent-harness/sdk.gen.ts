@@ -862,7 +862,8 @@ export class Sdk extends HeyApiClient {
      * A routine listing creates the caller's own routine, filled in from the
      * body and the fills stored when they first installed it; taking a new
      * major fills in their routine again, replacing any edits, and it follows
-     * minor versions again. `422` lists the variables that still need a fill.
+     * minor versions again. `422` lists the variables that still need a fill;
+     * `409` means another request is installing it for the caller right now.
      */
     public installMarketplaceListing<ThrowOnError extends boolean = false>(options: Options<InstallMarketplaceListingData, ThrowOnError>): RequestResult<InstallMarketplaceListingResponses, InstallMarketplaceListingErrors, ThrowOnError> {
         return (options.client ?? this.client).put<InstallMarketplaceListingResponses, InstallMarketplaceListingErrors, ThrowOnError>({

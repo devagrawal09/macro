@@ -179,6 +179,7 @@ impl ListingRepo for PgListingRepo {
                     SELECT count(*)
                     FROM marketplace_install c
                     WHERE c.listing_id = l.id
+                      AND (c.routine_claimed_at IS NULL OR c.routine_id IS NOT NULL)
                 ) AS "install_count!"
             FROM marketplace_listing l
             CROSS JOIN LATERAL (
@@ -188,8 +189,11 @@ impl ListingRepo for PgListingRepo {
                 ORDER BY major DESC, minor DESC
                 LIMIT 1
             ) v
+            -- A claim still creating its routine isn't an install yet.
             LEFT JOIN marketplace_install i
-                ON i.listing_id = l.id AND i.user_id = $1
+                ON i.listing_id = l.id
+               AND i.user_id = $1
+               AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)
             WHERE (l.team_id IS NULL OR l.team_id = $2)
               AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
               AND ($3::uuid IS NULL OR l.id = $3)
@@ -338,6 +342,60 @@ impl ListingRepo for PgListingRepo {
     }
 
     #[tracing::instrument(err, skip_all)]
+    async fn claim_routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        major: i32,
+        stale_after_secs: u32,
+    ) -> Result<bool, Self::Err> {
+        // The row's insert decides between racing installs. A claim with no
+        // routine past the timeout is taken over in the same statement, so
+        // two late installs can't both take it.
+        let claimed = sqlx::query_scalar!(
+            r#"
+            INSERT INTO marketplace_install (listing_id, user_id, major, routine_claimed_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (listing_id, user_id) DO UPDATE
+            SET major = EXCLUDED.major,
+                routine_claimed_at = now(),
+                updated_at = now()
+            WHERE marketplace_install.routine_id IS NULL
+              AND marketplace_install.routine_claimed_at
+                  < now() - make_interval(secs => $4::float8)
+            RETURNING listing_id
+            "#,
+            id.as_uuid(),
+            user.as_ref(),
+            major,
+            f64::from(stale_after_secs),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(claimed.is_some())
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn release_routine_claim(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+    ) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            DELETE FROM marketplace_install
+            WHERE listing_id = $1 AND user_id = $2 AND routine_id IS NULL
+              AND routine_claimed_at IS NOT NULL
+            "#,
+            id.as_uuid(),
+            user.as_ref(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all)]
     async fn save_routine_install(
         &self,
         id: ListingId,
@@ -356,6 +414,7 @@ impl ListingRepo for PgListingRepo {
                 routine_minor = EXCLUDED.routine_minor,
                 routine_fills = EXCLUDED.routine_fills,
                 routine_task_hash = EXCLUDED.routine_task_hash,
+                routine_claimed_at = NULL,
                 detached_at = NULL,
                 update_failed_at = NULL,
                 updated_at = now()

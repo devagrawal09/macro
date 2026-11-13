@@ -570,3 +570,88 @@ async fn updates_reach_installs_behind_on_the_major_until_they_detach(pool: PgPo
             .is_some_and(|routine| !routine.detached)
     );
 }
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn one_of_two_concurrent_first_installs_claims_the_routine(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = digest(acme);
+    repo.create_listing(listing.clone()).await.unwrap();
+
+    let claim = |repo: PgListingRepo| {
+        tokio::spawn(async move {
+            repo.claim_routine_install(listing.id, &user(BEN), 1, 120)
+                .await
+                .unwrap()
+        })
+    };
+    let (first, second) = tokio::join!(claim(repo.clone()), claim(repo.clone()));
+    let while_claimed = repo.listings(&user(BEN), Some(acme), None).await.unwrap();
+    let routine_id = Uuid::now_v7();
+    repo.save_routine_install(listing.id, &user(BEN), &install(0, routine_id, "first"))
+        .await
+        .unwrap();
+    let after_install = repo
+        .claim_routine_install(listing.id, &user(BEN), 1, 0)
+        .await
+        .unwrap();
+    repo.release_routine_claim(listing.id, &user(BEN))
+        .await
+        .unwrap();
+    let kept = repo.routine_install(listing.id, &user(BEN)).await.unwrap();
+
+    // Exactly one claims it.
+    assert_ne!(first.unwrap(), second.unwrap());
+    // A claim still creating its routine isn't shown as an install.
+    assert_eq!(while_claimed[0].installed_major, None);
+    assert_eq!(while_claimed[0].install_count, 0);
+    // Neither claiming nor releasing touches an install with a routine.
+    assert!(!after_install);
+    assert_eq!(kept, Some(install(0, routine_id, "first")));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_stale_or_released_claim_is_taken_by_the_next_install(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    let repo = PgListingRepo::new(pool.clone());
+    let listing = digest(acme);
+    repo.create_listing(listing.clone()).await.unwrap();
+
+    let claimed = repo
+        .claim_routine_install(listing.id, &user(BEN), 1, 120)
+        .await
+        .unwrap();
+    let while_fresh = repo
+        .claim_routine_install(listing.id, &user(BEN), 1, 120)
+        .await
+        .unwrap();
+    sqlx::query!(
+        r#"
+        UPDATE marketplace_install
+        SET routine_claimed_at = now() - interval '10 minutes'
+        WHERE listing_id = $1
+        "#,
+        listing.id.as_uuid(),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let taken_over = repo
+        .claim_routine_install(listing.id, &user(BEN), 1, 120)
+        .await
+        .unwrap();
+    repo.release_routine_claim(listing.id, &user(BEN))
+        .await
+        .unwrap();
+    let after_release = repo
+        .claim_routine_install(listing.id, &user(BEN), 1, 120)
+        .await
+        .unwrap();
+
+    assert!(claimed);
+    assert!(!while_fresh);
+    assert!(taken_over);
+    assert!(after_release);
+}

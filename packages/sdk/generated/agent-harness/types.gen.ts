@@ -5912,6 +5912,7 @@ export type InstallMarketplaceListingErrors = {
     401: unknown;
     403: ErrorResponse;
     404: ErrorResponse;
+    409: ErrorResponse;
     422: MissingRoutineFills;
     500: unknown;
 };

@@ -4847,7 +4847,8 @@ export const unlistMarketplaceListing = async (
  * A routine listing creates the caller's own routine, filled in from the
 body and the fills stored when they first installed it; taking a new
 major fills in their routine again, replacing any edits, and it follows
-minor versions again. `422` lists the variables that still need a fill.
+minor versions again. `422` lists the variables that still need a fill;
+`409` means another request is installing it for the caller right now.
  * @summary Put the caller on the listing's newest major version: installs it, or
 takes a major version they were waiting on. Repeating it changes nothing
 for an artifact.
@@ -4877,6 +4878,11 @@ export type installMarketplaceListingResponse404 = {
   status: 404;
 };
 
+export type installMarketplaceListingResponse409 = {
+  data: ErrorResponse;
+  status: 409;
+};
+
 export type installMarketplaceListingResponse422 = {
   data: MissingRoutineFills;
   status: 422;
@@ -4896,6 +4902,7 @@ export type installMarketplaceListingResponseError = (
   | installMarketplaceListingResponse401
   | installMarketplaceListingResponse403
   | installMarketplaceListingResponse404
+  | installMarketplaceListingResponse409
   | installMarketplaceListingResponse422
   | installMarketplaceListingResponse500
 ) & {

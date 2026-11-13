@@ -365,6 +365,48 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
 }
 
 #[tokio::test]
+async fn only_the_install_that_claims_creates_the_routine() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    // Another request is creating Ben's routine right now.
+    service
+        .listings
+        .claim_routine_install(listing.id, &user(BEN), 1, 120)
+        .await
+        .expect("the claim is stored");
+
+    let racing = service
+        .install(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            listing.id,
+            in_new_york(),
+        )
+        .await;
+
+    assert!(matches!(racing, Err(MarketplaceError::InstallInProgress)));
+    assert!(routines.saved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_first_install_releases_its_claim_for_the_next() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let ben = member(BEN, ACME, TeamRole::Member);
+    routines.fail_creates(true);
+
+    let failed = service
+        .install(&user(BEN), Some(&ben), listing.id, in_new_york())
+        .await;
+    routines.fail_creates(false);
+    let retried = install(&service, BEN, listing.id).await;
+
+    assert!(matches!(failed, Err(MarketplaceError::RoutineRejected(_))));
+    assert_eq!(retried.installed_major, Some(1));
+    assert_eq!(routines.saved.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn a_deleted_routine_records_a_failure_and_stays_attached() {
     let (service, _, routines) = marketplace_with_routines();
     let listing = published_digest(&service, &routines).await;

@@ -81,6 +81,8 @@ struct Stored {
     removed: bool,
     versions: Vec<(Version, ListingContent)>,
     installs: HashMap<String, StoredInstall>,
+    /// People whose first routine install is creating its routine.
+    claims: std::collections::HashSet<String>,
 }
 
 impl Stored {
@@ -119,6 +121,7 @@ impl ListingRepo for FakeListings {
             removed: false,
             versions: vec![first],
             installs: HashMap::new(),
+            claims: std::collections::HashSet::new(),
         });
         Ok(true)
     }
@@ -226,6 +229,36 @@ impl ListingRepo for FakeListings {
             .and_then(|install| install.routine.clone()))
     }
 
+    async fn claim_routine_install(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        _major: i32,
+        _stale_after_secs: u32,
+    ) -> Result<bool, Self::Err> {
+        let mut stored = self.0.lock().unwrap();
+        let entry = stored
+            .iter_mut()
+            .find(|entry| entry.listing.id == id)
+            .expect("a listing to claim");
+        if entry.installs.contains_key(user.as_ref()) {
+            return Ok(false);
+        }
+        Ok(entry.claims.insert(user.as_ref().to_owned()))
+    }
+
+    async fn release_routine_claim(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+    ) -> Result<(), Self::Err> {
+        let mut stored = self.0.lock().unwrap();
+        if let Some(entry) = stored.iter_mut().find(|entry| entry.listing.id == id) {
+            entry.claims.remove(user.as_ref());
+        }
+        Ok(())
+    }
+
     async fn save_routine_install(
         &self,
         id: ListingId,
@@ -234,6 +267,7 @@ impl ListingRepo for FakeListings {
     ) -> Result<(), Self::Err> {
         let mut stored = self.0.lock().unwrap();
         if let Some(entry) = stored.iter_mut().find(|entry| entry.listing.id == id) {
+            entry.claims.remove(user.as_ref());
             entry.installs.insert(
                 user.as_ref().to_owned(),
                 StoredInstall {
@@ -435,6 +469,8 @@ struct FakeRoutines {
     saved: Mutex<HashMap<Uuid, SavedRoutine>>,
     /// Saving one of these fails.
     failing: Mutex<Vec<Uuid>>,
+    /// Creating a routine fails.
+    failing_creates: Mutex<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -479,6 +515,10 @@ impl FakeRoutines {
         self.saved.lock().unwrap().remove(&id);
     }
 
+    fn fail_creates(&self, failing: bool) {
+        *self.failing_creates.lock().unwrap() = failing;
+    }
+
     fn fail(&self, id: Uuid) {
         self.failing.lock().unwrap().push(id);
     }
@@ -521,6 +561,11 @@ impl Routines for FakeRoutines {
         routine: &FilledRoutine,
         enabled: bool,
     ) -> Result<RoutineCopy, MarketplaceError> {
+        if *self.failing_creates.lock().unwrap() {
+            return Err(MarketplaceError::RoutineRejected(
+                "connect Linear first".to_owned(),
+            ));
+        }
         let saved = SavedRoutine {
             owner: user.as_ref().to_owned(),
             routine: routine.clone(),

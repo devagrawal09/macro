@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS marketplace_install (
     routine_fills JSONB,
     -- SHA-256 of the routine's task as installed or last updated.
     routine_task_hash TEXT,
+    -- A first routine install claimed the row and is creating the routine:
+    -- only the claimer creates it. A claim with no routine after a few
+    -- minutes was abandoned, and the next install takes it over.
+    routine_claimed_at TIMESTAMPTZ,
     -- The person edited the routine; updates no longer reach it.
     detached_at TIMESTAMPTZ,
     -- The last update failed; the next minor version tries again.

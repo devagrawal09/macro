@@ -69,6 +69,15 @@ minor versions update until they edit it.
   task's hash (`sdk` left out, keys sorted). A `choice` variable without a
   fill answers 422 `MissingRoutineFills` listing them. Taking a new major
   refills the same routine, replacing edits, and it follows again.
+- A first routine install claims its row before creating the routine
+  (`claim_routine_install`: `INSERT ... ON CONFLICT DO UPDATE ... WHERE`
+  the claim is stale, `RETURNING`), so two installs at once make one
+  routine; the loser answers 409 `InstallInProgress`. The claimer records
+  the routine with `save_routine_install`, which ends the claim, or
+  releases it when creating fails. A claim left by a stopped process goes
+  stale after `CLAIM_STALE_AFTER_SECS` (120 s) and the next install takes it
+  over. A claim without a routine is not an install: listings and counts
+  leave it out.
 - A minor routine version updates every install on its major behind it,
   after the version is stored, eight at a time, on a spawned task the
   request awaits (dropping the request can't leave a routine updated and its
