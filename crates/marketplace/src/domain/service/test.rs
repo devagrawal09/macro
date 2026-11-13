@@ -19,11 +19,11 @@ use uuid::Uuid;
 
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage, InstalledRoutine,
-    Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
-    ListingText, ListingsShown, MarketplaceError, NewListing, PublishSource, PublishedVersion,
-    RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump,
-    VersionNotice,
+    AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage,
+    InstalledRoutine, Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery,
+    ListingScope, ListingText, ListingVersion, ListingsShown, MarketplaceError, NewListing,
+    PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion,
+    TaskHash, Version, VersionBump, VersionNotes, VersionNotice,
 };
 use crate::domain::ports::{
     ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
@@ -88,6 +88,8 @@ struct Stored {
     listing: NewListing,
     removed: bool,
     versions: Vec<(Version, ListingContent)>,
+    /// Each version's notes, oldest first.
+    history: Vec<ListingVersion>,
     installs: HashMap<String, StoredInstall>,
     /// People whose first routine install is creating its routine.
     claims: std::collections::HashSet<String>,
@@ -115,6 +117,7 @@ impl Stored {
             description: self.listing.text.description.clone(),
             latest_version: self.newest().0,
             installed_major: install.map(|install| install.major),
+            installed_version: install.map(|install| self.installed_version(install)),
             installed_routine: install.and_then(|install| {
                 install.routine.as_ref().map(|routine| InstalledRoutine {
                     routine_id: routine.routine_id,
@@ -129,11 +132,36 @@ impl Stored {
         }
     }
 
+    /// The version an install has: its routine's, or its major's newest.
+    fn installed_version(&self, install: &StoredInstall) -> Version {
+        install
+            .routine
+            .as_ref()
+            .map(|routine| routine.version)
+            .unwrap_or_else(|| {
+                self.versions
+                    .iter()
+                    .map(|(version, _)| *version)
+                    .filter(|version| version.major == install.major)
+                    .max()
+                    .expect("a major has a version")
+            })
+    }
+
     fn newest(&self) -> &(Version, ListingContent) {
         self.versions
             .iter()
             .max_by_key(|(version, _)| *version)
             .expect("a listing has a version")
+    }
+}
+
+fn history_entry(version: Version, notes: &VersionNotes) -> ListingVersion {
+    ListingVersion {
+        version,
+        changelog: notes.changelog.as_deref().map(str::to_owned),
+        forced_major: notes.forced_major,
+        created_at: Utc::now(),
     }
 }
 
@@ -159,10 +187,15 @@ impl ListingRepo for FakeListings {
         }
 
         let first = (Version::FIRST, listing.content.clone());
+        let notes = VersionNotes {
+            changelog: listing.changelog.clone(),
+            forced_major: false,
+        };
         stored.push(Stored {
             listing,
             removed: false,
             versions: vec![first],
+            history: vec![history_entry(Version::FIRST, &notes)],
             installs: HashMap::new(),
             claims: std::collections::HashSet::new(),
         });
@@ -219,6 +252,7 @@ impl ListingRepo for FakeListings {
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        notes: &VersionNotes,
     ) -> Result<AddedVersion, Self::Err> {
         let mut stored = self.0.lock().unwrap();
         let Some(entry) = stored
@@ -235,7 +269,17 @@ impl ListingRepo for FakeListings {
 
         let next = newest.next(bump);
         entry.versions.push((next, content.clone()));
+        entry.history.push(history_entry(next, notes));
         Ok(AddedVersion::Added(next))
+    }
+
+    async fn versions(&self, id: ListingId) -> Result<Vec<ListingVersion>, Self::Err> {
+        let stored = self.0.lock().unwrap();
+        Ok(stored
+            .iter()
+            .find(|entry| entry.listing.id == id)
+            .map(|entry| entry.history.iter().rev().cloned().collect())
+            .unwrap_or_default())
     }
 
     async fn routine_version(
@@ -759,6 +803,7 @@ async fn published_board(service: &Service, pages: &FakePages) -> Listing {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board"),
+            Changelog::default(),
         )
         .await
         .expect("the board publishes")
@@ -770,7 +815,13 @@ async fn publishing_needs_a_team() {
     pages.save(BOARD, "<h1>Board</h1>");
 
     let refused = service
-        .publish(&user(ADA), None, owned(ADA, BOARD), text("Board"))
+        .publish(
+            &user(ADA),
+            None,
+            owned(ADA, BOARD),
+            text("Board"),
+            Changelog::default(),
+        )
         .await;
 
     assert!(matches!(refused, Err(MarketplaceError::NoTeam)));
@@ -787,6 +838,7 @@ async fn a_first_version_is_one_point_zero_and_a_document_lists_once() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board again"),
+            Changelog::default(),
         )
         .await;
 
@@ -806,6 +858,7 @@ async fn a_page_that_does_not_build_is_not_published() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board"),
+            Changelog::default(),
         )
         .await;
 
@@ -872,6 +925,7 @@ async fn a_minor_version_reaches_an_install_at_once_and_a_major_waits() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await
         .expect("a minor version publishes");
@@ -888,6 +942,7 @@ async fn a_minor_version_reaches_an_install_at_once_and_a_major_waits() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Major,
+            Changelog::default(),
         )
         .await
         .expect("a major version publishes");
@@ -934,6 +989,7 @@ async fn a_version_needs_the_publisher_a_change_and_the_same_document() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await;
     let by_teammate = service
@@ -943,6 +999,7 @@ async fn a_version_needs_the_publisher_a_change_and_the_same_document() {
             listing.id,
             owned(BEN, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await;
     let from_another_document = service
@@ -952,6 +1009,7 @@ async fn a_version_needs_the_publisher_a_change_and_the_same_document() {
             listing.id,
             owned(ADA, other_document),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await;
 
@@ -1104,6 +1162,7 @@ async fn a_minor_version_notifies_its_major_and_a_major_version_notifies_everyon
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Major,
+            Changelog::default(),
         )
         .await
         .expect("a major version publishes");
@@ -1125,6 +1184,7 @@ async fn a_minor_version_notifies_its_major_and_a_major_version_notifies_everyon
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await
         .expect("a minor version publishes");
@@ -1180,6 +1240,7 @@ async fn a_version_publishes_when_its_notification_fails() {
             listing.id,
             owned(ADA, BOARD),
             VersionBump::Minor,
+            Changelog::default(),
         )
         .await
         .expect("the version publishes anyway");
@@ -1193,4 +1254,62 @@ async fn a_version_publishes_when_its_notification_fails() {
         Version { major: 1, minor: 1 }
     );
     assert_eq!(shown.version, Version { major: 1, minor: 1 });
+}
+
+#[tokio::test]
+async fn a_history_shows_each_versions_changelog_to_whoever_sees_the_listing() {
+    let (service, pages) = marketplace();
+    let ada = member(ADA, ACME, TeamRole::Member);
+    pages.save(BOARD, "<h1>Board</h1>");
+    let listing = service
+        .publish(
+            &user(ADA),
+            Some(&ada),
+            owned(ADA, BOARD),
+            text("Board"),
+            Changelog::new(Some("  First cut  ")).expect("a changelog"),
+        )
+        .await
+        .expect("the board publishes");
+    pages.save(BOARD, "<h1>Board, tidied</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+            Changelog::new(Some("Tidier columns")).expect("a changelog"),
+        )
+        .await
+        .expect("a minor version publishes");
+
+    let for_teammate = service
+        .versions(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            listing.id,
+        )
+        .await
+        .expect("a teammate reads the history");
+    let for_outsider = service
+        .versions(
+            &user(CAM),
+            Some(&member(CAM, OTHER_TEAM, TeamRole::Member)),
+            listing.id,
+        )
+        .await;
+
+    let changelogs: Vec<(Version, Option<&str>)> = for_teammate
+        .iter()
+        .map(|entry| (entry.version, entry.changelog.as_deref()))
+        .collect();
+    assert_eq!(
+        changelogs,
+        vec![
+            (Version { major: 1, minor: 1 }, Some("Tidier columns")),
+            (Version::FIRST, Some("First cut")),
+        ]
+    );
+    assert!(matches!(for_outsider, Err(MarketplaceError::NotFound)));
 }

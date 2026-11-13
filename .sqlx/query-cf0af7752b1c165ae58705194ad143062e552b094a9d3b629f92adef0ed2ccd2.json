@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT major, minor, changelog, forced_major, created_at\n            FROM marketplace_listing_version\n            WHERE listing_id = $1\n            ORDER BY major DESC, minor DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "changelog",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "forced_major",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "cf0af7752b1c165ae58705194ad143062e552b094a9d3b629f92adef0ed2ccd2"
+}

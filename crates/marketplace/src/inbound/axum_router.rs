@@ -38,8 +38,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     models::{
-        InstallRequest, InstalledBuild, Listing, ListingId, ListingKind, ListingQuery, ListingText,
-        ListingsShown, MarketplaceError, PublishSource, PublishedVersion, Version, VersionBump,
+        Changelog, InstallRequest, InstalledBuild, Listing, ListingId, ListingKind, ListingQuery,
+        ListingText, ListingVersion, ListingsShown, MarketplaceError, PublishSource,
+        PublishedVersion, Version, VersionBump,
     },
     ports::MarketplaceService,
 };
@@ -109,7 +110,8 @@ where
         )
         .route(
             "/marketplace/listings/{id}/versions",
-            post(publish_marketplace_listing_version::<S, Access, Auth>),
+            get(list_marketplace_listing_versions::<S, Access, Auth>)
+                .post(publish_marketplace_listing_version::<S, Access, Auth>),
         )
         .route(
             "/marketplace/listings/{id}/routine",
@@ -195,6 +197,9 @@ pub struct PublishListing {
     /// What it does, in a few lines.
     #[serde(default)]
     pub description: String,
+    /// What version 1.0 says about itself, at most 2000 characters.
+    #[serde(default)]
+    pub changelog: Option<String>,
 }
 
 /// Publish a listing's source as its next version.
@@ -207,6 +212,17 @@ pub struct PublishListingVersion {
     /// routine that asks something new of its installs takes a major
     /// version whatever is asked.
     pub bump: VersionBump,
+    /// What changed, for installers to read: at most 2000 characters.
+    #[serde(default)]
+    pub changelog: Option<String>,
+}
+
+/// A listing's versions.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingVersions {
+    /// Every version, newest first.
+    pub versions: Vec<ListingVersion>,
 }
 
 /// Install a listing, or take its newest major version. A routine is filled
@@ -417,6 +433,7 @@ where
     Auth: MacroAuthorizationService,
 {
     let user = &caller.authorization.macro_user_id;
+    let changelog = Changelog::new(body.changelog.as_deref())?;
     let source = owned_source(&state, user, body.source).await?;
     let listing = state
         .service
@@ -428,6 +445,7 @@ where
                 title: body.title,
                 description: body.description,
             },
+            changelog,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(listing)))
@@ -458,6 +476,7 @@ where
     Auth: MacroAuthorizationService,
 {
     let user = &caller.authorization.macro_user_id;
+    let changelog = Changelog::new(body.changelog.as_deref())?;
     let source = owned_source(&state, user, body.source).await?;
     let published = state
         .service
@@ -467,9 +486,39 @@ where
             ListingId::from_uuid(id),
             source,
             body.bump,
+            changelog,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(published)))
+}
+
+#[utoipa::path(get, path = "/marketplace/listings/{id}/versions", tag = "marketplace", operation_id = "list_marketplace_listing_versions",
+    params(("id" = Uuid, Path, description = "The listing")),
+    responses((status = 200, body = ListingVersions), (status = 401), (status = 404), (status = 500)))]
+/// The listing's versions, newest first: each one's changelog, when it was
+/// published, and whether the server made a routine version major. Anyone
+/// who sees the listing sees them.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn list_marketplace_listing_versions<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<ListingVersions>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let versions = state
+        .service
+        .versions(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+        )
+        .await?;
+    Ok(Json(ListingVersions { versions }))
 }
 
 #[utoipa::path(get, path = "/marketplace/listings/{id}/routine", tag = "marketplace", operation_id = "get_marketplace_listing_routine",

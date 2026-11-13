@@ -15,7 +15,8 @@ use scheduled_action::domain::templates::fill::RoutineFills;
 use crate::domain::models::{
     AddedVersion, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine, Listing,
     ListingContent, ListingCursor, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
-    ListingsShown, NewListing, RoutineInstall, RoutineVersion, TaskHash, Version, VersionBump,
+    ListingVersion, ListingsShown, NewListing, RoutineInstall, RoutineVersion, TaskHash, Version,
+    VersionBump, VersionNotes,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -63,6 +64,7 @@ struct ListingRow {
     latest_major: i32,
     latest_minor: i32,
     installed_major: Option<i32>,
+    installed_minor: Option<i32>,
     installed_routine_id: Option<Uuid>,
     detached: Option<bool>,
     update_failed: Option<bool>,
@@ -95,6 +97,10 @@ impl TryFrom<ListingRow> for Listing {
                 minor: row.latest_minor,
             },
             installed_major: row.installed_major,
+            installed_version: row
+                .installed_major
+                .zip(row.installed_minor)
+                .map(|(major, minor)| Version { major, minor }),
             installed_routine: row.installed_routine_id.map(|routine_id| InstalledRoutine {
                 routine_id,
                 detached: row.detached.unwrap_or(false),
@@ -163,6 +169,9 @@ impl PgListingRepo {
                 v.major AS "latest_major!",
                 v.minor AS "latest_minor!",
                 i.major AS "installed_major?",
+                -- A routine is on the version it was last filled in from; a
+                -- page shows the newest minor of its major.
+                COALESCE(i.routine_minor, iv.minor) AS "installed_minor?",
                 i.routine_id AS "installed_routine_id?",
                 (i.detached_at IS NOT NULL) AS "detached?",
                 (i.update_failed_at IS NOT NULL) AS "update_failed?",
@@ -185,6 +194,11 @@ impl PgListingRepo {
                 ON i.listing_id = l.id
                AND i.user_id = $1
                AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)
+            LEFT JOIN LATERAL (
+                SELECT max(minor) AS minor
+                FROM marketplace_listing_version
+                WHERE listing_id = l.id AND major = i.major
+            ) iv ON true
             WHERE (l.team_id IS NULL OR l.team_id = $2)
               AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
               AND ($3::uuid IS NULL OR l.id = $3)
@@ -253,6 +267,10 @@ impl ListingRepo for PgListingRepo {
             listing.id,
             Version::FIRST,
             &listing.content,
+            &VersionNotes {
+                changelog: listing.changelog,
+                forced_major: false,
+            },
         )
         .await?;
 
@@ -320,6 +338,7 @@ impl ListingRepo for PgListingRepo {
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        notes: &VersionNotes,
     ) -> Result<AddedVersion, Self::Err> {
         let mut transaction = self.pool.begin().await?;
 
@@ -363,7 +382,7 @@ impl ListingRepo for PgListingRepo {
             minor: newest.minor,
         }
         .next(bump);
-        insert_version(&mut transaction, id, next, content).await?;
+        insert_version(&mut transaction, id, next, content, notes).await?;
         sqlx::query!(
             r#"UPDATE marketplace_listing SET updated_at = now() WHERE id = $1"#,
             id.as_uuid(),
@@ -373,6 +392,34 @@ impl ListingRepo for PgListingRepo {
 
         transaction.commit().await?;
         Ok(AddedVersion::Added(next))
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn versions(&self, id: ListingId) -> Result<Vec<ListingVersion>, Self::Err> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT major, minor, changelog, forced_major, created_at
+            FROM marketplace_listing_version
+            WHERE listing_id = $1
+            ORDER BY major DESC, minor DESC
+            "#,
+            id.as_uuid(),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ListingVersion {
+                version: Version {
+                    major: row.major,
+                    minor: row.minor,
+                },
+                changelog: row.changelog,
+                forced_major: row.forced_major,
+                created_at: row.created_at,
+            })
+            .collect())
     }
 
     #[tracing::instrument(err, skip_all)]
@@ -790,6 +837,7 @@ async fn insert_version(
     id: ListingId,
     version: Version,
     content: &ListingContent,
+    notes: &VersionNotes,
 ) -> Result<(), ListingRepoErr> {
     let (html, routine) = match content {
         ListingContent::Page(page) => (Some(page.html.as_str()), None),
@@ -799,8 +847,9 @@ async fn insert_version(
     sqlx::query!(
         r#"
         INSERT INTO marketplace_listing_version
-            (listing_id, kind, major, minor, source_hash, html, routine)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (listing_id, kind, major, minor, source_hash, html, routine, changelog,
+             forced_major)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#,
         id.as_uuid(),
         content.kind().to_string(),
@@ -809,6 +858,8 @@ async fn insert_version(
         content.source_hash().as_ref(),
         html,
         routine,
+        notes.changelog.as_deref(),
+        notes.forced_major,
     )
     .execute(&mut **transaction)
     .await?;

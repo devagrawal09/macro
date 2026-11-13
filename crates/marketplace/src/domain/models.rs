@@ -27,6 +27,9 @@ pub const MAX_TITLE_CHARS: usize = 120;
 /// Longest description a listing takes, in characters.
 pub const MAX_DESCRIPTION_CHARS: usize = 1000;
 
+/// Longest changelog a version takes, in characters.
+pub const MAX_CHANGELOG_CHARS: usize = 2000;
+
 /// The connection gateway message that tells installers a version was
 /// published, shared with the web app's websocket handler.
 pub const LISTING_VERSION_MESSAGE_TYPE: &str = "marketplace_listing_version";
@@ -173,6 +176,9 @@ pub struct Listing {
     pub latest_version: Version,
     /// The major version the person asking is on, when they installed it.
     pub installed_major: Option<i32>,
+    /// The version the person asking has: the one their page shows, or the
+    /// one their routine was last filled in from.
+    pub installed_version: Option<Version>,
     /// The routine the person asking got from installing it.
     pub installed_routine: Option<InstalledRoutine>,
     /// How many people installed it.
@@ -344,6 +350,53 @@ impl ListingText {
     }
 }
 
+/// What a publisher says changed in a version, trimmed. Blank says nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changelog(Option<String>);
+
+impl Changelog {
+    /// The changelog a publisher typed, or why it can't be used.
+    pub fn new(text: Option<&str>) -> Result<Self, MarketplaceError> {
+        let text = text.map(str::trim).filter(|text| !text.is_empty());
+        if text.is_some_and(|text| text.chars().count() > MAX_CHANGELOG_CHARS) {
+            return Err(MarketplaceError::Invalid(format!(
+                "a changelog is at most {MAX_CHANGELOG_CHARS} characters"
+            )));
+        }
+
+        Ok(Self(text.map(str::to_owned)))
+    }
+
+    /// The text, when there is any.
+    pub fn as_deref(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+}
+
+/// What a new version says about itself, beside its content.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VersionNotes {
+    /// What its publisher says changed.
+    pub changelog: Changelog,
+    /// A routine version the server made major whatever was asked.
+    pub forced_major: bool,
+}
+
+/// One version in a listing's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingVersion {
+    /// Its version.
+    pub version: Version,
+    /// What its publisher said changed; absent when they said nothing.
+    pub changelog: Option<String>,
+    /// A routine version the server made major because what installs rely
+    /// on changed, whatever bump was asked.
+    pub forced_major: bool,
+    /// When it was published.
+    pub created_at: DateTime<Utc>,
+}
+
 /// A page's source as published: what a version stores.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedPage {
@@ -427,6 +480,8 @@ pub struct NewListing {
     pub text: ListingText,
     /// Its first version's content, which decides its kind.
     pub content: ListingContent,
+    /// What its first version says changed.
+    pub changelog: Changelog,
 }
 
 /// What became of a new version.

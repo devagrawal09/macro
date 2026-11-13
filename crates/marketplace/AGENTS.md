@@ -120,6 +120,12 @@ minor versions update until they edit it.
   never user ids.
 - Publishing refuses a page that doesn't build, so an install never shows
   one. A routine listing has no page: `installed_page` reads artifacts only.
+- Every version keeps its publisher's `changelog` (`Changelog`: trimmed,
+  blank is none, at most `MAX_CHANGELOG_CHARS` 2000, also a CHECK) and, for a
+  routine, `forced_major` when `routine_bump` overrode a minor.
+  `GET /marketplace/listings/{id}/versions` answers them newest first, without
+  content, to whoever sees the listing. A listing's `installedVersion` is the
+  routine's `routine_minor`, or the newest minor of a page install's major.
 - Every route answers `404` outside the rollout: `enable-marketplace` and
   `enable-html-code-mode` together, since listings are pages with programs.
   Runs refuse an agent's or a program's token, like a document's.

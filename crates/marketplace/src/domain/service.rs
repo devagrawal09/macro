@@ -21,11 +21,12 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
-    Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery, ListingText,
-    MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing, PublishSource, PublishedPage,
-    PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineUpdates,
-    RoutineVersion, Version, VersionBump, VersionNotice,
+    AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
+    InstalledPage, Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery,
+    ListingText, ListingVersion, MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing,
+    PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall,
+    RoutineUpdate, RoutineUpdates, RoutineVersion, Version, VersionBump, VersionNotes,
+    VersionNotice,
 };
 use crate::domain::ports::{
     ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
@@ -540,6 +541,7 @@ where
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         source: PublishSource,
         text: ListingText,
+        changelog: Changelog,
     ) -> Result<Listing, MarketplaceError> {
         self.admit(user).await?;
         let team_id = membership(user, team)?
@@ -562,6 +564,7 @@ where
                 source_id,
                 text,
                 content,
+                changelog,
             })
             .await
             .map_err(internal)?;
@@ -590,7 +593,8 @@ where
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
         source: PublishSource,
-        bump: VersionBump,
+        requested: VersionBump,
+        changelog: Changelog,
     ) -> Result<PublishedVersion, MarketplaceError> {
         self.admit(user).await?;
         let team = membership(user, team)?.map(|member| member.team_id);
@@ -608,7 +612,7 @@ where
 
         let content = self.content(source, &listing.description).await?;
         let bump = match &content {
-            ListingContent::Page(_) => bump,
+            ListingContent::Page(_) => requested,
             ListingContent::Routine(routine) => {
                 let newest = self
                     .listings
@@ -616,14 +620,18 @@ where
                     .await
                     .map_err(internal)?
                     .ok_or(MarketplaceError::NotFound)?;
-                routine_bump(bump, &newest.snapshot, &routine.snapshot)
+                routine_bump(requested, &newest.snapshot, &routine.snapshot)
             }
         };
         tracing::Span::current().record("bump", tracing::field::debug(bump));
+        let notes = VersionNotes {
+            changelog,
+            forced_major: bump != requested,
+        };
 
         let added = self
             .listings
-            .add_version(id, bump, &content)
+            .add_version(id, bump, &content, &notes)
             .await
             .map_err(internal)?;
         let version = match added {
@@ -647,6 +655,21 @@ where
             bump,
             updates,
         })
+    }
+
+    #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]
+    async fn versions(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> Result<Vec<ListingVersion>, MarketplaceError> {
+        self.admit(user).await?;
+        let team = membership(user, team)?.map(|member| member.team_id);
+        // Whoever sees the listing sees its history.
+        self.listing(user, team, id).await?;
+
+        self.listings.versions(id).await.map_err(internal)
     }
 
     #[tracing::instrument(err, skip_all, fields(listing_id = %id, team_id = tracing::field::Empty))]

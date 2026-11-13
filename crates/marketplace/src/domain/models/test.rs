@@ -1,9 +1,12 @@
-//! Reading a page request.
+//! Reading a page request and a changelog.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::{ListingCursor, ListingId, ListingQuery, ListingsShown, MarketplaceError};
+use super::{
+    Changelog, ListingCursor, ListingId, ListingQuery, ListingsShown, MAX_CHANGELOG_CHARS,
+    MarketplaceError,
+};
 
 #[test]
 fn a_cursor_reads_back_as_the_listing_it_names() {
@@ -61,4 +64,17 @@ fn a_blank_search_searches_nothing_and_a_long_one_is_refused() {
         search(&"é".repeat(201)),
         Err(MarketplaceError::Invalid(_))
     ));
+}
+
+#[test]
+fn a_changelog_is_trimmed_blank_says_nothing_and_long_is_refused() {
+    let trimmed = Changelog::new(Some("  Tidier columns \n")).expect("a changelog");
+    let blank = Changelog::new(Some("   ")).expect("a blank changelog");
+    let longest = Changelog::new(Some(&"é".repeat(MAX_CHANGELOG_CHARS)));
+    let too_long = Changelog::new(Some(&"a".repeat(MAX_CHANGELOG_CHARS + 1)));
+
+    assert_eq!(trimmed.as_deref(), Some("Tidier columns"));
+    assert_eq!(blank, Changelog::default());
+    assert!(longest.is_ok());
+    assert!(matches!(too_long, Err(MarketplaceError::Invalid(_))));
 }

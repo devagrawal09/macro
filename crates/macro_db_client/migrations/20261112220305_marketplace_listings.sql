@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS marketplace_listing_version (
     html TEXT,
     -- A routine's snapshot: name, description, trigger, task and variables.
     routine JSONB,
+    -- What the publisher says changed, for installers to read.
+    changelog TEXT CHECK (char_length(changelog) <= 2000),
+    -- A routine version the server made major because its interface changed,
+    -- whatever bump was asked.
+    forced_major BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (listing_id, major, minor),
     FOREIGN KEY (listing_id, kind)

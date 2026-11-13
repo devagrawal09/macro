@@ -84,6 +84,7 @@ async fn published_digest(service: &Service, routines: &FakeRoutines) -> Listing
                 title: "Weekly digest".to_owned(),
                 description: "Sums up the week".to_owned(),
             },
+            Changelog::default(),
         )
         .await
         .expect("the digest publishes")
@@ -106,6 +107,7 @@ async fn publish_instructions(
             listing,
             routine_source(ADA, variables),
             bump,
+            Changelog::default(),
         )
         .await
         .expect("the version publishes")
@@ -150,6 +152,7 @@ async fn a_routine_publishes_as_one_point_zero_with_its_snapshot() {
             Some(&member(BEN, ACME, TeamRole::Member)),
             routine_source(BEN, Vec::new()),
             text("Someone else's digest"),
+            Changelog::default(),
         )
         .await;
 
@@ -217,6 +220,7 @@ async fn installing_fills_in_the_routine_as_the_persons_own() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             routine_source(ADA, vec![zone(), board(VariableFill::Choice)]),
             text("Weekly digest"),
+            Changelog::default(),
         )
         .await
         .expect("the digest publishes");
@@ -567,5 +571,53 @@ async fn a_major_version_asks_for_new_fills_before_it_updates() {
             "timezone": "America/New_York",
         }))
         .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_history_says_which_routine_version_the_server_made_major() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+
+    // Asked as a minor, a new variable makes it 2.0.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION}"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Minor,
+    )
+    .await;
+    // Asked as a major, a major is no surprise.
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        &format!("Sum up {BOARD_MENTION} briefly"),
+        vec![zone(), board(VariableFill::Shared)],
+        VersionBump::Major,
+    )
+    .await;
+    let history = service
+        .versions(
+            &user(BEN),
+            Some(&member(BEN, ACME, TeamRole::Member)),
+            listing.id,
+        )
+        .await
+        .expect("a teammate reads the history");
+
+    let forced: Vec<(Version, bool)> = history
+        .iter()
+        .map(|entry| (entry.version, entry.forced_major))
+        .collect();
+    assert_eq!(
+        forced,
+        vec![
+            (Version { major: 3, minor: 0 }, false),
+            (Version { major: 2, minor: 0 }, true),
+            (Version::FIRST, false),
+        ]
     );
 }

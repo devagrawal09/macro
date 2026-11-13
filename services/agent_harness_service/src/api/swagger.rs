@@ -84,6 +84,7 @@ impl Modify for SecurityAddon {
         marketplace::inbound::axum_router::list_marketplace_listings,
         marketplace::inbound::axum_router::publish_marketplace_listing,
         marketplace::inbound::axum_router::publish_marketplace_listing_version,
+        marketplace::inbound::axum_router::list_marketplace_listing_versions,
         marketplace::inbound::axum_router::get_marketplace_listing_routine,
         marketplace::inbound::axum_router::unlist_marketplace_listing,
         marketplace::inbound::axum_router::install_marketplace_listing,

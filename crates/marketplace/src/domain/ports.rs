@@ -12,10 +12,11 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
-    Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText, MarketplaceError,
-    NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate,
-    RoutineVersion, TaskHash, Version, VersionBump, VersionNotice,
+    AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
+    InstalledPage, Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText,
+    ListingVersion, MarketplaceError, NewListing, PublishSource, PublishedVersion, RoutineCopy,
+    RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump, VersionNotes,
+    VersionNotice,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -48,14 +49,21 @@ pub trait ListingRepo: Send + Sync + 'static {
         query: &ListingQuery,
     ) -> impl Future<Output = Result<ListingPage, Self::Err>> + Send;
 
-    /// Store `content` as the listing's next version, unless its newest
-    /// version already holds the same content.
+    /// Store `content` as the listing's next version, with its notes,
+    /// unless its newest version already holds the same content.
     fn add_version(
         &self,
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        notes: &VersionNotes,
     ) -> impl Future<Output = Result<AddedVersion, Self::Err>> + Send;
+
+    /// Every version of the listing, newest first, without its content.
+    fn versions(
+        &self,
+        id: ListingId,
+    ) -> impl Future<Output = Result<Vec<ListingVersion>, Self::Err>> + Send;
 
     /// A routine listing's newest version, or the newest of `major`.
     fn routine_version(
@@ -243,13 +251,14 @@ pub trait MarketplaceService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<ListingPage, MarketplaceError>> + Send;
 
     /// Publish a document or routine the caller owns to their team, as
-    /// version 1.0.
+    /// version 1.0 saying `changelog`.
     fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         source: PublishSource,
         text: ListingText,
+        changelog: Changelog,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
     /// Publish the listing's source as its next version. Only its publisher
@@ -262,7 +271,16 @@ pub trait MarketplaceService: Send + Sync + 'static {
         id: ListingId,
         source: PublishSource,
         bump: VersionBump,
+        changelog: Changelog,
     ) -> impl Future<Output = Result<PublishedVersion, MarketplaceError>> + Send;
+
+    /// The listing's versions, newest first, to whoever may see it.
+    fn versions(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<Vec<ListingVersion>, MarketplaceError>> + Send;
 
     /// A routine listing's newest version, for someone deciding to install
     /// it or take its newest major.

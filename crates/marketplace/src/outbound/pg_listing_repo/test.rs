@@ -15,9 +15,10 @@ use uuid::Uuid;
 
 use super::PgListingRepo;
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallUpdate, InstalledRoutine, Listing, ListingContent,
-    ListingCursor, ListingId, ListingKind, ListingQuery, ListingScope, ListingText, ListingsShown,
-    NewListing, PublishedPage, PublishedRoutine, RoutineInstall, TaskHash, Version, VersionBump,
+    AddedVersion, Changelog, FollowingInstall, InstallUpdate, InstalledRoutine, Listing,
+    ListingContent, ListingCursor, ListingId, ListingKind, ListingQuery, ListingScope, ListingText,
+    ListingsShown, NewListing, PublishedPage, PublishedRoutine, RoutineInstall, TaskHash, Version,
+    VersionBump, VersionNotes,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -145,6 +146,7 @@ fn board(team: Uuid) -> NewListing {
             description: "Tasks by status".to_owned(),
         },
         content: page("<h1>Board</h1>"),
+        changelog: Changelog::default(),
     }
 }
 
@@ -160,6 +162,7 @@ fn digest(team: Uuid) -> NewListing {
             description: "Sums up the week".to_owned(),
         },
         content: routine("Weekly digest"),
+        changelog: Changelog::default(),
     }
 }
 
@@ -224,19 +227,39 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
     repo.create_listing(listing.clone()).await.unwrap();
 
     let unchanged = repo
-        .add_version(listing.id, VersionBump::Minor, &page("<h1>Board</h1>"))
+        .add_version(
+            listing.id,
+            VersionBump::Minor,
+            &page("<h1>Board</h1>"),
+            &VersionNotes::default(),
+        )
         .await
         .unwrap();
     let minor = repo
-        .add_version(listing.id, VersionBump::Minor, &page("<h1>Board 2</h1>"))
+        .add_version(
+            listing.id,
+            VersionBump::Minor,
+            &page("<h1>Board 2</h1>"),
+            &VersionNotes::default(),
+        )
         .await
         .unwrap();
     let major = repo
-        .add_version(listing.id, VersionBump::Major, &page("<h1>Board 3</h1>"))
+        .add_version(
+            listing.id,
+            VersionBump::Major,
+            &page("<h1>Board 3</h1>"),
+            &VersionNotes::default(),
+        )
         .await
         .unwrap();
     let after_major = repo
-        .add_version(listing.id, VersionBump::Minor, &page("<h1>Board 4</h1>"))
+        .add_version(
+            listing.id,
+            VersionBump::Minor,
+            &page("<h1>Board 4</h1>"),
+            &VersionNotes::default(),
+        )
         .await
         .unwrap();
     let missing = repo
@@ -244,6 +267,7 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
             ListingId::generate(),
             VersionBump::Minor,
             &page("<h1>Nothing</h1>"),
+            &VersionNotes::default(),
         )
         .await
         .unwrap();
@@ -261,6 +285,63 @@ async fn versions_number_from_the_newest_and_skip_an_unchanged_page(pool: PgPool
 }
 
 #[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_history_keeps_each_versions_changelog_newest_first(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    let repo = PgListingRepo::new(pool);
+    let listing = NewListing {
+        changelog: Changelog::new(Some("First cut")).unwrap(),
+        ..digest(acme)
+    };
+    repo.create_listing(listing.clone()).await.unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Major,
+        &routine("Weekly digest, with a board"),
+        &VersionNotes {
+            changelog: Changelog::new(Some("Asks for a board")).unwrap(),
+            forced_major: true,
+        },
+    )
+    .await
+    .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &routine("Weekly digest, tidied"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+
+    let history = repo.versions(listing.id).await.unwrap();
+    let unknown = repo.versions(ListingId::generate()).await.unwrap();
+
+    let summary: Vec<(Version, Option<&str>, bool)> = history
+        .iter()
+        .map(|entry| {
+            (
+                entry.version,
+                entry.changelog.as_deref(),
+                entry.forced_major,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (Version { major: 2, minor: 1 }, None, false),
+            (
+                Version { major: 2, minor: 0 },
+                Some("Asks for a board"),
+                true
+            ),
+            (Version::FIRST, Some("First cut"), false),
+        ]
+    );
+    assert!(unknown.is_empty());
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
 async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgPool) {
     let acme = insert_team(&pool, ADA).await;
     insert_user(&pool, BEN).await;
@@ -274,12 +355,22 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
         .await
         .unwrap();
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
-    repo.add_version(listing.id, VersionBump::Minor, &page("<h1>Board 1.1</h1>"))
-        .await
-        .unwrap();
-    repo.add_version(listing.id, VersionBump::Major, &page("<h1>Board 2.0</h1>"))
-        .await
-        .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1</h1>"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Major,
+        &page("<h1>Board 2.0</h1>"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
     let on_first_major = repo
         .installed_page(listing.id, &user(BEN), Some(acme))
         .await
@@ -305,10 +396,18 @@ async fn an_install_shows_the_newest_minor_of_its_major_until_it_moves(pool: PgP
     assert_eq!(on_first_major.html, "<h1>Board 1.1</h1>");
     assert_eq!(from_another_team, None);
     assert_eq!(waiting[0].installed_major, Some(1));
+    assert_eq!(
+        waiting[0].installed_version,
+        Some(Version { major: 1, minor: 1 })
+    );
     assert_eq!(waiting[0].latest_version, Version { major: 2, minor: 0 });
     assert_eq!(on_second_major.version, Version { major: 2, minor: 0 });
     assert_eq!(on_second_major.html, "<h1>Board 2.0</h1>");
     assert_eq!(moved[0].installed_major, Some(2));
+    assert_eq!(
+        moved[0].installed_version,
+        Some(Version { major: 2, minor: 0 })
+    );
     assert_eq!(moved[0].install_count, 1);
 }
 
@@ -685,19 +784,30 @@ async fn a_routine_version_stores_its_snapshot_and_no_page(pool: PgPool) {
     repo.create_listing(listing.clone()).await.unwrap();
 
     let unchanged = repo
-        .add_version(listing.id, VersionBump::Minor, &routine("Weekly digest"))
+        .add_version(
+            listing.id,
+            VersionBump::Minor,
+            &routine("Weekly digest"),
+            &VersionNotes::default(),
+        )
         .await
         .unwrap();
     repo.add_version(
         listing.id,
         VersionBump::Minor,
         &routine("Weekly digest 1.1"),
+        &VersionNotes::default(),
     )
     .await
     .unwrap();
-    repo.add_version(listing.id, VersionBump::Major, &routine("Weekly digest 2"))
-        .await
-        .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Major,
+        &routine("Weekly digest 2"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
     let newest = repo.routine_version(listing.id, None).await.unwrap();
     let first_major = repo.routine_version(listing.id, Some(1)).await.unwrap();
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
@@ -971,9 +1081,14 @@ async fn installers_are_team_members_on_the_major_newest_install_first(pool: PgP
     repo.create_listing(listing.clone()).await.unwrap();
 
     repo.install_latest(listing.id, &user(BEN)).await.unwrap();
-    repo.add_version(listing.id, VersionBump::Major, &page("<h1>Board 2.0</h1>"))
-        .await
-        .unwrap();
+    repo.add_version(
+        listing.id,
+        VersionBump::Major,
+        &page("<h1>Board 2.0</h1>"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
     repo.install_latest(listing.id, &user(CARA)).await.unwrap();
     // Ada owns the team but has no member row: like someone who left, she
     // can't open the listing, so she isn't told of it.
