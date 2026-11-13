@@ -499,10 +499,13 @@ the shimmer.
   unlisted (badge **Unlisted**). **Install** adds a page; **Open** shows the
   installed page in place of the lists, with **Back**, its title and the
   version shown. An install follows the newest minor version of its major: a
-  minor update reaches every install at once (on the next run, or on
-  returning to the window, the page reloads with a notice), and a major
-  update waits behind a quiet **Update to v2** button on the card and the
-  open page. The card's **More actions** menu has **Uninstall**, and for the
+  minor update reaches every install at once (an open page reloads within
+  seconds with the notice "A new version of this page was published"; a
+  missed message falls back to the next run or to returning to the window),
+  and a major update waits behind a quiet **Update to v2** button on the card
+  and the open page, which appears live too. To verify, open an installed
+  page in one browser, publish a minor version as its publisher in another,
+  and watch the page swap without interacting with it. The card's **More actions** menu has **Uninstall**, and for the
   publisher or a team admin **Unlist** (confirmed; people who installed the
   page keep it). An installed page is not a document: it is the marketplace's
   own build of the published version, and its programs run as the viewer. To
