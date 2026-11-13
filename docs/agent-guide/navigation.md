@@ -1556,7 +1556,10 @@ v1.2** in **More actions** holds your routine on its version: minor updates
 skip it (**Pinned** badge, and the card offers the newer version as
 **Update to v1.3**). **Unpin** applies the newest minor of your major at
 once, unless you edited the routine, which pauses its updates as an
-automatic update would. An edited routine has no **Pin**.
+automatic update would. An edited routine has no **Pin**. **Make my own**
+asks **Make “name” your own?**, then detaches your routine as an edit would:
+it stays as it is and stops getting updates. Publishing that routine later
+makes a listing that reads **Based on <title>**.
 
 **Runs** shows outcome, duration, and firing time. History loads fifty
 rows at a time; **Load more runs** reveals older records. Accessible run rows

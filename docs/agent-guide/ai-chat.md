@@ -521,14 +521,18 @@ the shimmer.
   dialog with the listing's description and every version's note, newest
   first, from `GET /marketplace/listings/{id}/versions`; a routine version
   the server made major is badged **Made major**), **Pin to v1.2** for an
-  install (the version it has) or **Unpin**, **Uninstall**, and for the
+  install (the version it has) or **Unpin**, **Make a copy** for an
+  installed page (a new HTML document of the version shown, owned by the
+  viewer, which opens in a split; the install stays), **Uninstall**, and for the
   publisher or a team admin **Unlist** (confirmed; people who installed the
   page keep it). A pinned install shows a **Pinned** badge (also beside the
   open page's version) and keeps that exact version: a minor update doesn't
   reach it and its open page doesn't reload, but the card says **Pinned to
   v1.0. v1.1 is available.** and offers **Update to v1.1**, which takes the
   newest version and unpins. **Unpin** moves it to the newest minor of its
-  major. An installed page is not a document: it is the marketplace's
+  major. A listing published from such a copy reads **Based on <title>**
+  on its card and in Version history, for viewers who can see the original
+  listing (nothing otherwise). An installed page is not a document: it is the marketplace's
   own build of the published version, and its programs run as the viewer. To
   publish, open an HTML page you own and choose **Publish to marketplace…**
   from its file menu (see
