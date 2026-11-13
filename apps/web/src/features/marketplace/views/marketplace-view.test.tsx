@@ -5,6 +5,7 @@ import {
   screen,
   within,
 } from '@solidjs/testing-library';
+import { ImperativeDialogHost } from '@ui';
 import { createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -226,6 +227,45 @@ describe('Marketplace', () => {
       fireEvent.click(within(card).getByRole('button', { name: 'Open' }));
       expect(routines.open).toHaveBeenCalledWith('routine-1');
     });
+
+    it.each([
+      ['Update to v2', 1],
+      ['Cancel', 0],
+    ] as const)(
+      'confirms before replacing an edited routine: %s',
+      async (choice, installs) => {
+        const source = fakeSource(() => [
+          digest({
+            installedMajor: 1,
+            latestVersion: { major: 2, minor: 0 },
+            installedRoutine: {
+              routineId: 'routine-1',
+              detached: true,
+              updateFailed: false,
+            },
+          }),
+        ]);
+        render(() => <ImperativeDialogHost />);
+        renderMarketplace(source);
+
+        const card = screen.getByRole('article', {
+          name: 'Marketplace page: Weekly digest',
+        });
+        fireEvent.click(
+          within(card).getByRole('button', { name: 'Update to v2' })
+        );
+        const confirm = await screen.findByRole('dialog', {
+          name: 'Update “Weekly digest” to v2.0?',
+        });
+        expect(source.install).not.toHaveBeenCalled();
+
+        fireEvent.click(within(confirm).getByRole('button', { name: choice }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        await vi.waitFor(() =>
+          expect(source.install).toHaveBeenCalledTimes(installs)
+        );
+      }
+    );
 
     it('asks only for what a new major added, then takes it', async () => {
       const board = {

@@ -35,6 +35,9 @@ export default {
   uninstallRoutineTitle: 'Uninstall “{{title}}”?',
   uninstallRoutineBody:
     'Your routine stays yours and keeps its settings, but it no longer gets updates.',
+  updateEditedTitle: 'Update “{{title}}” to {{version}}?',
+  updateEditedBody:
+    'You edited this routine. Updating replaces your edits with the new version, filled in with your earlier choices.',
   installedToast: 'Installed {{title}}',
   installFailed: 'Could not install {{title}}',
   updatedToast: 'Updated {{title}} to {{version}}',

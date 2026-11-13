@@ -153,9 +153,31 @@ export function MarketplaceView(props: {
         failed: t('marketplace.installFailed', { title: listing.title }),
       }
     );
+  /**
+   * A routine its person edited is refilled from the new major, replacing
+   * their edits: ask first.
+   */
+  const confirmReplacingEdits = (listing: Listing) =>
+    confirmDialog({
+      title: t('marketplace.updateEditedTitle', {
+        title: listing.title,
+        version: versionLabel(listing.latestVersion),
+      }),
+      body: t('marketplace.updateEditedBody'),
+      confirmLabel: t('marketplace.updateTo', {
+        major: listing.latestVersion.major,
+      }),
+      tone: 'danger',
+    });
+
   // Installing again moves the install to the newest major.
-  const update = (listing: Listing) =>
-    act(
+  const update = async (listing: Listing) => {
+    if (listing.installedRoutine?.detached) {
+      const confirmed = await confirmReplacingEdits(listing);
+      if (!confirmed) return;
+    }
+
+    await act(
       'marketplace.update',
       listing,
       (span) =>
@@ -170,6 +192,7 @@ export function MarketplaceView(props: {
         failed: t('marketplace.updateFailed', { title: listing.title }),
       }
     );
+  };
   const uninstall = async (listing: Listing) => {
     // The routine an install made stays the person's own: say so first.
     if (listing.installedRoutine) {
