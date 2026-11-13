@@ -5032,7 +5032,7 @@ export const uninstallMarketplaceListing = async (
 
 /**
  * @summary Build the page the caller's install shows: the newest minor version of
-the major they are on.
+the major they are on, or the version they pinned.
  */
 export type getInstalledListingBuildResponse200 = {
   data: InstalledListingBuild;
@@ -5197,6 +5197,145 @@ export const runInstalledListingProgram = async (
     status: res.status,
     headers: res.headers,
   } as runInstalledListingProgramResponse;
+};
+
+/**
+ * @summary Pin the caller's install to the version it has: a page keeps showing it
+and a routine gets no automatic updates. Taking a version with
+`PUT .../install` unpins it. `400` means a routine the caller edited or
+made their own, which gets no updates to hold back.
+ */
+export type pinMarketplaceInstallResponse200 = {
+  data: Listing;
+  status: 200;
+};
+
+export type pinMarketplaceInstallResponse400 = {
+  data: ErrorResponse;
+  status: 400;
+};
+
+export type pinMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type pinMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type pinMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type pinMarketplaceInstallResponseSuccess =
+  pinMarketplaceInstallResponse200 & {
+    headers: Headers;
+  };
+export type pinMarketplaceInstallResponseError = (
+  | pinMarketplaceInstallResponse400
+  | pinMarketplaceInstallResponse401
+  | pinMarketplaceInstallResponse404
+  | pinMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type pinMarketplaceInstallResponse =
+  | pinMarketplaceInstallResponseSuccess
+  | pinMarketplaceInstallResponseError;
+
+export const getPinMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/pin`;
+};
+
+export const pinMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<pinMarketplaceInstallResponse> => {
+  const res = await fetch(getPinMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'PUT',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: pinMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as pinMarketplaceInstallResponse;
+};
+
+/**
+ * @summary Unpin the caller's install: it moves to the newest minor version of its
+major. A routine is updated to it unless its person edited it, which
+detaches it as an automatic update would.
+ */
+export type unpinMarketplaceInstallResponse200 = {
+  data: Listing;
+  status: 200;
+};
+
+export type unpinMarketplaceInstallResponse401 = {
+  data: void;
+  status: 401;
+};
+
+export type unpinMarketplaceInstallResponse404 = {
+  data: ErrorResponse;
+  status: 404;
+};
+
+export type unpinMarketplaceInstallResponse500 = {
+  data: void;
+  status: 500;
+};
+
+export type unpinMarketplaceInstallResponseSuccess =
+  unpinMarketplaceInstallResponse200 & {
+    headers: Headers;
+  };
+export type unpinMarketplaceInstallResponseError = (
+  | unpinMarketplaceInstallResponse401
+  | unpinMarketplaceInstallResponse404
+  | unpinMarketplaceInstallResponse500
+) & {
+  headers: Headers;
+};
+
+export type unpinMarketplaceInstallResponse =
+  | unpinMarketplaceInstallResponseSuccess
+  | unpinMarketplaceInstallResponseError;
+
+export const getUnpinMarketplaceInstallUrl = (id: string) => {
+  return `/marketplace/listings/${id}/install/pin`;
+};
+
+export const unpinMarketplaceInstall = async (
+  id: string,
+  options?: RequestInit
+): Promise<unpinMarketplaceInstallResponse> => {
+  const res = await fetch(getUnpinMarketplaceInstallUrl(id), {
+    ...options,
+    method: 'DELETE',
+  });
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: unpinMarketplaceInstallResponse['data'] = body
+    ? JSON.parse(body)
+    : {};
+  return {
+    data,
+    status: res.status,
+    headers: res.headers,
+  } as unpinMarketplaceInstallResponse;
 };
 
 /**

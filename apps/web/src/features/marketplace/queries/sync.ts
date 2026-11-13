@@ -16,9 +16,10 @@ const messageSchema = z.object({
 });
 
 /**
- * A version was published: refresh the listings, so a waiting major shows
- * its Update button, and the open page of that listing when the version is
- * a newer minor of the major it shows. The run's `409` and the window focus
+ * A version was published: refresh the listings, so a waiting major (or,
+ * for a pinned install, any newer version) shows its Update button, and the
+ * open page of that listing when the version is a newer minor of the major
+ * it shows and the page isn't pinned. The run's `409` and the window focus
  * refetch stay as fallbacks for a missed message.
  */
 export async function handleListingVersion(data: unknown): Promise<void> {
@@ -35,8 +36,10 @@ export async function handleListingVersion(data: unknown): Promise<void> {
   // page refetches when it opens anyway.
   const buildKey = marketplaceKeys.installedBuild(listingId).queryKey;
   const shown = queryClient.getQueryData<InstalledListingBuild>(buildKey);
+  // A pinned page keeps its version: only its lists learn of the new one.
   const newerMinor =
     shown !== undefined &&
+    !shown.pinned &&
     version.major === shown.version.major &&
     version.minor > shown.version.minor;
   if (!newerMinor) {

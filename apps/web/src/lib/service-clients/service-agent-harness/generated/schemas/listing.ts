@@ -32,6 +32,9 @@ export interface Listing {
   kind: ListingKind;
   /** Its newest version. */
   latestVersion: Version;
+  /** The person asking pinned their install to `installed_version`: newer
+minor versions don't reach it until they unpin or update. */
+  pinned: boolean;
   /** Who published it. */
   publisher: string;
   /** Unlisted: only those who installed it still see it. */

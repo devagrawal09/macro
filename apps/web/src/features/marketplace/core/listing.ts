@@ -41,14 +41,36 @@ export function isInstalled(listing: Listing): boolean {
   return typeof listing.installedMajor === 'number';
 }
 
+/** Whether the viewer pinned their install to the version it has. */
+export function isPinned(listing: Listing): boolean {
+  return isInstalled(listing) && listing.pinned === true;
+}
+
 /**
- * Whether a major version newer than the viewer's install is waiting. Minor
- * versions never wait: every install on a major shows its newest minor.
+ * A version newer than a pinned install's, which it doesn't get until the
+ * viewer updates or unpins. Nothing for an install that isn't pinned.
+ */
+export function newerThanPinned(listing: Listing): boolean {
+  const installed = listing.installedVersion;
+  return (
+    isPinned(listing) &&
+    installed !== null &&
+    installed !== undefined &&
+    compareVersions(installed, listing.latestVersion) < 0
+  );
+}
+
+/**
+ * Whether a version newer than the viewer's install is waiting for them to
+ * take: a newer major, or for a pinned install any newer version. Minor
+ * versions don't wait otherwise: every install on a major shows its newest
+ * minor.
  */
 export function updateAvailable(listing: Listing): boolean {
   return (
-    typeof listing.installedMajor === 'number' &&
-    listing.installedMajor < listing.latestVersion.major
+    (typeof listing.installedMajor === 'number' &&
+      listing.installedMajor < listing.latestVersion.major) ||
+    newerThanPinned(listing)
   );
 }
 

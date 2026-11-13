@@ -51,6 +51,15 @@ export type MarketplaceSource = {
   unlist(listingId: string, parentSpan?: TraceContext): Promise<void>;
   /** A listing's versions, newest first, with what each one changed. */
   versions(listingId: string): Promise<readonly ListingVersion[]>;
+  /**
+   * Pin the viewer's install to the version it has, or unpin it, which
+   * moves it to the newest minor of its major.
+   */
+  pin(
+    listingId: string,
+    pinned: boolean,
+    parentSpan?: TraceContext
+  ): Promise<Listing>;
 };
 
 /** What the person decided while filling in a routine to install. */

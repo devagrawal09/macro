@@ -2319,11 +2319,17 @@ export type InstalledListingBuild = {
      */
     page: DocumentBuildResponse;
     /**
+     * The caller pinned their install to `version`: a newer minor version
+     * doesn't replace the page.
+     */
+    pinned: boolean;
+    /**
      * The version's source, when `page` is plain and is shown as it is.
      */
     plainHtml?: string | null;
     /**
-     * The version built: the newest minor of the major the caller is on.
+     * The version built: the newest minor of the major the caller is on,
+     * or the one they pinned.
      */
     version: Version;
 };
@@ -2450,6 +2456,11 @@ export type Listing = {
      * Its newest version.
      */
     latestVersion: Version;
+    /**
+     * The person asking pinned their install to `installed_version`: newer
+     * minor versions don't reach it until they unpin or update.
+     */
+    pinned: boolean;
     /**
      * Who published it.
      */
@@ -6054,6 +6065,59 @@ export type RunInstalledListingProgramResponses = {
 };
 
 export type RunInstalledListingProgramResponse = RunInstalledListingProgramResponses[keyof RunInstalledListingProgramResponses];
+
+export type UnpinMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/pin';
+};
+
+export type UnpinMarketplaceInstallErrors = {
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type UnpinMarketplaceInstallError = UnpinMarketplaceInstallErrors[keyof UnpinMarketplaceInstallErrors];
+
+export type UnpinMarketplaceInstallResponses = {
+    200: Listing;
+};
+
+export type UnpinMarketplaceInstallResponse = UnpinMarketplaceInstallResponses[keyof UnpinMarketplaceInstallResponses];
+
+export type PinMarketplaceInstallData = {
+    body?: never;
+    path: {
+        /**
+         * A listing the caller installed
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/marketplace/listings/{id}/install/pin';
+};
+
+export type PinMarketplaceInstallErrors = {
+    400: ErrorResponse;
+    401: unknown;
+    404: ErrorResponse;
+    500: unknown;
+};
+
+export type PinMarketplaceInstallError = PinMarketplaceInstallErrors[keyof PinMarketplaceInstallErrors];
+
+export type PinMarketplaceInstallResponses = {
+    200: Listing;
+};
+
+export type PinMarketplaceInstallResponse = PinMarketplaceInstallResponses[keyof PinMarketplaceInstallResponses];
 
 export type GetMarketplaceListingRoutineData = {
     body?: never;

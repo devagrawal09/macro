@@ -693,6 +693,20 @@ export const agentHarnessServiceClient = {
     );
   },
 
+  /**
+   * Pin the caller's install to the version it has, or unpin it, which
+   * moves it to the newest minor of its major.
+   */
+  setListingPinned(listingId: string, pinned: boolean) {
+    return fetchWithToken<Listing>(
+      `${agentHarnessHost}/marketplace/listings/${listingId}/install/pin`,
+      {
+        method: pinned ? 'PUT' : 'DELETE',
+        errorResponseHandler: marketplaceError,
+      }
+    );
+  },
+
   uninstallListing(listingId: string) {
     return fetchWithToken<Record<string, never>>(
       `${agentHarnessHost}/marketplace/listings/${listingId}/install`,

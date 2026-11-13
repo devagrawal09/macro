@@ -13,6 +13,7 @@ import ArrowLeftIcon from '@icon/system/regular/arrow-left.svg';
 import { useQuery } from '@tanstack/solid-query';
 import { Badge, Button } from '@ui';
 import { createMemo, createSignal, Match, Show, Switch } from 'solid-js';
+import { updateLabel } from '../components/update-changes';
 import { type Listing, updateAvailable, versionLabel } from '../core/listing';
 import {
   installedBuildQueryOptions,
@@ -37,7 +38,7 @@ export function InstalledPageView(props: {
   /** An action on this listing is in flight. */
   busy: boolean;
   onBack(): void;
-  /** Take the major version that is waiting. */
+  /** Take the newer version that is waiting. */
   onUpdate(): void;
 }) {
   const build = useQuery(() => installedBuildQueryOptions(props.listing.id));
@@ -124,9 +125,16 @@ export function InstalledPageView(props: {
         </h2>
         <Show when={installed()}>
           {(current) => (
-            <Badge variant="outline" size="xs" class="shrink-0">
-              {versionLabel(current().version)}
-            </Badge>
+            <>
+              <Badge variant="outline" size="xs" class="shrink-0">
+                {versionLabel(current().version)}
+              </Badge>
+              <Show when={current().pinned}>
+                <Badge variant="ghost" size="xs" class="shrink-0">
+                  {t('marketplace.pinned')}
+                </Badge>
+              </Show>
+            </>
           )}
         </Show>
         <Show when={updateAvailable(props.listing)}>
@@ -137,9 +145,7 @@ export function InstalledPageView(props: {
             disabled={props.busy}
             onClick={() => props.onUpdate()}
           >
-            {t('marketplace.updateTo', {
-              major: props.listing.latestVersion.major,
-            })}
+            {updateLabel(props.listing)}
           </Button>
         </Show>
       </div>

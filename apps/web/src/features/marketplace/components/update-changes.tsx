@@ -1,6 +1,10 @@
 import { t } from '@app/lib/i18n';
 import { Show } from 'solid-js';
-import type { ListingVersion } from '../core/listing';
+import {
+  type Listing,
+  type ListingVersion,
+  versionLabel,
+} from '../core/listing';
 import { VersionHistory } from './version-history';
 
 /**
@@ -36,4 +40,18 @@ export function UpdateChanges(props: {
       </Show>
     </div>
   );
+}
+
+/**
+ * The update button's label: the newer major waiting, or for a pinned
+ * install the exact version it would take.
+ */
+export function updateLabel(listing: Listing): string {
+  const target = listing.latestVersion;
+  const newerMajor =
+    typeof listing.installedMajor === 'number' &&
+    listing.installedMajor < target.major;
+  return newerMajor
+    ? t('marketplace.updateTo', { major: target.major })
+    : t('marketplace.updateToVersion', { version: versionLabel(target) });
 }

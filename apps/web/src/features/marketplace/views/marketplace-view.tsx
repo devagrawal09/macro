@@ -16,7 +16,7 @@ import { confirmDialog, Tabs } from '@ui';
 import { createSignal, Show } from 'solid-js';
 import { ListingCard } from '../components/listing-card';
 import { ListingGrid } from '../components/listing-grid';
-import { UpdateChanges } from '../components/update-changes';
+import { UpdateChanges, updateLabel } from '../components/update-changes';
 import type {
   MarketplaceRoutines,
   MarketplaceSource,
@@ -213,7 +213,7 @@ export function MarketplaceView(props: {
         version: versionLabel(target),
       }),
       body: <UpdateChanges changes={changes} replacesEdits={replacesEdits} />,
-      confirmLabel: t('marketplace.updateTo', { major: target.major }),
+      confirmLabel: updateLabel(listing),
       tone: replacesEdits ? 'danger' : undefined,
     });
   };
@@ -258,6 +258,28 @@ export function MarketplaceView(props: {
         done: t('marketplace.uninstalledToast', { title: listing.title }),
         failed: t('marketplace.uninstallFailed', { title: listing.title }),
       }
+    );
+  };
+  const pin = (listing: Listing, pinned: boolean) => {
+    const version = versionLabel(
+      listing.installedVersion ?? listing.latestVersion
+    );
+    return act(
+      pinned ? 'marketplace.pin' : 'marketplace.unpin',
+      listing,
+      (span) => props.source.pin(listing.id, pinned, span),
+      pinned
+        ? {
+            done: t('marketplace.pinnedToast', {
+              title: listing.title,
+              version,
+            }),
+            failed: t('marketplace.pinFailed', { title: listing.title }),
+          }
+        : {
+            done: t('marketplace.unpinnedToast', { title: listing.title }),
+            failed: t('marketplace.unpinFailed', { title: listing.title }),
+          }
     );
   };
   const unlist = async (listing: Listing) => {
@@ -350,6 +372,9 @@ export function MarketplaceView(props: {
                     fireAndForget(unlist(listing()), 'marketplace')
                   }
                   onDetails={() => setDetailsId(listing().id)}
+                  onPin={(pinned) =>
+                    fireAndForget(pin(listing(), pinned), 'marketplace')
+                  }
                 />
               )}
             </ListingGrid>

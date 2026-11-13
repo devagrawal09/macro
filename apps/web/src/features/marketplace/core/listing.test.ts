@@ -20,6 +20,7 @@ const listing = (overrides: Partial<Listing> = {}): Listing => ({
   latestVersion: { major: 1, minor: 0 },
   installCount: 0,
   removed: false,
+  pinned: false,
   createdAt: '2026-11-01T10:00:00Z',
   updatedAt: '2026-11-01T10:00:00Z',
   ...overrides,
@@ -74,6 +75,26 @@ describe('marketplace listings', () => {
     expect(updateAvailable(listing({ latestVersion, installedMajor: 1 }))).toBe(
       true
     );
+  });
+
+  it('offers a pinned install any newer version, and an unpinned one only a major', () => {
+    const behind = {
+      latestVersion: { major: 1, minor: 3 },
+      installedMajor: 1,
+      installedVersion: { major: 1, minor: 1 },
+    };
+
+    expect(updateAvailable(listing({ ...behind, pinned: true }))).toBe(true);
+    expect(updateAvailable(listing({ ...behind, pinned: false }))).toBe(false);
+    expect(
+      updateAvailable(
+        listing({
+          ...behind,
+          installedVersion: { major: 1, minor: 3 },
+          pinned: true,
+        })
+      )
+    ).toBe(false);
   });
 
   it('knows a listing’s publisher', () => {

@@ -18,12 +18,13 @@ afterEach(() => {
 });
 
 /** A query client with `listing`'s page open on version 1.0. */
-async function openPage(listing: string) {
+async function openPage(listing: string, pinned = false) {
   const queryClient = new QueryClient();
   client.current = queryClient;
   const fetchBuild = vi.fn(async () => ({
     page: { status: 'plain' },
     version: { major: 1, minor: 0 },
+    pinned,
   }));
 
   const observer = new QueryObserver(queryClient, {
@@ -52,6 +53,17 @@ describe('a published version message', () => {
     });
 
     expect(fetchBuild).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a pinned page alone for a newer minor', async () => {
+    const { fetchBuild } = await openPage('board', true);
+
+    await handleListingVersion({
+      listingId: 'board',
+      version: { major: 1, minor: 1 },
+    });
+
+    expect(fetchBuild).not.toHaveBeenCalled();
   });
 
   it('leaves the open page of another listing alone', async () => {

@@ -36,6 +36,9 @@ export type { PublishListingErrorCode };
 /** An action on one listing, sent in the trace of the span that started it. */
 export type ListingAction = { listingId: string; parentSpan?: TraceContext };
 
+/** Pinning or unpinning an install. */
+export type PinAction = ListingAction & { pinned: boolean };
+
 /** An install, with a routine's fills when it is one. */
 export type InstallAction = ListingAction & { request?: InstallListing };
 
@@ -189,6 +192,41 @@ export function useUninstallListingMutation(
             queryKey: marketplaceKeys.installedBuild(listingId).queryKey,
           });
           await invalidateListings();
+        },
+      },
+      callbacks
+    ),
+  }));
+}
+
+/**
+ * Pins the viewer's install to the version it has, or unpins it, which
+ * moves it to the newest minor of its major (and updates a routine).
+ */
+export function usePinListingMutation(
+  callbacks?: MutationCallbacks<Listing, Error, PinAction>
+) {
+  return useMutation(() => ({
+    mutationFn: (args: PinAction) =>
+      inTrace(args.parentSpan, () =>
+        throwOnErr(() =>
+          agentHarnessServiceClient.setListingPinned(
+            args.listingId,
+            args.pinned
+          )
+        )
+      ),
+    ...withCallbacks(
+      {
+        onSuccess: async (listing) => {
+          setListing(listing);
+          // Unpinning moves an open page to the newest minor.
+          await Promise.all([
+            invalidateListings(),
+            queryClient.invalidateQueries({
+              queryKey: marketplaceKeys.installedBuild(listing.id).queryKey,
+            }),
+          ]);
         },
       },
       callbacks
@@ -352,6 +390,7 @@ export function createMarketplaceSource(
   const install = useInstallListingMutation();
   const uninstall = useUninstallListingMutation();
   const unlist = useUnlistListingMutation();
+  const pin = usePinListingMutation();
 
   return {
     list: (filter) => createListingList(filter, enabled),
@@ -362,5 +401,7 @@ export function createMarketplaceSource(
     unlist: (listingId, parentSpan) =>
       unlist.mutateAsync({ listingId, parentSpan }),
     versions: fetchListingVersions,
+    pin: (listingId, pinned, parentSpan) =>
+      pin.mutateAsync({ listingId, pinned, parentSpan }),
   };
 }

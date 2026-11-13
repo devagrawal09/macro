@@ -52,10 +52,12 @@ export const agentHarnessBacklog = [
   'installMarketplaceListing',
   'listMarketplaceListingVersions',
   'listMarketplaceListings',
+  'pinMarketplaceInstall',
   'publishMarketplaceListing',
   'publishMarketplaceListingVersion',
   'uninstallMarketplaceListing',
   'unlistMarketplaceListing',
+  'unpinMarketplaceInstall',
 ] as const satisfies readonly (keyof AgentHarnessSdk)[];
 
 export const authExcluded = [

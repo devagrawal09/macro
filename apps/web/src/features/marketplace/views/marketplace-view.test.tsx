@@ -40,6 +40,7 @@ const listing = (overrides: Partial<Listing>): Listing => ({
   latestVersion: { major: 1, minor: 0 },
   installCount: 3,
   removed: false,
+  pinned: false,
   createdAt: '2026-11-01T10:00:00Z',
   updatedAt: '2026-11-01T10:00:00Z',
   ...overrides,
@@ -67,6 +68,9 @@ function fakeSource(
     uninstall: vi.fn(async () => {}),
     unlist: vi.fn(async () => {}),
     versions: vi.fn(async () => []),
+    pin: vi.fn(async (id: string, pinned: boolean) =>
+      listing({ id, installedMajor: 1, pinned })
+    ),
     ...overrides,
   };
 }
@@ -263,6 +267,70 @@ describe('Marketplace', () => {
     );
     expect(source.uninstall).toHaveBeenCalledWith(
       'dashboard',
+      expect.anything()
+    );
+  });
+
+  it('pins an install to its version from More actions', async () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        installedMajor: 1,
+        installedVersion: { major: 1, minor: 2 },
+        latestVersion: { major: 1, minor: 2 },
+      }),
+    ]);
+    renderMarketplace(source);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'More actions for Launch dashboard' })
+    );
+    expect(screen.queryByRole('menuitem', { name: 'Unpin' })).toBeNull();
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Pin to v1.2' })
+    );
+    expect(source.pin).toHaveBeenCalledWith(
+      'dashboard',
+      true,
+      expect.anything()
+    );
+  });
+
+  it('marks a pinned install, says a newer version is out, and unpins it', async () => {
+    const source = fakeSource(() => [
+      listing({
+        id: 'dashboard',
+        installedMajor: 1,
+        installedVersion: { major: 1, minor: 0 },
+        latestVersion: { major: 1, minor: 1 },
+        pinned: true,
+      }),
+    ]);
+    renderMarketplace(source);
+
+    const card = screen.getByRole('article', {
+      name: 'Marketplace page: Launch dashboard',
+    });
+    expect(within(card).getByText('Pinned')).toBeTruthy();
+    expect(
+      within(card).getByText('Pinned to v1.0. v1.1 is available.')
+    ).toBeTruthy();
+    expect(
+      within(card).getByRole('button', { name: 'Update to v1.1' })
+    ).toBeTruthy();
+
+    await userEvent.click(
+      within(card).getByRole('button', {
+        name: 'More actions for Launch dashboard',
+      })
+    );
+    expect(screen.queryByRole('menuitem', { name: /Pin to/ })).toBeNull();
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Unpin' })
+    );
+    expect(source.pin).toHaveBeenCalledWith(
+      'dashboard',
+      false,
       expect.anything()
     );
   });
