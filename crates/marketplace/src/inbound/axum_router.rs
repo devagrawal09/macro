@@ -38,8 +38,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     models::{
-        Changelog, InstallRequest, InstalledBuild, Listing, ListingId, ListingKind, ListingQuery,
-        ListingText, ListingVersion, ListingsShown, MarketplaceError, PublishSource,
+        Changelog, InstallRequest, InstalledBuild, Listing, ListingCopy, ListingId, ListingKind,
+        ListingQuery, ListingText, ListingVersion, ListingsShown, MarketplaceError, PublishSource,
         PublishedVersion, Version, VersionBump,
     },
     ports::MarketplaceService,
@@ -121,6 +121,10 @@ where
             "/marketplace/listings/{id}/install",
             put(install_marketplace_listing::<S, Access, Auth>)
                 .delete(uninstall_marketplace_listing::<S, Access, Auth>),
+        )
+        .route(
+            "/marketplace/listings/{id}/install/copy",
+            post(copy_marketplace_install::<S, Access, Auth>),
         )
         .route(
             "/marketplace/listings/{id}/install/pin",
@@ -657,6 +661,38 @@ where
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(post, path = "/marketplace/listings/{id}/install/copy", tag = "marketplace", operation_id = "copy_marketplace_install",
+    params(("id" = Uuid, Path, description = "A listing the caller installed")),
+    responses((status = 201, body = ListingCopy), (status = 400, body = ErrorResponse), (status = 401), (status = 404, body = ErrorResponse), (status = 500)))]
+/// Make the caller's own copy of what they installed, recording the listing
+/// and version it came from. An artifact becomes a new HTML document owned
+/// by the caller, holding the version their install shows; the install
+/// stays. A routine install is detached: the routine stays the caller's and
+/// gets no more updates. Publishing the copy later says it is based on this
+/// listing.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn copy_marketplace_install<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<(StatusCode, Json<ListingCopy>), MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let copy = state
+        .service
+        .copy(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+        )
+        .await?;
+    Ok((StatusCode::CREATED, Json(copy)))
 }
 
 #[utoipa::path(put, path = "/marketplace/listings/{id}/install/pin", tag = "marketplace", operation_id = "pin_marketplace_install",

@@ -16,9 +16,9 @@ use uuid::Uuid;
 use super::PgListingRepo;
 use crate::domain::models::{
     AddedVersion, Changelog, FollowingInstall, InstallUpdate, InstalledRoutine, Listing,
-    ListingContent, ListingCursor, ListingId, ListingKind, ListingQuery, ListingScope, ListingText,
-    ListingsShown, NewListing, PublishedPage, PublishedRoutine, RoutineInstall, TaskHash, Version,
-    VersionBump, VersionNotes,
+    ListingContent, ListingCursor, ListingId, ListingKind, ListingOrigin, ListingQuery,
+    ListingScope, ListingText, ListingsShown, NewCopy, NewListing, PublishedPage, PublishedRoutine,
+    RoutineInstall, TaskHash, Version, VersionBump, VersionNotes,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -147,6 +147,7 @@ fn board(team: Uuid) -> NewListing {
         },
         content: page("<h1>Board</h1>"),
         changelog: Changelog::default(),
+        derived_from: None,
     }
 }
 
@@ -163,6 +164,7 @@ fn digest(team: Uuid) -> NewListing {
         },
         content: routine("Weekly digest"),
         changelog: Changelog::default(),
+        derived_from: None,
     }
 }
 
@@ -1210,4 +1212,91 @@ async fn a_pin_holds_a_page_on_its_minor_and_keeps_a_routine_from_updates(pool: 
     assert_eq!(behind, vec![CARA.to_owned()]);
     assert!(pinned_routine.pinned);
     assert_eq!(pinned_routine.installed_version, Some(Version::FIRST));
+}
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_listing_from_a_copy_is_based_on_its_origin_where_the_origin_is_seen(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    join_team(&pool, acme, BEN).await;
+    join_team(&pool, acme, CARA).await;
+    let other = insert_team(&pool, OTHER_OWNER).await;
+    let repo = PgListingRepo::new(pool);
+    let origin = board(acme);
+    repo.create_listing(origin.clone()).await.unwrap();
+    repo.install_latest(origin.id, &user(BEN)).await.unwrap();
+
+    // Ben copies the board into a document of his own, twice recorded.
+    let document = Uuid::now_v7();
+    let copy = NewCopy {
+        kind: ListingKind::Artifact,
+        copy_id: document,
+        listing_id: origin.id,
+        version: Version::FIRST,
+        user: user(BEN),
+    };
+    repo.record_copy(&copy).await.unwrap();
+    repo.record_copy(&copy).await.unwrap();
+    let copied_from = repo
+        .copied_from(ListingKind::Artifact, document)
+        .await
+        .unwrap();
+    let not_a_routine = repo
+        .copied_from(ListingKind::Routine, document)
+        .await
+        .unwrap();
+    let not_a_copy = repo
+        .copied_from(ListingKind::Artifact, Uuid::now_v7())
+        .await
+        .unwrap();
+
+    // He publishes it to Acme, and to another team that can't see the board.
+    let bens = NewListing {
+        publisher: user(BEN),
+        source_id: document,
+        derived_from: copied_from,
+        text: ListingText {
+            title: "Ben's board".to_owned(),
+            description: String::new(),
+        },
+        ..board(acme)
+    };
+    let elsewhere = NewListing {
+        id: ListingId::generate(),
+        team_id: other,
+        source_id: Uuid::now_v7(),
+        ..bens.clone()
+    };
+    repo.create_listing(bens.clone()).await.unwrap();
+    repo.create_listing(elsewhere.clone()).await.unwrap();
+    let seen_by = |viewer: &'static str, team: Uuid, id: ListingId| {
+        let repo = repo.clone();
+        async move {
+            repo.listing(&user(viewer), Some(team), id)
+                .await
+                .unwrap()
+                .expect("the listing is seen")
+                .based_on
+        }
+    };
+    let for_cara = seen_by(CARA, acme, bens.id).await;
+    let for_other_team = seen_by(OTHER_OWNER, other, elsewhere.id).await;
+
+    // Unlisted, the board stays seen only by Ben, who installed it.
+    repo.remove_listing(origin.id).await.unwrap();
+    let for_cara_after_unlisting = seen_by(CARA, acme, bens.id).await;
+    let for_ben_after_unlisting = seen_by(BEN, acme, bens.id).await;
+
+    let board_origin = Some(ListingOrigin {
+        id: origin.id,
+        title: "Board".to_owned(),
+    });
+    assert_eq!(copied_from, Some(origin.id));
+    assert_eq!(not_a_routine, None);
+    assert_eq!(not_a_copy, None);
+    assert_eq!(for_cara, board_origin);
+    assert_eq!(for_other_team, None);
+    assert_eq!(for_cara_after_unlisting, None);
+    assert_eq!(for_ben_after_unlisting, board_origin);
 }

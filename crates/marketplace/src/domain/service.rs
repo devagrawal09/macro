@@ -22,14 +22,14 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
-    InstalledPage, Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery,
-    ListingText, ListingVersion, MAX_NOTIFIED_INSTALLS, MarketplaceError, NewListing,
-    PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, RoutineCopy, RoutineInstall,
-    RoutineUpdate, RoutineUpdates, RoutineVersion, Version, VersionBump, VersionNotes,
-    VersionNotice,
+    InstalledPage, Listing, ListingContent, ListingCopy, ListingId, ListingKind, ListingPage,
+    ListingQuery, ListingText, ListingVersion, MAX_NOTIFIED_INSTALLS, MarketplaceError, NewCopy,
+    NewListing, PublishSource, PublishedPage, PublishedRoutine, PublishedVersion, RoutineCopy,
+    RoutineInstall, RoutineUpdate, RoutineUpdates, RoutineVersion, Version, VersionBump,
+    VersionNotes, VersionNotice,
 };
 use crate::domain::ports::{
-    ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
+    Documents, ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
 };
 
 /// How many installed routines a minor version updates at once.
@@ -41,29 +41,32 @@ const UPDATE_CONCURRENCY: usize = 8;
 const CLAIM_STALE_AFTER_SECS: u32 = 120;
 
 /// The marketplace service over its repository, page builder, routines,
-/// rollout and version notifier.
-pub struct MarketplaceServiceImpl<Listings, P, Ro, R, N> {
+/// documents, rollout and version notifier.
+pub struct MarketplaceServiceImpl<Listings, P, Ro, D, R, N> {
     listings: Arc<Listings>,
     pages: Arc<P>,
     routines: Arc<Ro>,
+    documents: Arc<D>,
     rollout: R,
     notifier: N,
 }
 
-impl<Listings, P, Ro, R, N> MarketplaceServiceImpl<Listings, P, Ro, R, N>
+impl<Listings, P, Ro, D, R, N> MarketplaceServiceImpl<Listings, P, Ro, D, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     Ro: Routines,
+    D: Documents,
     R: Rollout,
     N: VersionNotifier,
 {
-    /// Bind the repository, the page builder, routines, the rollout and the
-    /// notifier.
+    /// Bind the repository, the page builder, routines, documents, the
+    /// rollout and the notifier.
     pub fn new(
         listings: Listings,
         pages: Arc<P>,
         routines: Arc<Ro>,
+        documents: Arc<D>,
         rollout: R,
         notifier: N,
     ) -> Self {
@@ -71,6 +74,7 @@ where
             listings: Arc::new(listings),
             pages,
             routines,
+            documents,
             rollout,
             notifier,
         }
@@ -556,11 +560,13 @@ fn internal<E: std::error::Error + Send + Sync + 'static>(error: E) -> Marketpla
     MarketplaceError::Internal(rootcause::Report::new(error).into_dynamic())
 }
 
-impl<Listings, P, Ro, R, N> MarketplaceService for MarketplaceServiceImpl<Listings, P, Ro, R, N>
+impl<Listings, P, Ro, D, R, N> MarketplaceService
+    for MarketplaceServiceImpl<Listings, P, Ro, D, R, N>
 where
     Listings: ListingRepo,
     P: Pages,
     Ro: Routines,
+    D: Documents,
     R: Rollout,
     N: VersionNotifier,
 {
@@ -586,6 +592,7 @@ where
             team_id = tracing::field::Empty,
             listing_id = tracing::field::Empty,
             source_id = tracing::field::Empty,
+            derived_from = tracing::field::Empty,
             kind = %source.kind(),
         )
     )]
@@ -602,9 +609,19 @@ where
             .ok_or(MarketplaceError::NoTeam)?
             .team_id;
         let text = text.normalized()?;
-        let source_id = owned_source(user, source.receipt(), source.kind())?;
+        let kind = source.kind();
+        let source_id = owned_source(user, source.receipt(), kind)?;
         let span = tracing::Span::current();
         span.record("source_id", tracing::field::display(source_id));
+        // A source someone copied from a listing records where it came from.
+        let derived_from = self
+            .listings
+            .copied_from(kind, source_id)
+            .await
+            .map_err(internal)?;
+        if let Some(origin) = derived_from {
+            span.record("derived_from", tracing::field::display(origin));
+        }
         let content = self.content(source, &text.description).await?;
 
         let id = ListingId::generate();
@@ -619,6 +636,7 @@ where
                 text,
                 content,
                 changelog,
+                derived_from,
             })
             .await
             .map_err(internal)?;
@@ -843,6 +861,90 @@ where
         }
 
         self.listing(user, team, id).await
+    }
+
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(listing_id = %id, team_id = tracing::field::Empty, kind = tracing::field::Empty, copy_id = tracing::field::Empty)
+    )]
+    async fn copy(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> Result<ListingCopy, MarketplaceError> {
+        self.admit(user).await?;
+        let team = membership(user, team)?.map(|member| member.team_id);
+        let listing = self.listing(user, team, id).await?;
+        let span = tracing::Span::current();
+        span.record("kind", tracing::field::display(listing.kind));
+
+        match listing.kind {
+            ListingKind::Artifact => {
+                let page = self
+                    .listings
+                    .installed_page(id, user, team)
+                    .await
+                    .map_err(internal)?
+                    .ok_or(MarketplaceError::NotFound)?;
+                let document_id = self
+                    .documents
+                    .create_html(user, &listing.title, &page.html)
+                    .await?;
+                span.record("copy_id", tracing::field::display(document_id));
+                // The document is the person's now: a record that fails only
+                // loses its lineage, so it is logged and the copy stands.
+                let recorded = self
+                    .listings
+                    .record_copy(&NewCopy {
+                        kind: ListingKind::Artifact,
+                        copy_id: document_id,
+                        listing_id: id,
+                        version: page.version,
+                        user: user.clone(),
+                    })
+                    .await;
+                if let Err(error) = recorded {
+                    tracing::error!(error = %error, "could not record a copied page");
+                }
+
+                Ok(ListingCopy {
+                    kind: ListingKind::Artifact,
+                    id: document_id,
+                })
+            }
+            ListingKind::Routine => {
+                let install = self
+                    .listings
+                    .routine_install(id, user)
+                    .await
+                    .map_err(internal)?
+                    .ok_or(MarketplaceError::NotFound)?;
+                span.record("copy_id", tracing::field::display(install.routine_id));
+                // Recorded before detaching, so a routine that stops
+                // following always knows where it came from.
+                self.listings
+                    .record_copy(&NewCopy {
+                        kind: ListingKind::Routine,
+                        copy_id: install.routine_id,
+                        listing_id: id,
+                        version: install.version,
+                        user: user.clone(),
+                    })
+                    .await
+                    .map_err(internal)?;
+                self.listings
+                    .record_update(id, user, &InstallUpdate::Detached)
+                    .await
+                    .map_err(internal)?;
+
+                Ok(ListingCopy {
+                    kind: ListingKind::Routine,
+                    id: install.routine_id,
+                })
+            }
+        }
     }
 
     #[tracing::instrument(err, skip_all, fields(listing_id = %id))]

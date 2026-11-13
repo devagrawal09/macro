@@ -20,13 +20,13 @@ use uuid::Uuid;
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
     AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage,
-    InstalledRoutine, Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery,
-    ListingScope, ListingText, ListingVersion, ListingsShown, MarketplaceError, NewListing,
-    PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion,
-    TaskHash, Version, VersionBump, VersionNotes, VersionNotice,
+    InstalledRoutine, Listing, ListingContent, ListingId, ListingKind, ListingOrigin, ListingPage,
+    ListingQuery, ListingScope, ListingText, ListingVersion, ListingsShown, MarketplaceError,
+    NewCopy, NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall,
+    RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump, VersionNotes, VersionNotice,
 };
 use crate::domain::ports::{
-    ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
+    Documents, ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
 };
 
 mod routines;
@@ -121,6 +121,7 @@ impl Stored {
             installed_major: install.map(|install| install.major),
             installed_version: install.map(|install| self.installed_version(install)),
             pinned: install.is_some_and(|install| install.pinned.is_some()),
+            based_on: None,
             installed_routine: install.and_then(|install| {
                 install.routine.as_ref().map(|routine| InstalledRoutine {
                     routine_id: routine.routine_id,
@@ -174,8 +175,26 @@ fn history_entry(version: Version, notes: &VersionNotes) -> ListingVersion {
     }
 }
 
+/// `entry` as `user`, a member of `team`, sees it: with the listing it was
+/// copied from when they may see that one too.
+fn seen(entry: &Stored, all: &[Stored], user: &MacroUserIdStr<'_>, team: Option<Uuid>) -> Listing {
+    let based_on = entry.listing.derived_from.and_then(|origin| {
+        all.iter()
+            .find(|other| other.listing.id == origin && other.seen_by(user, team))
+            .map(|other| ListingOrigin {
+                id: origin,
+                title: other.listing.text.title.clone(),
+            })
+    });
+    Listing {
+        based_on,
+        ..entry.as_seen_by(user)
+    }
+}
+
+/// Listings, and the copies people made of them.
 #[derive(Default)]
-struct FakeListings(Mutex<Vec<Stored>>);
+struct FakeListings(Mutex<Vec<Stored>>, Mutex<Vec<NewCopy>>);
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake repository failed")]
@@ -221,7 +240,7 @@ impl ListingRepo for FakeListings {
         Ok(stored
             .iter()
             .find(|entry| entry.listing.id == id && entry.seen_by(user, team))
-            .map(|entry| entry.as_seen_by(user)))
+            .map(|entry| seen(entry, &stored, user, team)))
     }
 
     async fn listings(
@@ -248,7 +267,7 @@ impl ListingRepo for FakeListings {
                     .source_id
                     .is_none_or(|id| id == entry.listing.source_id)
             })
-            .map(|entry| entry.as_seen_by(user))
+            .map(|entry| seen(entry, &stored, user, team))
             .collect();
         Ok(ListingPage {
             listings,
@@ -455,6 +474,31 @@ impl ListingRepo for FakeListings {
             install.pinned = pin;
         }
         Ok(true)
+    }
+
+    async fn record_copy(&self, copy: &NewCopy) -> Result<(), Self::Err> {
+        let mut copies = self.1.lock().unwrap();
+        let recorded = copies
+            .iter()
+            .any(|existing| existing.kind == copy.kind && existing.copy_id == copy.copy_id);
+        if !recorded {
+            copies.push(copy.clone());
+        }
+        Ok(())
+    }
+
+    async fn copied_from(
+        &self,
+        kind: ListingKind,
+        copy_id: Uuid,
+    ) -> Result<Option<ListingId>, Self::Err> {
+        Ok(self
+            .1
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|copy| copy.kind == kind && copy.copy_id == copy_id)
+            .map(|copy| copy.listing_id))
     }
 
     async fn remove_listing(&self, id: ListingId) -> Result<(), Self::Err> {
@@ -789,8 +833,40 @@ impl Routines for FakeRoutines {
     }
 }
 
-type Service =
-    MarketplaceServiceImpl<FakeListings, FakePages, FakeRoutines, FakeRollout, Arc<FakeNotifier>>;
+/// HTML documents people created, by id: owner, name and source.
+#[derive(Default)]
+struct FakeDocuments(Mutex<HashMap<Uuid, (String, String, String)>>);
+
+impl FakeDocuments {
+    fn get(&self, id: Uuid) -> (String, String, String) {
+        self.0.lock().unwrap()[&id].clone()
+    }
+}
+
+impl Documents for FakeDocuments {
+    async fn create_html(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        name: &str,
+        html: &str,
+    ) -> Result<Uuid, MarketplaceError> {
+        let id = Uuid::now_v7();
+        self.0.lock().unwrap().insert(
+            id,
+            (user.as_ref().to_owned(), name.to_owned(), html.to_owned()),
+        );
+        Ok(id)
+    }
+}
+
+type Service = MarketplaceServiceImpl<
+    FakeListings,
+    FakePages,
+    FakeRoutines,
+    FakeDocuments,
+    FakeRollout,
+    Arc<FakeNotifier>,
+>;
 
 fn marketplace() -> (Service, Arc<FakePages>) {
     let (service, pages, _, _) = marketplace_with(FakeNotifier::default());
@@ -815,17 +891,32 @@ fn marketplace_with(
     Arc<FakeRoutines>,
     Arc<FakeNotifier>,
 ) {
+    let (service, pages, routines, _, notifier) = marketplace_with_documents(notifier);
+    (service, pages, routines, notifier)
+}
+
+fn marketplace_with_documents(
+    notifier: FakeNotifier,
+) -> (
+    Service,
+    Arc<FakePages>,
+    Arc<FakeRoutines>,
+    Arc<FakeDocuments>,
+    Arc<FakeNotifier>,
+) {
     let pages = Arc::new(FakePages::default());
     let routines = Arc::new(FakeRoutines::default());
+    let documents = Arc::new(FakeDocuments::default());
     let notifier = Arc::new(notifier);
     let service = MarketplaceServiceImpl::new(
         FakeListings::default(),
         Arc::clone(&pages),
         Arc::clone(&routines),
+        Arc::clone(&documents),
         FakeRollout(true),
         Arc::clone(&notifier),
     );
-    (service, pages, routines, notifier)
+    (service, pages, routines, documents, notifier)
 }
 
 /// Ada, a member of Acme, publishes her board.
@@ -1156,6 +1247,7 @@ async fn nobody_outside_the_rollout_sees_the_marketplace() {
         FakeListings::default(),
         Arc::new(FakePages::default()),
         Arc::new(FakeRoutines::default()),
+        Arc::new(FakeDocuments::default()),
         FakeRollout(false),
         Arc::new(FakeNotifier::default()),
     );
@@ -1421,4 +1513,124 @@ async fn a_pinned_page_keeps_its_minor_until_unpinned_or_updated() {
     assert_eq!(after_unpinning.version, Version { major: 1, minor: 1 });
     assert!(!after_unpinning.pinned);
     assert!(!updated.pinned, "taking a version unpins the install");
+}
+
+#[tokio::test]
+async fn a_copy_of_an_installed_page_is_a_new_document_of_the_version_shown() {
+    let (service, pages, _, documents, _) = marketplace_with_documents(FakeNotifier::default());
+    let listing = published_board(&service, &pages).await;
+    let ada = member(ADA, ACME, TeamRole::Member);
+    let ben = member(BEN, ACME, TeamRole::Member);
+    service
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
+        .await
+        .expect("Ben installs the board");
+    pages.save(BOARD, "<h1>Board, tidied</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+            Changelog::default(),
+        )
+        .await
+        .expect("a minor version publishes");
+
+    let copy = service
+        .copy(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("Ben copies his install");
+    let not_installed = service
+        .copy(
+            &user(CAM),
+            Some(&member(CAM, ACME, TeamRole::Member)),
+            listing.id,
+        )
+        .await;
+    let still_installed = service
+        .installed_build(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("the install stays");
+
+    assert_eq!(copy.kind, ListingKind::Artifact);
+    assert_eq!(
+        documents.get(copy.id),
+        (
+            BEN.to_owned(),
+            "Board".to_owned(),
+            "<h1>Board, tidied</h1>".to_owned()
+        )
+    );
+    assert!(matches!(not_installed, Err(MarketplaceError::NotFound)));
+    assert_eq!(still_installed.version, Version { major: 1, minor: 1 });
+}
+
+#[tokio::test]
+async fn publishing_a_copy_says_what_it_is_based_on_to_those_who_see_the_origin() {
+    let (service, pages) = marketplace();
+    let origin = published_board(&service, &pages).await;
+    let ada = member(ADA, ACME, TeamRole::Member);
+    let ben = member(BEN, ACME, TeamRole::Member);
+    let cam = member(CAM, ACME, TeamRole::Member);
+    service
+        .install(&user(BEN), Some(&ben), origin.id, InstallRequest::default())
+        .await
+        .expect("Ben installs the board");
+    let copy = service
+        .copy(&user(BEN), Some(&ben), origin.id)
+        .await
+        .expect("Ben copies his install");
+    pages.save(copy.id, "<h1>Ben's board</h1>");
+
+    let bens = service
+        .publish(
+            &user(BEN),
+            Some(&ben),
+            owned(BEN, copy.id),
+            text("Ben's board"),
+            Changelog::default(),
+        )
+        .await
+        .expect("Ben publishes his copy");
+    let for_cam = service
+        .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
+        .await
+        .expect("listings load")
+        .listings;
+    // Unlisted, the board is seen only by Ben, who installed it.
+    service
+        .unlist(&user(ADA), Some(&ada), origin.id)
+        .await
+        .expect("Ada unlists the board");
+    let cams_view = service
+        .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
+        .await
+        .expect("listings load")
+        .listings;
+    let bens_view = service
+        .listings(&user(BEN), Some(&ben), first_page(ListingsShown::Listed))
+        .await
+        .expect("listings load")
+        .listings;
+
+    let origin_seen = Some(ListingOrigin {
+        id: origin.id,
+        title: "Board".to_owned(),
+    });
+    assert_eq!(bens.based_on, origin_seen);
+    let cams_copy = for_cam.iter().find(|listing| listing.id == bens.id);
+    assert_eq!(
+        cams_copy.and_then(|listing| listing.based_on.clone()),
+        origin_seen
+    );
+    assert_eq!(cams_view.len(), 1);
+    assert_eq!(cams_view[0].based_on, None);
+    assert_eq!(bens_view[0].based_on, origin_seen);
 }

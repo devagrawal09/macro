@@ -714,3 +714,66 @@ async fn unpinning_an_edited_routine_detaches_it_and_leaves_it_alone() {
     assert_eq!(routines.saved(bens).routine.task, edited);
     assert!(matches!(pinning_again, Err(MarketplaceError::Invalid(_))));
 }
+
+#[tokio::test]
+async fn making_a_routine_ones_own_detaches_it_and_its_listing_says_where_it_came_from() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let ben = member(BEN, ACME, TeamRole::Member);
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+
+    let copy = service
+        .copy(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("Ben makes the routine his own");
+    let published = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    let after = service
+        .listings(&user(BEN), Some(&ben), first_page(ListingsShown::Installed))
+        .await
+        .expect("listings load")
+        .listings;
+
+    // Ben publishes his own routine: its listing is based on the digest.
+    routines.save_source(BEN, bens, digest("Ben's digest"));
+    let his = service
+        .publish(
+            &user(BEN),
+            Some(&ben),
+            PublishSource::Routine {
+                routine: routine_receipt(BEN, bens),
+                variables: Vec::new(),
+            },
+            text("Ben's digest"),
+            Changelog::default(),
+        )
+        .await
+        .expect("Ben publishes his routine");
+
+    assert_eq!(copy.kind, ListingKind::Routine);
+    assert_eq!(copy.id, bens);
+    assert_eq!(published.updates.updated, 0);
+    assert_eq!(
+        instructions(&routines.saved(bens)),
+        json!("Sum up the week")
+    );
+    let routine = after[0]
+        .installed_routine
+        .as_ref()
+        .expect("an installed routine");
+    assert!(routine.detached);
+    assert_eq!(
+        his.based_on,
+        Some(ListingOrigin {
+            id: listing.id,
+            title: "Weekly digest".to_owned(),
+        })
+    );
+}

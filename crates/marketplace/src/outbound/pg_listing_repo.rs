@@ -14,9 +14,9 @@ use scheduled_action::domain::templates::fill::RoutineFills;
 
 use crate::domain::models::{
     AddedVersion, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine, Listing,
-    ListingContent, ListingCursor, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
-    ListingVersion, ListingsShown, NewListing, RoutineInstall, RoutineVersion, TaskHash, Version,
-    VersionBump, VersionNotes,
+    ListingContent, ListingCursor, ListingId, ListingKind, ListingOrigin, ListingPage,
+    ListingQuery, ListingScope, ListingVersion, ListingsShown, NewCopy, NewListing, RoutineInstall,
+    RoutineVersion, TaskHash, Version, VersionBump, VersionNotes,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -67,6 +67,8 @@ struct ListingRow {
     installed_minor: Option<i32>,
     pinned: Option<bool>,
     installed_routine_id: Option<Uuid>,
+    based_on_id: Option<Uuid>,
+    based_on_title: Option<String>,
     detached: Option<bool>,
     update_failed: Option<bool>,
     install_count: i64,
@@ -103,6 +105,13 @@ impl TryFrom<ListingRow> for Listing {
                 .zip(row.installed_minor)
                 .map(|(major, minor)| Version { major, minor }),
             pinned: row.pinned.unwrap_or(false),
+            based_on: row
+                .based_on_id
+                .zip(row.based_on_title)
+                .map(|(id, title)| ListingOrigin {
+                    id: ListingId::from_uuid(id),
+                    title,
+                }),
             installed_routine: row.installed_routine_id.map(|routine_id| InstalledRoutine {
                 routine_id,
                 detached: row.detached.unwrap_or(false),
@@ -177,6 +186,8 @@ impl PgListingRepo {
                 COALESCE(i.routine_minor, i.pinned_minor, iv.minor) AS "installed_minor?",
                 (i.pinned_minor IS NOT NULL) AS "pinned?",
                 i.routine_id AS "installed_routine_id?",
+                o.id AS "based_on_id?",
+                o.title AS "based_on_title?",
                 (i.detached_at IS NOT NULL) AS "detached?",
                 (i.update_failed_at IS NOT NULL) AS "update_failed?",
                 (
@@ -203,6 +214,21 @@ impl PgListingRepo {
                 FROM marketplace_listing_version
                 WHERE listing_id = l.id AND major = i.major
             ) iv ON true
+            -- The listing it was copied from, only when $1 may see it: their
+            -- team's or everyone's, and listed or installed by them.
+            LEFT JOIN marketplace_listing o
+                ON o.id = l.derived_from_listing_id
+               AND (o.team_id IS NULL OR o.team_id = $2)
+               AND (
+                   o.removed_at IS NULL
+                   OR EXISTS (
+                       SELECT 1
+                       FROM marketplace_install oi
+                       WHERE oi.listing_id = o.id
+                         AND oi.user_id = $1
+                         AND (oi.routine_claimed_at IS NULL OR oi.routine_id IS NOT NULL)
+                   )
+               )
             WHERE (l.team_id IS NULL OR l.team_id = $2)
               AND (l.removed_at IS NULL OR i.user_id IS NOT NULL)
               AND ($3::uuid IS NULL OR l.id = $3)
@@ -248,8 +274,9 @@ impl ListingRepo for PgListingRepo {
         let inserted = sqlx::query!(
             r#"
             INSERT INTO marketplace_listing
-                (id, kind, user_id, team_id, source_id, title, description)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (id, kind, user_id, team_id, source_id, title, description,
+                 derived_from_listing_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (kind, source_id) WHERE removed_at IS NULL DO NOTHING
             "#,
             listing.id.as_uuid(),
@@ -259,6 +286,7 @@ impl ListingRepo for PgListingRepo {
             listing.source_id,
             listing.text.title,
             listing.text.description,
+            listing.derived_from.map(|origin| origin.as_uuid()),
         )
         .execute(&mut *transaction)
         .await?;
@@ -733,6 +761,42 @@ impl ListingRepo for PgListingRepo {
         .fetch_optional(&self.pool)
         .await?;
         Ok(found.is_some())
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn record_copy(&self, copy: &NewCopy) -> Result<(), Self::Err> {
+        sqlx::query!(
+            r#"
+            INSERT INTO marketplace_copy (kind, copy_id, listing_id, major, minor, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (kind, copy_id) DO NOTHING
+            "#,
+            copy.kind.to_string(),
+            copy.copy_id,
+            copy.listing_id.as_uuid(),
+            copy.version.major,
+            copy.version.minor,
+            copy.user.as_ref(),
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn copied_from(
+        &self,
+        kind: ListingKind,
+        copy_id: Uuid,
+    ) -> Result<Option<ListingId>, Self::Err> {
+        let listing = sqlx::query_scalar!(
+            r#"SELECT listing_id FROM marketplace_copy WHERE kind = $1 AND copy_id = $2"#,
+            kind.to_string(),
+            copy_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(listing.map(ListingId::from_uuid))
     }
 
     #[tracing::instrument(err, skip_all)]

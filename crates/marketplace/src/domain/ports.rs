@@ -13,10 +13,10 @@ use uuid::Uuid;
 
 use crate::domain::models::{
     AddedVersion, Changelog, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
-    InstalledPage, Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText,
-    ListingVersion, MarketplaceError, NewListing, PublishSource, PublishedVersion, RoutineCopy,
-    RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump, VersionNotes,
-    VersionNotice,
+    InstalledPage, Listing, ListingContent, ListingCopy, ListingId, ListingKind, ListingPage,
+    ListingQuery, ListingText, ListingVersion, MarketplaceError, NewCopy, NewListing,
+    PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion,
+    TaskHash, Version, VersionBump, VersionNotes, VersionNotice,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -133,6 +133,17 @@ pub trait ListingRepo: Send + Sync + 'static {
         pinned: bool,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
+    /// Record a copy a person made. Recording it again changes nothing.
+    fn record_copy(&self, copy: &NewCopy) -> impl Future<Output = Result<(), Self::Err>> + Send;
+
+    /// The listing the document or routine `copy_id` was copied from, when
+    /// it is a recorded copy of that kind.
+    fn copied_from(
+        &self,
+        kind: ListingKind,
+        copy_id: Uuid,
+    ) -> impl Future<Output = Result<Option<ListingId>, Self::Err>> + Send;
+
     /// Unlist a listing. Repeating it changes nothing.
     fn remove_listing(&self, id: ListingId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
@@ -207,6 +218,18 @@ pub trait Pages: Send + Sync + 'static {
         request: RunProgram,
         cancel: CancellationToken,
     ) -> impl Future<Output = Result<UserExecutionReceipt, DocumentProgramError>> + Send;
+}
+
+/// Outbound port for documents a person keeps as their own.
+pub trait Documents: Send + Sync + 'static {
+    /// Create an HTML document named `name`, owned by `user`, holding
+    /// `html`. Answers its id.
+    fn create_html(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        name: &str,
+        html: &str,
+    ) -> impl Future<Output = Result<Uuid, MarketplaceError>> + Send;
 }
 
 /// Outbound port for routines: reading one to publish, and saving the copies
@@ -331,6 +354,17 @@ pub trait MarketplaceService: Send + Sync + 'static {
         id: ListingId,
         pinned: bool,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
+
+    /// Make the caller's own copy of what they installed, and record where
+    /// it came from. An artifact becomes a new HTML document of the version
+    /// their install shows, and the install stays. A routine install is
+    /// detached: the routine is theirs and gets no more updates.
+    fn copy(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<ListingCopy, MarketplaceError>> + Send;
 
     /// Remove the caller's install. A routine it created stays theirs.
     fn uninstall(

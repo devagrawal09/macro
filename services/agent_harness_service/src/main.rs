@@ -1962,6 +1962,11 @@ async fn run() -> anyhow::Result<()> {
                         marketplace::outbound::pg_listing_repo::PgListingRepo::new(pool.clone()),
                         programs,
                         marketplace_routines,
+                        // A copy of an installed page is a new HTML document,
+                        // created as `POST /documents/upload` creates one.
+                        Arc::new(code_mode::marketplace_documents::UploadedDocuments::new(
+                            tool_context.document_tool_context.creator.clone(),
+                        )),
                         code_mode::rollout::MarketplaceRollout::new(
                             code_mode::rollout::FlaggedRollout::new(
                                 feature_flags.clone(),

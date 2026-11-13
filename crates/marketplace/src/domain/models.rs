@@ -182,6 +182,9 @@ pub struct Listing {
     /// The person asking pinned their install to `installed_version`: newer
     /// minor versions don't reach it until they unpin or update.
     pub pinned: bool,
+    /// The listing its source was copied from, when the person asking may
+    /// see that listing.
+    pub based_on: Option<ListingOrigin>,
     /// The routine the person asking got from installing it.
     pub installed_routine: Option<InstalledRoutine>,
     /// How many people installed it.
@@ -192,6 +195,16 @@ pub struct Listing {
     pub created_at: DateTime<Utc>,
     /// When it last changed.
     pub updated_at: DateTime<Utc>,
+}
+
+/// The listing another one's source was copied from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingOrigin {
+    /// Its id.
+    pub id: ListingId,
+    /// Its title.
+    pub title: String,
 }
 
 /// Listings a page holds when the request doesn't say.
@@ -485,6 +498,34 @@ pub struct NewListing {
     pub content: ListingContent,
     /// What its first version says changed.
     pub changelog: Changelog,
+    /// The listing its source was copied from, when it is a recorded copy.
+    pub derived_from: Option<ListingId>,
+}
+
+/// A copy a person made of what they installed, to record where it came
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewCopy {
+    /// What was copied, which says what `copy_id` names.
+    pub kind: ListingKind,
+    /// The new document, or the routine made the person's own.
+    pub copy_id: Uuid,
+    /// The listing it came from.
+    pub listing_id: ListingId,
+    /// The version it came from.
+    pub version: Version,
+    /// Who made it.
+    pub user: MacroUserIdStr<'static>,
+}
+
+/// What making one's own copy of an install made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListingCopy {
+    /// What it is: a document for an artifact, a routine for a routine.
+    pub kind: ListingKind,
+    /// The new document, or the routine now the caller's own.
+    pub id: Uuid,
 }
 
 /// What became of a new version.

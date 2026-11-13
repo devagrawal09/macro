@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS marketplace_listing (
     description TEXT NOT NULL,
     -- Unlisted: hidden from browsing, still served to those who installed it.
     removed_at TIMESTAMPTZ,
+    -- The listing its source was copied from, when its source is a recorded
+    -- marketplace copy. Cleared when that listing is deleted.
+    derived_from_listing_id UUID REFERENCES marketplace_listing (id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- The target of each version's (listing_id, kind) key.
@@ -39,6 +42,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS marketplace_listing_source_idx
 CREATE INDEX IF NOT EXISTS marketplace_listing_team_id_idx
     ON marketplace_listing (team_id)
     WHERE removed_at IS NULL;
+
+-- Deleting a listing clears the lineage of those derived from it.
+CREATE INDEX IF NOT EXISTS marketplace_listing_derived_from_idx
+    ON marketplace_listing (derived_from_listing_id)
+    WHERE derived_from_listing_id IS NOT NULL;
 
 -- One published snapshot. Rows are only ever inserted.
 CREATE TABLE IF NOT EXISTS marketplace_listing_version (
@@ -115,3 +123,27 @@ CREATE TABLE IF NOT EXISTS marketplace_install (
 
 CREATE INDEX IF NOT EXISTS marketplace_install_user_id_idx
     ON marketplace_install (user_id);
+
+-- A copy a person made of what they installed: a new document from an
+-- artifact's version, or their installed routine made their own. Publishing
+-- a copy records the listing it came from as the new listing's
+-- `derived_from_listing_id`.
+CREATE TABLE IF NOT EXISTS marketplace_copy (
+    kind TEXT NOT NULL CHECK (kind IN ('artifact', 'routine')),
+    -- The new document, or the routine made one's own. A plain pointer: it
+    -- is the person's to delete.
+    copy_id UUID NOT NULL,
+    listing_id UUID NOT NULL REFERENCES marketplace_listing (id) ON DELETE CASCADE,
+    -- The version copied.
+    major INT NOT NULL,
+    minor INT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (kind, copy_id)
+);
+
+CREATE INDEX IF NOT EXISTS marketplace_copy_listing_id_idx
+    ON marketplace_copy (listing_id);
+
+CREATE INDEX IF NOT EXISTS marketplace_copy_user_id_idx
+    ON marketplace_copy (user_id);
