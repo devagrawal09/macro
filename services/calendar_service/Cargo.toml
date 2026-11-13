@@ -73,6 +73,9 @@ uuid = { workspace = true }
 workspace-hack = { version = "0.1", path = "../../crates/workspace-hack" }
 
 [dev-dependencies]
+gmail_emulator = { path = "../../crates/gmail_emulator" }
+macro_db_migrator = { path = "../../crates/macro_db_migrator" }
+outlook_emulator = { path = "../../crates/outlook_emulator" }
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 tracing-opentelemetry = { workspace = true }

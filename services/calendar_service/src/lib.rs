@@ -25,6 +25,9 @@ pub mod calendar_refresh;
 pub mod calendar_tokens;
 /// Service configuration.
 pub mod config;
+/// Calendar sync against the provider emulators, with its specs.
+#[cfg(test)]
+mod emulated_calendar;
 /// Health check router.
 pub mod health;
 /// Shared calendar pubsub helpers.

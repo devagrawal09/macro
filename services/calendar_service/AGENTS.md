@@ -39,6 +39,10 @@ gateway `/calendar` prefix.
 ## Checks
 
 - `cargo test -p calendar_service` (`SQLX_OFFLINE` unset).
+- `cargo test -p calendar_service emulated_calendar` (`REDIS_URI` set too):
+  owner-level specs of Google and Outlook calendar sync over the provider
+  emulators (`src/emulated_calendar.rs`). Add a story there when sync
+  changes what the owner sees; put plumbing in the harness, not the spec.
 - `curl http://localhost:8088/health` after `just run_local`.
 
 - Run it without a Google account: `crates/gmail_emulator` serves the
