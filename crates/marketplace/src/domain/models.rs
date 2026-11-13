@@ -110,9 +110,93 @@ impl ListingScope {
     }
 }
 
+/// Who a first publish lists to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishScope {
+    /// The publisher's team, at once.
+    #[default]
+    Team,
+    /// Everyone, once another member of Macro's publisher team approves it.
+    Global,
+}
+
+/// Where a version stands in review. Team versions are approved as they are
+/// stored; a global version waits for a second publisher.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema, strum::Display, strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ReviewState {
+    /// Waiting: only Macro's publishers see it.
+    Pending,
+    /// Live for everyone who sees the listing.
+    Approved,
+    /// Turned down: never shown, and out of the numbering.
+    Rejected,
+}
+
+/// What a reviewer decided about a pending version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewDecision {
+    /// It goes live.
+    Approve,
+    /// It never does, for this reason when given.
+    Reject {
+        /// Why, for its publisher.
+        reason: Option<String>,
+    },
+}
+
+/// Longest reason a rejection takes, in characters.
+pub const MAX_REJECTION_REASON_CHARS: usize = 1000;
+
+impl ReviewDecision {
+    /// The decision trimmed, or why it can't be used. A blank reason is none.
+    pub fn normalized(self) -> Result<Self, MarketplaceError> {
+        match self {
+            Self::Approve => Ok(Self::Approve),
+            Self::Reject { reason } => {
+                let reason = reason
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|reason| !reason.is_empty());
+                if reason.is_some_and(|reason| reason.chars().count() > MAX_REJECTION_REASON_CHARS)
+                {
+                    return Err(MarketplaceError::Invalid(format!(
+                        "a rejection's reason is at most {MAX_REJECTION_REASON_CHARS} characters"
+                    )));
+                }
+                Ok(Self::Reject {
+                    reason: reason.map(str::to_owned),
+                })
+            }
+        }
+    }
+
+    /// The state the version takes.
+    pub fn state(&self) -> ReviewState {
+        match self {
+            Self::Approve => ReviewState::Approved,
+            Self::Reject { .. } => ReviewState::Rejected,
+        }
+    }
+}
+
+/// Who is asking, as listing visibility needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Audience {
+    /// Their team, whose listings they see.
+    pub team: Option<Uuid>,
+    /// They belong to Macro's publisher team, so they also see global
+    /// listings and versions still waiting for review.
+    pub global_publisher: bool,
+}
+
 /// A listing's version. An install follows minor versions by itself and
 /// takes a major version only when its person asks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub struct Version {
     /// Changes an install waits for.
     pub major: i32,
@@ -136,6 +220,12 @@ impl Version {
                 minor: 0,
             },
         }
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
     }
 }
 
@@ -169,8 +259,11 @@ pub struct Listing {
     pub title: String,
     /// What it does, in a few lines.
     pub description: String,
-    /// Its newest version.
+    /// Its newest approved version. A global listing not yet approved, which
+    /// only Macro's publishers see, shows the version waiting for review.
     pub latest_version: Version,
+    /// The version waiting for review, shown only to Macro's publishers.
+    pub pending_version: Option<Version>,
     /// The major version the person asking is on, when they installed it.
     pub installed_major: Option<i32>,
     /// The routine the person asking got from installing it.
@@ -183,6 +276,14 @@ pub struct Listing {
     pub created_at: DateTime<Utc>,
     /// When it last changed.
     pub updated_at: DateTime<Utc>,
+}
+
+impl Listing {
+    /// It has a version anyone who sees it may install. A global listing
+    /// whose first version waits for review has none.
+    pub fn has_approved_version(&self) -> bool {
+        self.pending_version != Some(self.latest_version)
+    }
 }
 
 /// Listings a page holds when the request doesn't say.
@@ -306,6 +407,16 @@ pub struct ListingPage {
     pub next: Option<ListingCursor>,
 }
 
+/// A page of listings, and what the person asking may do beyond their team.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewerListings {
+    /// The page.
+    pub page: ListingPage,
+    /// They belong to Macro's publisher team: they may publish to everyone
+    /// and review what other publishers did.
+    pub global_publisher: bool,
+}
+
 /// What a person types to publish a listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListingText {
@@ -419,14 +530,16 @@ pub struct NewListing {
     pub id: ListingId,
     /// Who publishes it.
     pub publisher: MacroUserIdStr<'static>,
-    /// The team that sees it.
-    pub team_id: Uuid,
+    /// The team that sees it; none for everyone.
+    pub team_id: Option<Uuid>,
     /// The document or routine it is published from.
     pub source_id: Uuid,
     /// Its title and description.
     pub text: ListingText,
     /// Its first version's content, which decides its kind.
     pub content: ListingContent,
+    /// Its first version's review: approved for a team, pending for everyone.
+    pub review: ReviewState,
 }
 
 /// What became of a new version.
@@ -436,8 +549,147 @@ pub enum AddedVersion {
     Added(Version),
     /// The newest version already holds this source.
     Unchanged,
+    /// Another version is still waiting for review.
+    ReviewPending,
     /// The listing is gone or unlisted.
     Missing,
+}
+
+/// A version waiting for review, as the review list shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingVersion {
+    /// Its listing.
+    pub listing_id: ListingId,
+    /// What the listing publishes.
+    pub kind: ListingKind,
+    /// The listing's name.
+    pub title: String,
+    /// What it does.
+    pub description: String,
+    /// Who published the version, who may not review it.
+    #[schema(value_type = String)]
+    pub publisher: MacroUserIdStr<'static>,
+    /// The version waiting.
+    pub version: Version,
+    /// The listing's newest approved version, absent for a new listing.
+    pub approved_version: Option<Version>,
+    /// When it was published.
+    pub published_at: DateTime<Utc>,
+}
+
+/// A pending version with what a reviewer needs to judge it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingReview {
+    /// The version and its listing.
+    pub pending: PendingVersion,
+    /// What it holds.
+    pub content: ListingContent,
+}
+
+/// A pending version as a reviewer reads it: never run.
+#[derive(Debug, Clone)]
+pub enum ReviewPreview {
+    /// A page: its build, which the reviewer renders with programs refused,
+    /// and its source, which shows what each program does.
+    Page {
+        /// The version.
+        pending: PendingVersion,
+        /// Its build.
+        build: DocumentBuild,
+        /// Its source.
+        html: String,
+    },
+    /// A routine's snapshot, and how its interface differs from the newest
+    /// approved version's.
+    Routine {
+        /// The version.
+        pending: PendingVersion,
+        /// The routine as installs would get it.
+        snapshot: RoutineSnapshot,
+        /// What it asks of installs that the approved version didn't, or no
+        /// longer asks; everything for a new listing.
+        interface_changes: Vec<InterfaceChange>,
+    },
+}
+
+/// One part of a routine's interface added or removed by a version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InterfaceChange {
+    /// Which part.
+    pub part: InterfacePart,
+    /// Added or removed.
+    pub change: InterfaceChangeKind,
+    /// The part as people read it, such as a variable's key and kind.
+    pub name: String,
+}
+
+/// A part of a routine's interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InterfacePart {
+    /// A variable each install fills in.
+    Variable,
+    /// An app it requires.
+    App,
+    /// A kind of trigger that starts it.
+    Trigger,
+    /// A code step's knob.
+    Knob,
+}
+
+/// Whether a part of the interface came or went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InterfaceChangeKind {
+    /// New in this version.
+    Added,
+    /// Gone in this version.
+    Removed,
+}
+
+/// How `next`'s interface differs from `approved`'s, or all of it when
+/// nothing is approved yet: removals first, then additions, each by part.
+pub fn interface_changes(
+    approved: Option<&RoutineSnapshot>,
+    next: &RoutineSnapshot,
+) -> Vec<InterfaceChange> {
+    fn named(snapshot: &RoutineSnapshot) -> std::collections::BTreeSet<(InterfacePart, String)> {
+        let interface = snapshot.interface();
+        let variables = interface
+            .variables
+            .iter()
+            .map(|(key, kind)| (InterfacePart::Variable, format!("{key} ({kind})")));
+        let apps = interface
+            .apps
+            .iter()
+            .map(|app| (InterfacePart::App, app.clone()));
+        let triggers = interface
+            .triggers
+            .iter()
+            .map(|trigger| (InterfacePart::Trigger, (*trigger).to_owned()));
+        let knobs = interface.knobs.iter().map(|(step, knob, kind, read_as)| {
+            (
+                InterfacePart::Knob,
+                format!("{step}.{knob} ({kind}: {read_as})"),
+            )
+        });
+        variables.chain(apps).chain(triggers).chain(knobs).collect()
+    }
+
+    let before = approved.map(named).unwrap_or_default();
+    let after = named(next);
+    let removed = before
+        .difference(&after)
+        .map(|(part, name)| (InterfaceChangeKind::Removed, *part, name.clone()));
+    let added = after
+        .difference(&before)
+        .map(|(part, name)| (InterfaceChangeKind::Added, *part, name.clone()));
+    removed
+        .chain(added)
+        .map(|(change, part, name)| InterfaceChange { part, change, name })
+        .collect()
 }
 
 /// A version just published, as its installers hear of it: no content, only
@@ -516,6 +768,20 @@ pub struct PublishedVersion {
     /// version whatever was asked.
     pub bump: VersionBump,
     /// Installs a minor routine version reached.
+    pub updates: RoutineUpdates,
+    /// `pending` for a global listing's version, which reaches nobody until
+    /// another publisher approves it.
+    pub review: ReviewState,
+}
+
+/// What a review decided, and the installs an approved minor routine
+/// version reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewOutcome {
+    /// `approved` or `rejected`.
+    pub state: ReviewState,
+    /// Installs the version reached when it went live.
     pub updates: RoutineUpdates,
 }
 
@@ -668,6 +934,15 @@ pub enum MarketplaceError {
     /// Another request is installing this routine for the same person.
     #[error("this routine is already being installed; try again in a moment")]
     InstallInProgress,
+    /// Publishing to everyone, or reviewing, needs Macro's publisher team.
+    #[error("only Macro's publishers can publish to everyone or review what is published")]
+    NotGlobalPublisher,
+    /// A publisher can't review their own version.
+    #[error("another publisher must review a version you published")]
+    OwnVersion,
+    /// A version of the listing is still waiting for review.
+    #[error("a version of this listing is waiting for review")]
+    ReviewPending,
     /// The routine can't be saved as given, such as an app its person
     /// hasn't connected.
     #[error("{0}")]

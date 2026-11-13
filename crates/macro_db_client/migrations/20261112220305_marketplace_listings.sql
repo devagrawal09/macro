@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS marketplace_listing (
     kind TEXT NOT NULL CHECK (kind IN ('artifact', 'routine')),
     -- Who published it.
     user_id TEXT NOT NULL REFERENCES "User" (id) ON DELETE CASCADE,
-    -- The team that sees it. NULL is everyone: a listing Macro provides.
+    -- The team that sees it. NULL is everyone: a listing Macro provides,
+    -- whose versions are reviewed before anyone outside Macro sees them.
     team_id UUID REFERENCES team (id) ON DELETE CASCADE,
     -- What its versions are published from: a document for an artifact, a
     -- routine for a routine. A plain pointer, not a foreign key: a listing
@@ -40,8 +41,16 @@ CREATE INDEX IF NOT EXISTS marketplace_listing_team_id_idx
     ON marketplace_listing (team_id)
     WHERE removed_at IS NULL;
 
--- One published snapshot. Rows are only ever inserted.
+-- One published snapshot. Its content never changes; only a global version's
+-- review does, once.
+--
+-- A team version is approved as it is stored. A global version (its listing
+-- has no team) waits for a second member of Macro's publisher team: until it
+-- is approved nobody else sees, installs or is updated to it. A rejected
+-- version keeps its row, out of the numbering, so the next version may take
+-- its number.
 CREATE TABLE IF NOT EXISTS marketplace_listing_version (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     listing_id UUID NOT NULL,
     -- The listing's kind, which decides the one content column it sets.
     kind TEXT NOT NULL,
@@ -54,15 +63,35 @@ CREATE TABLE IF NOT EXISTS marketplace_listing_version (
     html TEXT,
     -- A routine's snapshot: name, description, trigger, task and variables.
     routine JSONB,
+    review_state TEXT NOT NULL DEFAULT 'approved'
+        CHECK (review_state IN ('pending', 'approved', 'rejected')),
+    -- Who approved or rejected a global version. NULL for a team version,
+    -- and once the reviewer's account is deleted.
+    reviewed_by TEXT REFERENCES "User" (id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMPTZ,
+    -- Why a version was rejected, when the reviewer said.
+    rejection_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (listing_id, major, minor),
     FOREIGN KEY (listing_id, kind)
         REFERENCES marketplace_listing (id, kind) ON DELETE CASCADE,
     CHECK (
         (kind = 'artifact' AND html IS NOT NULL AND routine IS NULL)
         OR (kind = 'routine' AND routine IS NOT NULL AND html IS NULL)
-    )
+    ),
+    CHECK (review_state <> 'pending' OR (reviewed_by IS NULL AND reviewed_at IS NULL)),
+    CHECK (review_state <> 'rejected' OR reviewed_at IS NOT NULL),
+    CHECK (review_state = 'rejected' OR rejection_reason IS NULL)
 );
+
+-- A listing's numbered versions: every one not rejected.
+CREATE UNIQUE INDEX IF NOT EXISTS marketplace_listing_version_number_idx
+    ON marketplace_listing_version (listing_id, major, minor)
+    WHERE review_state <> 'rejected';
+
+-- At most one version of a listing waits for review at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS marketplace_listing_version_pending_idx
+    ON marketplace_listing_version (listing_id)
+    WHERE review_state = 'pending';
 
 -- A person's install of a listing: the major version they are on.
 --

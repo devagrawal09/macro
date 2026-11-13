@@ -84,6 +84,7 @@ async fn published_digest(service: &Service, routines: &FakeRoutines) -> Listing
                 title: "Weekly digest".to_owned(),
                 description: "Sums up the week".to_owned(),
             },
+            PublishScope::Team,
         )
         .await
         .expect("the digest publishes")
@@ -150,6 +151,7 @@ async fn a_routine_publishes_as_one_point_zero_with_its_snapshot() {
             Some(&member(BEN, ACME, TeamRole::Member)),
             routine_source(BEN, Vec::new()),
             text("Someone else's digest"),
+            PublishScope::Team,
         )
         .await;
 
@@ -217,6 +219,7 @@ async fn installing_fills_in_the_routine_as_the_persons_own() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             routine_source(ADA, vec![zone(), board(VariableFill::Choice)]),
             text("Weekly digest"),
+            PublishScope::Team,
         )
         .await
         .expect("the digest publishes");
@@ -394,6 +397,7 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
         )
         .await
         .expect("listings load")
+        .page
         .listings;
     let for_cam = service
         .listings(
@@ -403,6 +407,7 @@ async fn an_edited_routine_is_detached_and_a_failure_blocks_no_one_else() {
         )
         .await
         .expect("listings load")
+        .page
         .listings;
 
     assert_eq!(published.updates.updated, 1);
@@ -494,6 +499,7 @@ async fn a_deleted_routine_records_a_failure_and_stays_attached() {
         )
         .await
         .expect("listings load")
+        .page
         .listings;
 
     assert_eq!(published.updates.failed, 1);

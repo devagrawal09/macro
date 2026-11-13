@@ -12,10 +12,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild, InstalledPage,
-    Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText, MarketplaceError,
-    NewListing, PublishSource, PublishedVersion, RoutineCopy, RoutineInstall, RoutineUpdate,
-    RoutineVersion, TaskHash, Version, VersionBump, VersionNotice,
+    AddedVersion, Audience, FollowingInstall, InstallRequest, InstallUpdate, InstalledBuild,
+    InstalledPage, Listing, ListingContent, ListingId, ListingPage, ListingQuery, ListingText,
+    MarketplaceError, NewListing, PendingReview, PendingVersion, PublishScope, PublishSource,
+    PublishedVersion, ReviewDecision, ReviewOutcome, ReviewPreview, ReviewState, RoutineCopy,
+    RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump, VersionNotice,
+    ViewerListings,
 };
 
 /// Outbound persistence port for listings, their versions and installs.
@@ -30,34 +32,59 @@ pub trait ListingRepo: Send + Sync + 'static {
         listing: NewListing,
     ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
 
-    /// The listing, as `user` sees it, when a member of `team` may see it:
-    /// it is their team's or everyone's, and listed or installed by `user`.
+    /// The listing, as `user` sees it, when `audience` may see it: it is
+    /// their team's or everyone's, listed or installed by `user`, and has an
+    /// approved version, or is global and `audience` is a global publisher.
     fn listing(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         id: ListingId,
     ) -> impl Future<Output = Result<Option<Listing>, Self::Err>> + Send;
 
-    /// A page of the listings a member of `team` may see, as `user` sees
-    /// them, newest first: their team's and everyone's, as `query` picks.
+    /// A page of the listings `audience` may see, as `user` sees them, newest
+    /// first: their team's and everyone's, as `query` picks.
     fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         query: &ListingQuery,
     ) -> impl Future<Output = Result<ListingPage, Self::Err>> + Send;
 
-    /// Store `content` as the listing's next version, unless its newest
-    /// version already holds the same content.
+    /// Store `content` as the listing's next version in `review`, numbered
+    /// after its newest version not rejected, unless that version already
+    /// holds the same content or another version waits for review.
     fn add_version(
         &self,
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        review: ReviewState,
     ) -> impl Future<Output = Result<AddedVersion, Self::Err>> + Send;
 
-    /// A routine listing's newest version, or the newest of `major`.
+    /// Up to `limit` versions waiting for review, oldest first.
+    fn pending_versions(
+        &self,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<PendingVersion>, Self::Err>> + Send;
+
+    /// The listing's version waiting for review, with its content.
+    fn pending_review(
+        &self,
+        id: ListingId,
+    ) -> impl Future<Output = Result<Option<PendingReview>, Self::Err>> + Send;
+
+    /// Record `reviewer`'s decision on the listing's pending `version`:
+    /// `false` when it is no longer pending.
+    fn decide_review(
+        &self,
+        id: ListingId,
+        version: Version,
+        reviewer: &MacroUserIdStr<'_>,
+        decision: &ReviewDecision,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
+    /// A routine listing's newest approved version, or the newest of `major`.
     fn routine_version(
         &self,
         id: ListingId,
@@ -119,8 +146,8 @@ pub trait ListingRepo: Send + Sync + 'static {
     /// Unlist a listing. Repeating it changes nothing.
     fn remove_listing(&self, id: ListingId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// Put `user` on the listing's newest major version: installs it, or
-    /// moves their install.
+    /// Put `user` on the listing's newest approved major version: installs
+    /// it, or moves their install.
     fn install_latest(
         &self,
         id: ListingId,
@@ -134,8 +161,9 @@ pub trait ListingRepo: Send + Sync + 'static {
         user: &MacroUserIdStr<'_>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
-    /// The page `user`'s install shows, when they installed the listing and a
-    /// member of `team` may see it.
+    /// The page `user`'s install shows, the newest approved minor of their
+    /// major, when they installed the listing and a member of `team` may see
+    /// it.
     fn installed_page(
         &self,
         id: ListingId,
@@ -234,27 +262,33 @@ pub trait Rollout: Send + Sync + 'static {
 /// `team` is the caller's team membership, when they have one. Every method
 /// answers [`MarketplaceError::NotFound`] to a caller outside the rollout.
 pub trait MarketplaceService: Send + Sync + 'static {
-    /// A page of the listings the caller may see, as `query` picks.
+    /// A page of the listings the caller may see, as `query` picks, and
+    /// whether they are a global publisher.
     fn listings(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         query: ListingQuery,
-    ) -> impl Future<Output = Result<ListingPage, MarketplaceError>> + Send;
+    ) -> impl Future<Output = Result<ViewerListings, MarketplaceError>> + Send;
 
-    /// Publish a document or routine the caller owns to their team, as
-    /// version 1.0.
+    /// Publish a document or routine the caller owns, as version 1.0: to
+    /// their team at once, or to everyone once another member of Macro's
+    /// publisher team approves it. Only that team's members publish to
+    /// everyone.
     fn publish(
         &self,
         user: &MacroUserIdStr<'static>,
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         source: PublishSource,
         text: ListingText,
+        scope: PublishScope,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
     /// Publish the listing's source as its next version. Only its publisher
-    /// may. A minor routine version updates the routines installed from it.
-    /// Its installers' open clients are told, best effort.
+    /// may, and for a global listing only while they are a global publisher;
+    /// a global version then waits for review. Once a version is live, a
+    /// minor routine version updates the routines installed from it and its
+    /// installers' open clients are told, best effort.
     fn publish_version(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -264,8 +298,8 @@ pub trait MarketplaceService: Send + Sync + 'static {
         bump: VersionBump,
     ) -> impl Future<Output = Result<PublishedVersion, MarketplaceError>> + Send;
 
-    /// A routine listing's newest version, for someone deciding to install
-    /// it or take its newest major.
+    /// A routine listing's newest approved version, for someone deciding to
+    /// install it or take its newest major.
     fn routine_version(
         &self,
         user: &MacroUserIdStr<'static>,
@@ -316,4 +350,34 @@ pub trait MarketplaceService: Send + Sync + 'static {
         request: RunProgram,
         cancel: CancellationToken,
     ) -> impl Future<Output = Result<UserExecutionReceipt, MarketplaceError>> + Send;
+
+    /// The versions waiting for review. Only global publishers may list them.
+    fn pending_versions(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+    ) -> impl Future<Output = Result<Vec<PendingVersion>, MarketplaceError>> + Send;
+
+    /// The listing's pending version as a global publisher reviews it: a
+    /// page's build and source, or a routine's snapshot and interface
+    /// changes. Nothing in it runs.
+    fn review_preview(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+    ) -> impl Future<Output = Result<ReviewPreview, MarketplaceError>> + Send;
+
+    /// Approve or reject the listing's pending `version`. A global publisher
+    /// other than its publisher may. Approving makes it live: a minor
+    /// routine version updates installs and its installers are told.
+    /// Rejecting a new listing's first version unlists it.
+    fn review(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+        version: Version,
+        decision: ReviewDecision,
+    ) -> impl Future<Output = Result<ReviewOutcome, MarketplaceError>> + Send;
 }

@@ -19,9 +19,10 @@ use uuid::Uuid;
 
 use super::MarketplaceServiceImpl;
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage, InstalledRoutine,
-    Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
-    ListingText, ListingsShown, MarketplaceError, NewListing, PublishSource, PublishedVersion,
+    AddedVersion, Audience, FollowingInstall, InstallRequest, InstallUpdate, InstalledPage,
+    InstalledRoutine, Listing, ListingContent, ListingId, ListingKind, ListingPage, ListingQuery,
+    ListingScope, ListingText, ListingsShown, MarketplaceError, NewListing, PendingReview,
+    PendingVersion, PublishScope, PublishSource, PublishedVersion, ReviewDecision, ReviewState,
     RoutineCopy, RoutineInstall, RoutineUpdate, RoutineVersion, TaskHash, Version, VersionBump,
     VersionNotice,
 };
@@ -29,6 +30,7 @@ use crate::domain::ports::{
     ListingRepo, MarketplaceService, Pages, Rollout, Routines, VersionNotifier,
 };
 
+mod review;
 mod routines;
 
 const ADA: &str = "macro|ada@example.com";
@@ -84,36 +86,59 @@ struct StoredInstall {
     update_failed: bool,
 }
 
+/// One stored version: its number, content and review.
+#[derive(Clone)]
+struct StoredVersion {
+    version: Version,
+    content: ListingContent,
+    review: ReviewState,
+    reviewer: Option<String>,
+    reason: Option<String>,
+}
+
 struct Stored {
     listing: NewListing,
     removed: bool,
-    versions: Vec<(Version, ListingContent)>,
+    versions: Vec<StoredVersion>,
     installs: HashMap<String, StoredInstall>,
     /// People whose first routine install is creating its routine.
     claims: std::collections::HashSet<String>,
 }
 
 impl Stored {
-    /// A member of `team` sees it, and so does `user` once it is unlisted
-    /// when they installed it.
-    fn seen_by(&self, user: &MacroUserIdStr<'_>, team: Option<Uuid>) -> bool {
-        Some(self.listing.team_id) == team
-            && (!self.removed || self.installs.contains_key(user.as_ref()))
+    /// A member of `team` sees its team's and global listings once approved,
+    /// a global publisher also global ones waiting, and `user` an unlisted
+    /// one they installed.
+    fn seen_by(&self, user: &MacroUserIdStr<'_>, audience: Audience) -> bool {
+        let global = self.listing.team_id.is_none();
+        let in_scope = global || self.listing.team_id == audience.team;
+        let reviewed = self.approved().is_some() || (global && audience.global_publisher);
+        in_scope && reviewed && (!self.removed || self.installs.contains_key(user.as_ref()))
     }
 
-    fn as_seen_by(&self, user: &MacroUserIdStr<'_>) -> Listing {
+    fn as_seen_by(&self, user: &MacroUserIdStr<'_>, audience: Audience) -> Listing {
         let install = self.installs.get(user.as_ref());
+        let pending = audience
+            .global_publisher
+            .then(|| self.pending().map(|pending| pending.version))
+            .flatten();
         Listing {
             id: self.listing.id,
             kind: self.listing.content.kind(),
-            scope: ListingScope::Team {
-                team_id: self.listing.team_id,
+            scope: match self.listing.team_id {
+                Some(team_id) => ListingScope::Team { team_id },
+                None => ListingScope::Global,
             },
             publisher: self.listing.publisher.clone(),
             source_id: self.listing.source_id,
             title: self.listing.text.title.clone(),
             description: self.listing.text.description.clone(),
-            latest_version: self.newest().0,
+            latest_version: self
+                .approved()
+                .map(|approved| approved.version)
+                .or(pending)
+                .expect("a seen listing has a version to show"),
+            pending_version: pending,
             installed_major: install.map(|install| install.major),
             installed_routine: install.and_then(|install| {
                 install.routine.as_ref().map(|routine| InstalledRoutine {
@@ -129,11 +154,39 @@ impl Stored {
         }
     }
 
-    fn newest(&self) -> &(Version, ListingContent) {
+    /// The newest version not rejected, which the next is numbered after.
+    fn newest(&self) -> Option<&StoredVersion> {
         self.versions
             .iter()
-            .max_by_key(|(version, _)| *version)
-            .expect("a listing has a version")
+            .filter(|stored| stored.review != ReviewState::Rejected)
+            .max_by_key(|stored| stored.version)
+    }
+
+    fn approved(&self) -> Option<&StoredVersion> {
+        self.versions
+            .iter()
+            .filter(|stored| stored.review == ReviewState::Approved)
+            .max_by_key(|stored| stored.version)
+    }
+
+    fn pending(&self) -> Option<&StoredVersion> {
+        self.versions
+            .iter()
+            .find(|stored| stored.review == ReviewState::Pending)
+    }
+
+    fn pending_version(&self) -> Option<PendingVersion> {
+        let pending = self.pending()?;
+        Some(PendingVersion {
+            listing_id: self.listing.id,
+            kind: self.listing.content.kind(),
+            title: self.listing.text.title.clone(),
+            description: self.listing.text.description.clone(),
+            publisher: self.listing.publisher.clone(),
+            version: pending.version,
+            approved_version: self.approved().map(|approved| approved.version),
+            published_at: Utc::now(),
+        })
     }
 }
 
@@ -158,7 +211,13 @@ impl ListingRepo for FakeListings {
             return Ok(false);
         }
 
-        let first = (Version::FIRST, listing.content.clone());
+        let first = StoredVersion {
+            version: Version::FIRST,
+            content: listing.content.clone(),
+            review: listing.review,
+            reviewer: None,
+            reason: None,
+        };
         stored.push(Stored {
             listing,
             removed: false,
@@ -172,26 +231,26 @@ impl ListingRepo for FakeListings {
     async fn listing(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         id: ListingId,
     ) -> Result<Option<Listing>, Self::Err> {
         let stored = self.0.lock().unwrap();
         Ok(stored
             .iter()
-            .find(|entry| entry.listing.id == id && entry.seen_by(user, team))
-            .map(|entry| entry.as_seen_by(user)))
+            .find(|entry| entry.listing.id == id && entry.seen_by(user, audience))
+            .map(|entry| entry.as_seen_by(user, audience)))
     }
 
     async fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         query: &ListingQuery,
     ) -> Result<ListingPage, Self::Err> {
         let stored = self.0.lock().unwrap();
         let listings = stored
             .iter()
-            .filter(|entry| entry.seen_by(user, team))
+            .filter(|entry| entry.seen_by(user, audience))
             .filter(|entry| match query.shown {
                 ListingsShown::Listed => !entry.removed,
                 ListingsShown::Installed => entry.installs.contains_key(user.as_ref()),
@@ -206,7 +265,7 @@ impl ListingRepo for FakeListings {
                     .source_id
                     .is_none_or(|id| id == entry.listing.source_id)
             })
-            .map(|entry| entry.as_seen_by(user))
+            .map(|entry| entry.as_seen_by(user, audience))
             .collect();
         Ok(ListingPage {
             listings,
@@ -219,6 +278,7 @@ impl ListingRepo for FakeListings {
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        review: ReviewState,
     ) -> Result<AddedVersion, Self::Err> {
         let mut stored = self.0.lock().unwrap();
         let Some(entry) = stored
@@ -227,15 +287,78 @@ impl ListingRepo for FakeListings {
         else {
             return Ok(AddedVersion::Missing);
         };
+        if entry.pending().is_some() {
+            return Ok(AddedVersion::ReviewPending);
+        }
 
-        let (newest, newest_content) = entry.newest();
-        if newest_content.source_hash() == content.source_hash() {
+        let Some(newest) = entry.newest() else {
+            return Ok(AddedVersion::Missing);
+        };
+        if newest.content.source_hash() == content.source_hash() {
             return Ok(AddedVersion::Unchanged);
         }
 
-        let next = newest.next(bump);
-        entry.versions.push((next, content.clone()));
+        let next = newest.version.next(bump);
+        entry.versions.push(StoredVersion {
+            version: next,
+            content: content.clone(),
+            review,
+            reviewer: None,
+            reason: None,
+        });
         Ok(AddedVersion::Added(next))
+    }
+
+    async fn pending_versions(&self, limit: u16) -> Result<Vec<PendingVersion>, Self::Err> {
+        let stored = self.0.lock().unwrap();
+        Ok(stored
+            .iter()
+            .filter(|entry| !entry.removed)
+            .filter_map(Stored::pending_version)
+            .take(usize::from(limit))
+            .collect())
+    }
+
+    async fn pending_review(&self, id: ListingId) -> Result<Option<PendingReview>, Self::Err> {
+        let stored = self.0.lock().unwrap();
+        Ok(stored
+            .iter()
+            .find(|entry| entry.listing.id == id && !entry.removed)
+            .and_then(|entry| {
+                Some(PendingReview {
+                    pending: entry.pending_version()?,
+                    content: entry.pending()?.content.clone(),
+                })
+            }))
+    }
+
+    async fn decide_review(
+        &self,
+        id: ListingId,
+        version: Version,
+        reviewer: &MacroUserIdStr<'_>,
+        decision: &ReviewDecision,
+    ) -> Result<bool, Self::Err> {
+        let mut stored = self.0.lock().unwrap();
+        let Some(pending) = stored
+            .iter_mut()
+            .find(|entry| entry.listing.id == id)
+            .and_then(|entry| {
+                entry.versions.iter_mut().find(|stored| {
+                    stored.version == version && stored.review == ReviewState::Pending
+                })
+            })
+        else {
+            return Ok(false);
+        };
+
+        pending.review = decision.state();
+        pending.reviewer = Some(reviewer.as_ref().to_owned());
+        pending.reason = match decision {
+            ReviewDecision::Approve => None,
+            ReviewDecision::Reject { reason } => reason.clone(),
+        };
+        Ok(true)
     }
 
     async fn routine_version(
@@ -251,11 +374,12 @@ impl ListingRepo for FakeListings {
         Ok(entry
             .versions
             .iter()
-            .filter(|(version, _)| major.is_none_or(|major| version.major == major))
-            .max_by_key(|(version, _)| *version)
-            .and_then(|(version, content)| match content {
+            .filter(|stored| stored.review == ReviewState::Approved)
+            .filter(|stored| major.is_none_or(|major| stored.version.major == major))
+            .max_by_key(|stored| stored.version)
+            .and_then(|stored| match &stored.content {
                 ListingContent::Routine(routine) => Some(RoutineVersion {
-                    version: *version,
+                    version: stored.version,
                     snapshot: routine.snapshot.clone(),
                 }),
                 ListingContent::Page(_) => None,
@@ -397,7 +521,9 @@ impl ListingRepo for FakeListings {
     ) -> Result<(), Self::Err> {
         let mut stored = self.0.lock().unwrap();
         if let Some(entry) = stored.iter_mut().find(|entry| entry.listing.id == id) {
-            let major = entry.newest().0.major;
+            let Some(major) = entry.approved().map(|approved| approved.version.major) else {
+                return Ok(());
+            };
             entry.installs.insert(
                 user.as_ref().to_owned(),
                 StoredInstall {
@@ -426,10 +552,10 @@ impl ListingRepo for FakeListings {
         team: Option<Uuid>,
     ) -> Result<Option<InstalledPage>, Self::Err> {
         let stored = self.0.lock().unwrap();
-        let Some(entry) = stored
-            .iter()
-            .find(|entry| entry.listing.id == id && Some(entry.listing.team_id) == team)
-        else {
+        let Some(entry) = stored.iter().find(|entry| {
+            entry.listing.id == id
+                && (entry.listing.team_id.is_none() || entry.listing.team_id == team)
+        }) else {
             return Ok(None);
         };
         let Some(install) = entry.installs.get(user.as_ref()) else {
@@ -439,11 +565,12 @@ impl ListingRepo for FakeListings {
         Ok(entry
             .versions
             .iter()
-            .filter(|(version, _)| version.major == install.major)
-            .max_by_key(|(version, _)| *version)
-            .and_then(|(version, content)| match content {
+            .filter(|stored| stored.review == ReviewState::Approved)
+            .filter(|stored| stored.version.major == install.major)
+            .max_by_key(|stored| stored.version)
+            .and_then(|stored| match &stored.content {
                 ListingContent::Page(page) => Some(InstalledPage {
-                    version: *version,
+                    version: stored.version,
                     html: page.html.clone(),
                 }),
                 ListingContent::Routine(_) => None,
@@ -759,6 +886,7 @@ async fn published_board(service: &Service, pages: &FakePages) -> Listing {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board"),
+            PublishScope::Team,
         )
         .await
         .expect("the board publishes")
@@ -770,7 +898,13 @@ async fn publishing_needs_a_team() {
     pages.save(BOARD, "<h1>Board</h1>");
 
     let refused = service
-        .publish(&user(ADA), None, owned(ADA, BOARD), text("Board"))
+        .publish(
+            &user(ADA),
+            None,
+            owned(ADA, BOARD),
+            text("Board"),
+            PublishScope::Team,
+        )
         .await;
 
     assert!(matches!(refused, Err(MarketplaceError::NoTeam)));
@@ -787,6 +921,7 @@ async fn a_first_version_is_one_point_zero_and_a_document_lists_once() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board again"),
+            PublishScope::Team,
         )
         .await;
 
@@ -806,6 +941,7 @@ async fn a_page_that_does_not_build_is_not_published() {
             Some(&member(ADA, ACME, TeamRole::Member)),
             owned(ADA, BOARD),
             text("Board"),
+            PublishScope::Team,
         )
         .await;
 
@@ -840,6 +976,7 @@ async fn only_the_team_sees_and_installs_a_listing() {
         .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
         .await
         .expect("listings load")
+        .page
         .listings;
 
     assert_eq!(installed.installed_major, Some(1));
@@ -993,11 +1130,13 @@ async fn the_publisher_or_a_team_admin_unlists_and_installs_keep_working() {
         .listings(&user(CAM), Some(&cam), first_page(ListingsShown::Listed))
         .await
         .expect("listings load")
+        .page
         .listings;
     let for_installer = service
         .listings(&user(BEN), Some(&ben), first_page(ListingsShown::Installed))
         .await
         .expect("listings load")
+        .page
         .listings;
     let still_builds = service
         .installed_build(&user(BEN), Some(&ben), listing.id)

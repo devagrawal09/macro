@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT major, minor, source_hash\n            FROM marketplace_listing_version\n            WHERE listing_id = $1 AND review_state <> 'rejected'\n            ORDER BY major DESC, minor DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "52bcc37edd91559bc9b48b7dd9fc24150724644409d0cb84485a98fa03343db2"
+}

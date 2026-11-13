@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                l.id AS listing_id,\n                l.kind,\n                l.user_id,\n                l.title,\n                l.description,\n                p.major,\n                p.minor,\n                p.created_at AS published_at,\n                a.major AS \"approved_major?\",\n                a.minor AS \"approved_minor?\",\n                p.html,\n                p.routine\n            FROM marketplace_listing_version p\n            JOIN marketplace_listing l ON l.id = p.listing_id\n            LEFT JOIN LATERAL (\n                SELECT major, minor\n                FROM marketplace_listing_version\n                WHERE listing_id = l.id AND review_state = 'approved'\n                ORDER BY major DESC, minor DESC\n                LIMIT 1\n            ) a ON true\n            WHERE p.listing_id = $1 AND p.review_state = 'pending' AND l.removed_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "listing_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "published_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "approved_major?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "approved_minor?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "html",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "routine",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8341787f9167e77584025b76d05ff9bae2a6ff92805e9e64230bf7d807f7d842"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rejection_reason\n        FROM marketplace_listing_version\n        WHERE listing_id = $1 AND review_state = 'rejected'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rejection_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "3c17beff38a70c948a6c930153749418deeb5d02ecd8d28f7d0349da3d269c16"
+}

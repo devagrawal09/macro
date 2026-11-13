@@ -13,9 +13,11 @@ use uuid::Uuid;
 use scheduled_action::domain::templates::fill::RoutineFills;
 
 use crate::domain::models::{
-    AddedVersion, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine, Listing,
-    ListingContent, ListingCursor, ListingId, ListingKind, ListingPage, ListingQuery, ListingScope,
-    ListingsShown, NewListing, RoutineInstall, RoutineVersion, TaskHash, Version, VersionBump,
+    AddedVersion, Audience, FollowingInstall, InstallUpdate, InstalledPage, InstalledRoutine,
+    Listing, ListingContent, ListingCursor, ListingId, ListingKind, ListingPage, ListingQuery,
+    ListingScope, ListingsShown, NewListing, PendingReview, PendingVersion, PublishedPage,
+    PublishedRoutine, ReviewDecision, ReviewState, RoutineInstall, RoutineVersion, TaskHash,
+    Version, VersionBump,
 };
 use crate::domain::ports::ListingRepo;
 
@@ -47,6 +49,61 @@ pub enum ListingRepoErr {
     /// A stored routine snapshot or fills don't read.
     #[error("invalid routine stored for a listing: {0}")]
     InvalidRoutine(#[from] serde_json::Error),
+    /// A stored version holds no content for its kind.
+    #[error("a listing version has no content")]
+    MissingContent,
+}
+
+/// A pending version's row, with its content when read for review.
+struct PendingRow {
+    listing_id: Uuid,
+    kind: String,
+    user_id: String,
+    title: String,
+    description: String,
+    major: i32,
+    minor: i32,
+    published_at: DateTime<Utc>,
+    approved_major: Option<i32>,
+    approved_minor: Option<i32>,
+    html: Option<String>,
+    routine: Option<serde_json::Value>,
+}
+
+impl PendingRow {
+    /// The version as the review list shows it, and its content when read.
+    fn into_pending(self) -> Result<(PendingVersion, Option<ListingContent>), ListingRepoErr> {
+        let kind = ListingKind::from_str(&self.kind)
+            .map_err(|_| ListingRepoErr::UnknownKind(self.kind))?;
+        let content = match (kind, self.html, self.routine) {
+            (ListingKind::Artifact, Some(html), _) => Some(ListingContent::Page(PublishedPage {
+                source_hash: agent_code_mode::domain::SourceHash::of(&html),
+                html,
+            })),
+            (ListingKind::Routine, _, Some(routine)) => Some(ListingContent::Routine(
+                PublishedRoutine::new(serde_json::from_value(routine)?),
+            )),
+            _ => None,
+        };
+        let pending = PendingVersion {
+            listing_id: ListingId::from_uuid(self.listing_id),
+            kind,
+            title: self.title,
+            description: self.description,
+            publisher: MacroUserIdStr::try_from(self.user_id)
+                .map_err(|_| ListingRepoErr::InvalidUserId)?,
+            version: Version {
+                major: self.major,
+                minor: self.minor,
+            },
+            approved_version: self
+                .approved_major
+                .zip(self.approved_minor)
+                .map(|(major, minor)| Version { major, minor }),
+            published_at: self.published_at,
+        };
+        Ok((pending, content))
+    }
 }
 
 struct ListingRow {
@@ -62,6 +119,8 @@ struct ListingRow {
     updated_at: DateTime<Utc>,
     latest_major: i32,
     latest_minor: i32,
+    pending_major: Option<i32>,
+    pending_minor: Option<i32>,
     installed_major: Option<i32>,
     installed_routine_id: Option<Uuid>,
     detached: Option<bool>,
@@ -94,6 +153,10 @@ impl TryFrom<ListingRow> for Listing {
                 major: row.latest_major,
                 minor: row.latest_minor,
             },
+            pending_version: row
+                .pending_major
+                .zip(row.pending_minor)
+                .map(|(major, minor)| Version { major, minor }),
             installed_major: row.installed_major,
             installed_routine: row.installed_routine_id.map(|routine_id| InstalledRoutine {
                 routine_id,
@@ -135,17 +198,21 @@ fn escape_like(search: &str) -> String {
 }
 
 impl PgListingRepo {
-    /// The listings a member of `team` may see, as `user` sees them, newest
-    /// first: their team's and everyone's, leaving out unlisted ones `user`
-    /// hasn't installed, narrowed by `selection`.
+    /// The listings `audience` may see, as `user` sees them, newest first:
+    /// their team's and everyone's, leaving out unlisted ones `user` hasn't
+    /// installed and ones with no approved version, narrowed by `selection`.
+    /// A global publisher also sees global listings waiting for their first
+    /// approval, and each global listing's pending version.
     async fn select(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         selection: Selection,
     ) -> Result<Vec<Listing>, ListingRepoErr> {
         // Newest first, then by id: a cursor resumes after the listing it
-        // names, among those created at the same instant too.
+        // names, among those created at the same instant too. The version
+        // shown is the newest approved one, or for a global publisher a new
+        // listing's pending one.
         let rows = sqlx::query_as!(
             ListingRow,
             r#"
@@ -162,6 +229,8 @@ impl PgListingRepo {
                 l.updated_at,
                 v.major AS "latest_major!",
                 v.minor AS "latest_minor!",
+                p.major AS "pending_major?",
+                p.minor AS "pending_minor?",
                 i.major AS "installed_major?",
                 i.routine_id AS "installed_routine_id?",
                 (i.detached_at IS NOT NULL) AS "detached?",
@@ -177,9 +246,17 @@ impl PgListingRepo {
                 SELECT major, minor
                 FROM marketplace_listing_version
                 WHERE listing_id = l.id
-                ORDER BY major DESC, minor DESC
+                  AND (
+                      review_state = 'approved'
+                      OR ($12::bool AND l.team_id IS NULL AND review_state = 'pending')
+                  )
+                ORDER BY (review_state = 'approved') DESC, major DESC, minor DESC
                 LIMIT 1
             ) v
+            LEFT JOIN marketplace_listing_version p
+                ON $12::bool
+               AND p.listing_id = l.id
+               AND p.review_state = 'pending'
             -- A claim still creating its routine isn't an install yet.
             LEFT JOIN marketplace_install i
                 ON i.listing_id = l.id
@@ -202,7 +279,7 @@ impl PgListingRepo {
             LIMIT $11
             "#,
             user.as_ref(),
-            team,
+            audience.team,
             selection.only,
             selection.installed_only,
             selection.listed_only,
@@ -212,6 +289,7 @@ impl PgListingRepo {
             selection.after.map(|cursor| cursor.created_at),
             selection.after.map(|cursor| cursor.id.as_uuid()),
             selection.limit,
+            audience.global_publisher,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -253,6 +331,7 @@ impl ListingRepo for PgListingRepo {
             listing.id,
             Version::FIRST,
             &listing.content,
+            listing.review,
         )
         .await?;
 
@@ -264,7 +343,7 @@ impl ListingRepo for PgListingRepo {
     async fn listing(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         id: ListingId,
     ) -> Result<Option<Listing>, Self::Err> {
         let selection = Selection {
@@ -277,7 +356,7 @@ impl ListingRepo for PgListingRepo {
             after: None,
             limit: 1,
         };
-        let listings = self.select(user, team, selection).await?;
+        let listings = self.select(user, audience, selection).await?;
         Ok(listings.into_iter().next())
     }
 
@@ -285,7 +364,7 @@ impl ListingRepo for PgListingRepo {
     async fn listings(
         &self,
         user: &MacroUserIdStr<'_>,
-        team: Option<Uuid>,
+        audience: Audience,
         query: &ListingQuery,
     ) -> Result<ListingPage, Self::Err> {
         let limit = usize::from(query.limit);
@@ -303,7 +382,7 @@ impl ListingRepo for PgListingRepo {
             after: query.after,
             limit: i64::from(query.limit) + 1,
         };
-        let mut listings = self.select(user, team, selection).await?;
+        let mut listings = self.select(user, audience, selection).await?;
 
         let next = if listings.len() > limit {
             listings.truncate(limit);
@@ -320,6 +399,7 @@ impl ListingRepo for PgListingRepo {
         id: ListingId,
         bump: VersionBump,
         content: &ListingContent,
+        review: ReviewState,
     ) -> Result<AddedVersion, Self::Err> {
         let mut transaction = self.pool.begin().await?;
 
@@ -339,11 +419,28 @@ impl ListingRepo for PgListingRepo {
             return Ok(AddedVersion::Missing);
         }
 
+        let pending = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM marketplace_listing_version
+                WHERE listing_id = $1 AND review_state = 'pending'
+            ) AS "pending!"
+            "#,
+            id.as_uuid(),
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if pending {
+            return Ok(AddedVersion::ReviewPending);
+        }
+
+        // Rejected versions are out of the numbering.
         let newest = sqlx::query!(
             r#"
             SELECT major, minor, source_hash
             FROM marketplace_listing_version
-            WHERE listing_id = $1
+            WHERE listing_id = $1 AND review_state <> 'rejected'
             ORDER BY major DESC, minor DESC
             LIMIT 1
             "#,
@@ -363,7 +460,7 @@ impl ListingRepo for PgListingRepo {
             minor: newest.minor,
         }
         .next(bump);
-        insert_version(&mut transaction, id, next, content).await?;
+        insert_version(&mut transaction, id, next, content, review).await?;
         sqlx::query!(
             r#"UPDATE marketplace_listing SET updated_at = now() WHERE id = $1"#,
             id.as_uuid(),
@@ -373,6 +470,141 @@ impl ListingRepo for PgListingRepo {
 
         transaction.commit().await?;
         Ok(AddedVersion::Added(next))
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn pending_versions(&self, limit: u16) -> Result<Vec<PendingVersion>, Self::Err> {
+        let rows = sqlx::query_as!(
+            PendingRow,
+            r#"
+            SELECT
+                l.id AS listing_id,
+                l.kind,
+                l.user_id,
+                l.title,
+                l.description,
+                p.major,
+                p.minor,
+                p.created_at AS published_at,
+                a.major AS "approved_major?",
+                a.minor AS "approved_minor?",
+                NULL::text AS html,
+                NULL::jsonb AS routine
+            FROM marketplace_listing_version p
+            JOIN marketplace_listing l ON l.id = p.listing_id
+            LEFT JOIN LATERAL (
+                SELECT major, minor
+                FROM marketplace_listing_version
+                WHERE listing_id = l.id AND review_state = 'approved'
+                ORDER BY major DESC, minor DESC
+                LIMIT 1
+            ) a ON true
+            WHERE p.review_state = 'pending' AND l.removed_at IS NULL
+            ORDER BY p.created_at, l.id
+            LIMIT $1
+            "#,
+            i64::from(limit),
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| row.into_pending().map(|(pending, _)| pending))
+            .collect()
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn pending_review(&self, id: ListingId) -> Result<Option<PendingReview>, Self::Err> {
+        let row = sqlx::query_as!(
+            PendingRow,
+            r#"
+            SELECT
+                l.id AS listing_id,
+                l.kind,
+                l.user_id,
+                l.title,
+                l.description,
+                p.major,
+                p.minor,
+                p.created_at AS published_at,
+                a.major AS "approved_major?",
+                a.minor AS "approved_minor?",
+                p.html,
+                p.routine
+            FROM marketplace_listing_version p
+            JOIN marketplace_listing l ON l.id = p.listing_id
+            LEFT JOIN LATERAL (
+                SELECT major, minor
+                FROM marketplace_listing_version
+                WHERE listing_id = l.id AND review_state = 'approved'
+                ORDER BY major DESC, minor DESC
+                LIMIT 1
+            ) a ON true
+            WHERE p.listing_id = $1 AND p.review_state = 'pending' AND l.removed_at IS NULL
+            "#,
+            id.as_uuid(),
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            let (pending, content) = row.into_pending()?;
+            let content = content.ok_or(ListingRepoErr::MissingContent)?;
+            Ok(PendingReview { pending, content })
+        })
+        .transpose()
+    }
+
+    #[tracing::instrument(err, skip_all)]
+    async fn decide_review(
+        &self,
+        id: ListingId,
+        version: Version,
+        reviewer: &MacroUserIdStr<'_>,
+        decision: &ReviewDecision,
+    ) -> Result<bool, Self::Err> {
+        let mut transaction = self.pool.begin().await?;
+        let reason = match decision {
+            ReviewDecision::Approve => None,
+            ReviewDecision::Reject { reason } => reason.as_deref(),
+        };
+
+        let decided = sqlx::query!(
+            r#"
+            UPDATE marketplace_listing_version
+            SET review_state = $4,
+                reviewed_by = $5,
+                reviewed_at = now(),
+                rejection_reason = $6
+            WHERE listing_id = $1
+              AND major = $2
+              AND minor = $3
+              AND review_state = 'pending'
+            "#,
+            id.as_uuid(),
+            version.major,
+            version.minor,
+            decision.state().to_string(),
+            reviewer.as_ref(),
+            reason,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if decided.rows_affected() == 0 {
+            return Ok(false);
+        }
+
+        if matches!(decision, ReviewDecision::Approve) {
+            sqlx::query!(
+                r#"UPDATE marketplace_listing SET updated_at = now() WHERE id = $1"#,
+                id.as_uuid(),
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        transaction.commit().await?;
+        Ok(true)
     }
 
     #[tracing::instrument(err, skip_all)]
@@ -387,6 +619,7 @@ impl ListingRepo for PgListingRepo {
             FROM marketplace_listing_version
             WHERE listing_id = $1
               AND kind = 'routine'
+              AND review_state = 'approved'
               AND ($2::int IS NULL OR major = $2)
             ORDER BY major DESC, minor DESC
             LIMIT 1
@@ -669,7 +902,7 @@ impl ListingRepo for PgListingRepo {
             INSERT INTO marketplace_install (listing_id, user_id, major)
             SELECT $1, $2, max(major)
             FROM marketplace_listing_version
-            WHERE listing_id = $1
+            WHERE listing_id = $1 AND review_state = 'approved'
             HAVING max(major) IS NOT NULL
             ON CONFLICT (listing_id, user_id)
             DO UPDATE SET major = EXCLUDED.major, updated_at = now()
@@ -709,7 +942,9 @@ impl ListingRepo for PgListingRepo {
             CROSS JOIN LATERAL (
                 SELECT major, minor, html
                 FROM marketplace_listing_version
-                WHERE listing_id = i.listing_id AND major = i.major
+                WHERE listing_id = i.listing_id
+                  AND major = i.major
+                  AND review_state = 'approved'
                 ORDER BY minor DESC
                 LIMIT 1
             ) v
@@ -790,6 +1025,7 @@ async fn insert_version(
     id: ListingId,
     version: Version,
     content: &ListingContent,
+    review: ReviewState,
 ) -> Result<(), ListingRepoErr> {
     let (html, routine) = match content {
         ListingContent::Page(page) => (Some(page.html.as_str()), None),
@@ -799,8 +1035,8 @@ async fn insert_version(
     sqlx::query!(
         r#"
         INSERT INTO marketplace_listing_version
-            (listing_id, kind, major, minor, source_hash, html, routine)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (listing_id, kind, major, minor, source_hash, html, routine, review_state)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
         id.as_uuid(),
         content.kind().to_string(),
@@ -809,6 +1045,7 @@ async fn insert_version(
         content.source_hash().as_ref(),
         html,
         routine,
+        review.to_string(),
     )
     .execute(&mut **transaction)
     .await?;
