@@ -1102,3 +1102,112 @@ async fn installers_are_team_members_on_the_major_newest_install_first(pool: PgP
     assert_eq!(on_any_major, vec![user(CARA), user(BEN)]);
     assert_eq!(bounded, vec![user(CARA)]);
 }
+
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn a_pin_holds_a_page_on_its_minor_and_keeps_a_routine_from_updates(pool: PgPool) {
+    let acme = insert_team(&pool, ADA).await;
+    insert_user(&pool, BEN).await;
+    insert_user(&pool, CARA).await;
+    let repo = PgListingRepo::new(pool);
+    let page_listing = board(acme);
+    let routine_listing = digest(acme);
+    repo.create_listing(page_listing.clone()).await.unwrap();
+    repo.create_listing(routine_listing.clone()).await.unwrap();
+    let not_installed = repo
+        .set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+
+    // Ben pins his page on 1.0; a minor version follows.
+    repo.install_latest(page_listing.id, &user(BEN))
+        .await
+        .unwrap();
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    repo.add_version(
+        page_listing.id,
+        VersionBump::Minor,
+        &page("<h1>Board 1.1</h1>"),
+        &VersionNotes::default(),
+    )
+    .await
+    .unwrap();
+    // Pinning again keeps the pin on 1.0.
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    let pinned_page = repo
+        .installed_page(page_listing.id, &user(BEN), Some(acme))
+        .await
+        .unwrap()
+        .expect("the install has a page");
+    let pinned_listing = repo
+        .listing(&user(BEN), Some(acme), page_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+    repo.set_pinned(page_listing.id, &user(BEN), false)
+        .await
+        .unwrap();
+    let unpinned_page = repo
+        .installed_page(page_listing.id, &user(BEN), Some(acme))
+        .await
+        .unwrap()
+        .expect("the install has a page");
+    repo.set_pinned(page_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    repo.install_latest(page_listing.id, &user(BEN))
+        .await
+        .unwrap();
+    let after_taking = repo
+        .listing(&user(BEN), Some(acme), page_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+
+    // Ben pins his routine; Cara doesn't, so only she is behind.
+    repo.save_routine_install(
+        routine_listing.id,
+        &user(BEN),
+        &install(0, Uuid::now_v7(), "ben"),
+    )
+    .await
+    .unwrap();
+    repo.save_routine_install(
+        routine_listing.id,
+        &user(CARA),
+        &install(0, Uuid::now_v7(), "cara"),
+    )
+    .await
+    .unwrap();
+    repo.set_pinned(routine_listing.id, &user(BEN), true)
+        .await
+        .unwrap();
+    let behind = repo
+        .installs_behind(routine_listing.id, Version { major: 1, minor: 1 })
+        .await
+        .unwrap();
+    let pinned_routine = repo
+        .listing(&user(BEN), Some(acme), routine_listing.id)
+        .await
+        .unwrap()
+        .expect("Ben sees the listing");
+
+    assert!(!not_installed);
+    assert_eq!(pinned_page.version, Version::FIRST);
+    assert!(pinned_page.pinned);
+    assert!(pinned_listing.pinned);
+    assert_eq!(pinned_listing.installed_version, Some(Version::FIRST));
+    assert_eq!(unpinned_page.version, Version { major: 1, minor: 1 });
+    assert!(!unpinned_page.pinned);
+    assert!(!after_taking.pinned, "taking a version unpins");
+    let behind: Vec<String> = behind
+        .into_iter()
+        .map(|following| following.user.as_ref().to_owned())
+        .collect();
+    assert_eq!(behind, vec![CARA.to_owned()]);
+    assert!(pinned_routine.pinned);
+    assert_eq!(pinned_routine.installed_version, Some(Version::FIRST));
+}

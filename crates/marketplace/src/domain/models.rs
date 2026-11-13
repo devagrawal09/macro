@@ -179,6 +179,9 @@ pub struct Listing {
     /// The version the person asking has: the one their page shows, or the
     /// one their routine was last filled in from.
     pub installed_version: Option<Version>,
+    /// The person asking pinned their install to `installed_version`: newer
+    /// minor versions don't reach it until they unpin or update.
+    pub pinned: bool,
     /// The routine the person asking got from installing it.
     pub installed_routine: Option<InstalledRoutine>,
     /// How many people installed it.
@@ -514,6 +517,8 @@ pub struct InstalledPage {
     pub version: Version,
     /// Its source.
     pub html: String,
+    /// The install is pinned to this version.
+    pub pinned: bool,
 }
 
 /// An installed page's build.
@@ -521,6 +526,9 @@ pub struct InstalledPage {
 pub struct InstalledBuild {
     /// The version built.
     pub version: Version,
+    /// The install is pinned to this version, so newer minors don't replace
+    /// it.
+    pub pinned: bool,
     /// The page to render, or why it doesn't build.
     pub build: DocumentBuild,
     /// The version's source, which a page without programs is shown as.

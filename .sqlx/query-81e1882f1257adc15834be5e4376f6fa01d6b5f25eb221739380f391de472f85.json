@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO marketplace_install (listing_id, user_id, major)\n            SELECT $1, $2, max(major)\n            FROM marketplace_listing_version\n            WHERE listing_id = $1\n            HAVING max(major) IS NOT NULL\n            ON CONFLICT (listing_id, user_id)\n            DO UPDATE SET major = EXCLUDED.major, pinned_minor = NULL, updated_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "81e1882f1257adc15834be5e4376f6fa01d6b5f25eb221739380f391de472f85"
+}

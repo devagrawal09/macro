@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                v.major AS \"major!\",\n                v.minor AS \"minor!\",\n                v.html AS \"html!\",\n                (i.pinned_minor IS NOT NULL) AS \"pinned!\"\n            FROM marketplace_install i\n            JOIN marketplace_listing l ON l.id = i.listing_id\n            CROSS JOIN LATERAL (\n                SELECT major, minor, html\n                FROM marketplace_listing_version\n                WHERE listing_id = i.listing_id\n                  AND major = i.major\n                  AND (i.pinned_minor IS NULL OR minor = i.pinned_minor)\n                ORDER BY minor DESC\n                LIMIT 1\n            ) v\n            WHERE i.listing_id = $1\n              AND i.user_id = $2\n              AND (l.team_id IS NULL OR l.team_id = $3)\n              AND l.kind = 'artifact'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "major!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "minor!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "html!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "c33f4a65f4e88b2a39b552c719ee14686c7f6b22a0aea19fc31958d050552750"
+}

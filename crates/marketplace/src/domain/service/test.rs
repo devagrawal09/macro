@@ -82,6 +82,8 @@ struct StoredInstall {
     routine: Option<RoutineInstall>,
     detached: bool,
     update_failed: bool,
+    /// The minor it is pinned to.
+    pinned: Option<i32>,
 }
 
 struct Stored {
@@ -118,6 +120,7 @@ impl Stored {
             latest_version: self.newest().0,
             installed_major: install.map(|install| install.major),
             installed_version: install.map(|install| self.installed_version(install)),
+            pinned: install.is_some_and(|install| install.pinned.is_some()),
             installed_routine: install.and_then(|install| {
                 install.routine.as_ref().map(|routine| InstalledRoutine {
                     routine_id: routine.routine_id,
@@ -132,12 +135,18 @@ impl Stored {
         }
     }
 
-    /// The version an install has: its routine's, or its major's newest.
+    /// The version an install has: its routine's, the one it is pinned to,
+    /// or its major's newest.
     fn installed_version(&self, install: &StoredInstall) -> Version {
+        let pinned = install.pinned.map(|minor| Version {
+            major: install.major,
+            minor,
+        });
         install
             .routine
             .as_ref()
             .map(|routine| routine.version)
+            .or(pinned)
             .unwrap_or_else(|| {
                 self.versions
                     .iter()
@@ -365,6 +374,7 @@ impl ListingRepo for FakeListings {
                     routine: Some(install.clone()),
                     detached: false,
                     update_failed: false,
+                    pinned: None,
                 },
             );
         }
@@ -384,7 +394,7 @@ impl ListingRepo for FakeListings {
         Ok(entry
             .installs
             .iter()
-            .filter(|(_, install)| !install.detached)
+            .filter(|(_, install)| !install.detached && install.pinned.is_none())
             .filter_map(|(person, install)| {
                 let routine = install.routine.clone()?;
                 let behind =
@@ -426,6 +436,27 @@ impl ListingRepo for FakeListings {
         Ok(())
     }
 
+    async fn set_pinned(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        pinned: bool,
+    ) -> Result<bool, Self::Err> {
+        let mut stored = self.0.lock().unwrap();
+        let Some(entry) = stored.iter_mut().find(|entry| entry.listing.id == id) else {
+            return Ok(false);
+        };
+        let Some(install) = entry.installs.get(user.as_ref()).cloned() else {
+            return Ok(false);
+        };
+        let has = entry.installed_version(&install);
+        let pin = pinned.then(|| install.pinned.unwrap_or(has.minor));
+        if let Some(install) = entry.installs.get_mut(user.as_ref()) {
+            install.pinned = pin;
+        }
+        Ok(true)
+    }
+
     async fn remove_listing(&self, id: ListingId) -> Result<(), Self::Err> {
         let mut stored = self.0.lock().unwrap();
         if let Some(entry) = stored.iter_mut().find(|entry| entry.listing.id == id) {
@@ -449,6 +480,7 @@ impl ListingRepo for FakeListings {
                     routine: None,
                     detached: false,
                     update_failed: false,
+                    pinned: None,
                 },
             );
         }
@@ -484,11 +516,13 @@ impl ListingRepo for FakeListings {
             .versions
             .iter()
             .filter(|(version, _)| version.major == install.major)
+            .filter(|(version, _)| install.pinned.is_none_or(|minor| version.minor == minor))
             .max_by_key(|(version, _)| *version)
             .and_then(|(version, content)| match content {
                 ListingContent::Page(page) => Some(InstalledPage {
                     version: *version,
                     html: page.html.clone(),
+                    pinned: install.pinned.is_some(),
                 }),
                 ListingContent::Routine(_) => None,
             }))
@@ -1312,4 +1346,79 @@ async fn a_history_shows_each_versions_changelog_to_whoever_sees_the_listing() {
         ]
     );
     assert!(matches!(for_outsider, Err(MarketplaceError::NotFound)));
+}
+
+#[tokio::test]
+async fn a_pinned_page_keeps_its_minor_until_unpinned_or_updated() {
+    let (service, pages) = marketplace();
+    let listing = published_board(&service, &pages).await;
+    let ada = member(ADA, ACME, TeamRole::Member);
+    let ben = member(BEN, ACME, TeamRole::Member);
+    let cam = member(CAM, ACME, TeamRole::Member);
+    service
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
+        .await
+        .expect("a teammate installs it");
+    let not_installed = service
+        .set_pinned(&user(CAM), Some(&cam), listing.id, true)
+        .await;
+
+    let pinned = service
+        .set_pinned(&user(BEN), Some(&ben), listing.id, true)
+        .await
+        .expect("Ben pins his install");
+    pages.save(BOARD, "<h1>Board, tidied</h1>");
+    service
+        .publish_version(
+            &user(ADA),
+            Some(&ada),
+            listing.id,
+            owned(ADA, BOARD),
+            VersionBump::Minor,
+            Changelog::default(),
+        )
+        .await
+        .expect("a minor version publishes");
+    let while_pinned = service
+        .installed_build(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("the install builds");
+    let unpinned = service
+        .set_pinned(&user(BEN), Some(&ben), listing.id, false)
+        .await
+        .expect("Ben unpins his install");
+    let after_unpinning = service
+        .installed_build(&user(BEN), Some(&ben), listing.id)
+        .await
+        .expect("the install builds");
+
+    service
+        .set_pinned(&user(BEN), Some(&ben), listing.id, true)
+        .await
+        .expect("Ben pins again");
+    let updated = service
+        .install(
+            &user(BEN),
+            Some(&ben),
+            listing.id,
+            InstallRequest::default(),
+        )
+        .await
+        .expect("taking the newest version");
+
+    assert!(matches!(not_installed, Err(MarketplaceError::NotFound)));
+    assert!(pinned.pinned);
+    assert_eq!(pinned.installed_version, Some(Version::FIRST));
+    assert_eq!(while_pinned.version, Version::FIRST);
+    assert!(while_pinned.pinned);
+    assert_eq!(while_pinned.html, "<h1>Board</h1>");
+    assert!(!unpinned.pinned);
+    assert_eq!(after_unpinning.version, Version { major: 1, minor: 1 });
+    assert!(!after_unpinning.pinned);
+    assert!(!updated.pinned, "taking a version unpins the install");
 }

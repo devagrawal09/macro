@@ -358,6 +358,60 @@ where
         updates
     }
 
+    /// Bring an unpinned routine install up to the newest minor of its
+    /// major, as an automatic update would have: an edited routine detaches,
+    /// a failure is recorded. Like publishing's updates, it runs on its own
+    /// task, so a dropped request can't leave the routine updated and the
+    /// install unrecorded.
+    async fn catch_up_routine(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        id: ListingId,
+    ) -> Result<(), MarketplaceError> {
+        let Some(install) = self
+            .listings
+            .routine_install(id, user)
+            .await
+            .map_err(internal)?
+        else {
+            return Ok(());
+        };
+        let Some(newest) = self
+            .listings
+            .routine_version(id, Some(install.version.major))
+            .await
+            .map_err(internal)?
+        else {
+            return Ok(());
+        };
+        if newest.version <= install.version {
+            return Ok(());
+        }
+
+        let listings = Arc::clone(&self.listings);
+        let routines = Arc::clone(&self.routines);
+        let following = FollowingInstall {
+            user: user.clone(),
+            install,
+        };
+        let update = async move {
+            update_install(
+                &*listings,
+                &*routines,
+                id,
+                newest.version,
+                &newest.snapshot,
+                following,
+            )
+            .await
+        };
+        let update = tokio::spawn(update.in_current_span())
+            .await
+            .map_err(internal)?;
+        tracing::Span::current().record("update", tracing::field::debug(&update));
+        Ok(())
+    }
+
     /// The page the caller's install shows.
     async fn installed_page(
         &self,
@@ -744,6 +798,53 @@ where
         self.listing(user, team, id).await
     }
 
+    #[tracing::instrument(
+        err,
+        skip_all,
+        fields(listing_id = %id, team_id = tracing::field::Empty, pinned = pinned, update = tracing::field::Empty)
+    )]
+    async fn set_pinned(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+        pinned: bool,
+    ) -> Result<Listing, MarketplaceError> {
+        self.admit(user).await?;
+        let team = membership(user, team)?.map(|member| member.team_id);
+        let listing = self.listing(user, team, id).await?;
+        if listing.installed_major.is_none() {
+            return Err(MarketplaceError::NotFound);
+        }
+        // A routine its person edited or made their own gets no updates to
+        // hold back.
+        if pinned
+            && listing
+                .installed_routine
+                .is_some_and(|routine| routine.detached)
+        {
+            return Err(MarketplaceError::Invalid(
+                "this routine no longer gets updates, so there is nothing to pin".to_owned(),
+            ));
+        }
+
+        let found = self
+            .listings
+            .set_pinned(id, user, pinned)
+            .await
+            .map_err(internal)?;
+        if !found {
+            return Err(MarketplaceError::NotFound);
+        }
+        // An unpinned page shows the newest minor by itself; a routine has to
+        // be updated to it.
+        if !pinned && listing.kind == ListingKind::Routine {
+            self.catch_up_routine(user, id).await?;
+        }
+
+        self.listing(user, team, id).await
+    }
+
     #[tracing::instrument(err, skip_all, fields(listing_id = %id))]
     async fn uninstall(
         &self,
@@ -766,6 +867,7 @@ where
 
         Ok(InstalledBuild {
             version: page.version,
+            pinned: page.pinned,
             build,
             html: page.html,
         })

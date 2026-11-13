@@ -89,6 +89,8 @@ impl Modify for SecurityAddon {
         marketplace::inbound::axum_router::unlist_marketplace_listing,
         marketplace::inbound::axum_router::install_marketplace_listing,
         marketplace::inbound::axum_router::uninstall_marketplace_listing,
+        marketplace::inbound::axum_router::pin_marketplace_install,
+        marketplace::inbound::axum_router::unpin_marketplace_install,
         marketplace::inbound::axum_router::get_installed_listing_build,
         marketplace::inbound::axum_router::run_installed_listing_program,
         agent_code_mode::inbound::axum_router::list_connected_apps,

@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS marketplace_listing_version (
     )
 );
 
--- A person's install of a listing: the major version they are on.
+-- A person's install of a listing: the major version they are on, and the
+-- minor when they pinned it.
 --
 -- A routine install also keeps the routine it created, the version that
 -- routine was last filled in from, the person's fills and the hash of its
@@ -97,6 +98,10 @@ CREATE TABLE IF NOT EXISTS marketplace_install (
     detached_at TIMESTAMPTZ,
     -- The last update failed; the next minor version tries again.
     update_failed_at TIMESTAMPTZ,
+    -- The person pinned the install to this minor of its major: a page keeps
+    -- showing it and a routine gets no automatic updates. Taking a version
+    -- or unpinning clears it.
+    pinned_minor INT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (listing_id, user_id),

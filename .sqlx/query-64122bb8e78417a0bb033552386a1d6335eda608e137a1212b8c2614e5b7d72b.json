@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                user_id,\n                major,\n                routine_minor AS \"minor!\",\n                routine_id AS \"routine_id!\",\n                routine_fills AS \"fills!\",\n                routine_task_hash AS \"task_hash!\"\n            FROM marketplace_install\n            WHERE listing_id = $1\n              AND major = $2\n              AND routine_minor < $3\n              AND routine_id IS NOT NULL\n              AND detached_at IS NULL\n              AND pinned_minor IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "minor!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "routine_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "fills!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "task_hash!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "64122bb8e78417a0bb033552386a1d6335eda608e137a1212b8c2614e5b7d72b"
+}

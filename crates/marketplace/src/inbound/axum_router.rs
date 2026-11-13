@@ -123,6 +123,11 @@ where
                 .delete(uninstall_marketplace_listing::<S, Access, Auth>),
         )
         .route(
+            "/marketplace/listings/{id}/install/pin",
+            put(pin_marketplace_install::<S, Access, Auth>)
+                .delete(unpin_marketplace_install::<S, Access, Auth>),
+        )
+        .route(
             "/marketplace/listings/{id}/install/build",
             get(get_installed_listing_build::<S, Access, Auth>),
         )
@@ -269,8 +274,12 @@ pub struct MissingRoutineFills {
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledListingBuild {
-    /// The version built: the newest minor of the major the caller is on.
+    /// The version built: the newest minor of the major the caller is on,
+    /// or the one they pinned.
     pub version: Version,
+    /// The caller pinned their install to `version`: a newer minor version
+    /// doesn't replace the page.
+    pub pinned: bool,
     /// The page to render, or why it doesn't build.
     pub page: DocumentBuildResponse,
     /// The version's source, when `page` is plain and is shown as it is.
@@ -285,6 +294,7 @@ impl From<InstalledBuild> for InstalledListingBuild {
 
         Self {
             version: installed.version,
+            pinned: installed.pinned,
             page,
             plain_html,
         }
@@ -649,11 +659,72 @@ where
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(put, path = "/marketplace/listings/{id}/install/pin", tag = "marketplace", operation_id = "pin_marketplace_install",
+    params(("id" = Uuid, Path, description = "A listing the caller installed")),
+    responses((status = 200, body = Listing), (status = 400, body = ErrorResponse), (status = 401), (status = 404, body = ErrorResponse), (status = 500)))]
+/// Pin the caller's install to the version it has: a page keeps showing it
+/// and a routine gets no automatic updates. Taking a version with
+/// `PUT .../install` unpins it. `400` means a routine the caller edited or
+/// made their own, which gets no updates to hold back.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn pin_marketplace_install<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<Listing>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let listing = state
+        .service
+        .set_pinned(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+            true,
+        )
+        .await?;
+    Ok(Json(listing))
+}
+
+#[utoipa::path(delete, path = "/marketplace/listings/{id}/install/pin", tag = "marketplace", operation_id = "unpin_marketplace_install",
+    params(("id" = Uuid, Path, description = "A listing the caller installed")),
+    responses((status = 200, body = Listing), (status = 401), (status = 404, body = ErrorResponse), (status = 500)))]
+/// Unpin the caller's install: it moves to the newest minor version of its
+/// major. A routine is updated to it unless its person edited it, which
+/// detaches it as an automatic update would.
+#[tracing::instrument(err, skip_all, fields(%id))]
+pub async fn unpin_marketplace_install<S, Access, Auth>(
+    State(state): State<MarketplaceRouterState<S, Access, Auth>>,
+    Path(id): Path<Uuid>,
+    caller: Caller<Auth>,
+    team: Team<Access, Auth>,
+) -> Result<Json<Listing>, MarketplaceError>
+where
+    S: MarketplaceService,
+    Access: EntityAccessService,
+    Auth: MacroAuthorizationService,
+{
+    let listing = state
+        .service
+        .set_pinned(
+            &caller.authorization.macro_user_id,
+            team.entity_access_receipt.as_ref(),
+            ListingId::from_uuid(id),
+            false,
+        )
+        .await?;
+    Ok(Json(listing))
+}
+
 #[utoipa::path(get, path = "/marketplace/listings/{id}/install/build", tag = "marketplace", operation_id = "get_installed_listing_build",
     params(("id" = Uuid, Path, description = "A listing the caller installed")),
     responses((status = 200, body = InstalledListingBuild), (status = 401), (status = 404), (status = 500), (status = 503)))]
 /// Build the page the caller's install shows: the newest minor version of
-/// the major they are on.
+/// the major they are on, or the version they pinned.
 #[tracing::instrument(err, skip_all, fields(%id))]
 pub async fn get_installed_listing_build<S, Access, Auth>(
     State(state): State<MarketplaceRouterState<S, Access, Auth>>,

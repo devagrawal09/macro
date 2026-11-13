@@ -621,3 +621,96 @@ async fn a_history_says_which_routine_version_the_server_made_major() {
         ]
     );
 }
+
+async fn set_pinned(
+    service: &Service,
+    id: &'static str,
+    listing: ListingId,
+    pinned: bool,
+) -> Result<Listing, MarketplaceError> {
+    service
+        .set_pinned(
+            &user(id),
+            Some(&member(id, ACME, TeamRole::Member)),
+            listing,
+            pinned,
+        )
+        .await
+}
+
+#[tokio::test]
+async fn a_pinned_routine_skips_automatic_updates_and_unpinning_catches_up() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+    let cams = installed_id(&install(&service, CAM, listing.id).await);
+
+    let pinned = set_pinned(&service, BEN, listing.id, true)
+        .await
+        .expect("Ben pins his install");
+    let published = publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+    let while_pinned = routines.saved(bens);
+    let unpinned = set_pinned(&service, BEN, listing.id, false)
+        .await
+        .expect("Ben unpins his install");
+    let caught_up = routines.saved(bens);
+
+    assert!(pinned.pinned);
+    assert_eq!(pinned.installed_version, Some(Version::FIRST));
+    // Only Cam, who didn't pin, was updated with the version.
+    assert_eq!(published.updates.updated, 1);
+    assert_eq!(
+        instructions(&routines.saved(cams)),
+        json!("Sum up the week in three lines")
+    );
+    assert_eq!(instructions(&while_pinned), json!("Sum up the week"));
+    assert!(!unpinned.pinned);
+    assert_eq!(
+        unpinned.installed_version,
+        Some(Version { major: 1, minor: 1 })
+    );
+    assert_eq!(
+        instructions(&caught_up),
+        json!("Sum up the week in three lines")
+    );
+    assert_eq!(caught_up.revision, 2);
+}
+
+#[tokio::test]
+async fn unpinning_an_edited_routine_detaches_it_and_leaves_it_alone() {
+    let (service, _, routines) = marketplace_with_routines();
+    let listing = published_digest(&service, &routines).await;
+    let bens = installed_id(&install(&service, BEN, listing.id).await);
+    set_pinned(&service, BEN, listing.id, true)
+        .await
+        .expect("Ben pins his install");
+    publish_instructions(
+        &service,
+        &routines,
+        listing.id,
+        "Sum up the week in three lines",
+        vec![zone()],
+        VersionBump::Minor,
+    )
+    .await;
+
+    let edited = json!({ "steps": [{ "type": "agent", "instructions": "Mine now" }] });
+    routines.edit(bens, edited.clone());
+    let unpinned = set_pinned(&service, BEN, listing.id, false)
+        .await
+        .expect("Ben unpins his install");
+    let pinning_again = set_pinned(&service, BEN, listing.id, true).await;
+
+    let routine = unpinned.installed_routine.expect("an installed routine");
+    assert!(routine.detached);
+    assert_eq!(routines.saved(bens).routine.task, edited);
+    assert!(matches!(pinning_again, Err(MarketplaceError::Invalid(_))));
+}

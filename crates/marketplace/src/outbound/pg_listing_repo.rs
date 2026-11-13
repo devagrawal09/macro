@@ -65,6 +65,7 @@ struct ListingRow {
     latest_minor: i32,
     installed_major: Option<i32>,
     installed_minor: Option<i32>,
+    pinned: Option<bool>,
     installed_routine_id: Option<Uuid>,
     detached: Option<bool>,
     update_failed: Option<bool>,
@@ -101,6 +102,7 @@ impl TryFrom<ListingRow> for Listing {
                 .installed_major
                 .zip(row.installed_minor)
                 .map(|(major, minor)| Version { major, minor }),
+            pinned: row.pinned.unwrap_or(false),
             installed_routine: row.installed_routine_id.map(|routine_id| InstalledRoutine {
                 routine_id,
                 detached: row.detached.unwrap_or(false),
@@ -170,8 +172,10 @@ impl PgListingRepo {
                 v.minor AS "latest_minor!",
                 i.major AS "installed_major?",
                 -- A routine is on the version it was last filled in from; a
-                -- page shows the newest minor of its major.
-                COALESCE(i.routine_minor, iv.minor) AS "installed_minor?",
+                -- page shows the minor it is pinned to, or the newest of its
+                -- major.
+                COALESCE(i.routine_minor, i.pinned_minor, iv.minor) AS "installed_minor?",
+                (i.pinned_minor IS NOT NULL) AS "pinned?",
                 i.routine_id AS "installed_routine_id?",
                 (i.detached_at IS NOT NULL) AS "detached?",
                 (i.update_failed_at IS NOT NULL) AS "update_failed?",
@@ -569,6 +573,7 @@ impl ListingRepo for PgListingRepo {
                 routine_claimed_at = NULL,
                 detached_at = NULL,
                 update_failed_at = NULL,
+                pinned_minor = NULL,
                 updated_at = now()
             "#,
             id.as_uuid(),
@@ -605,6 +610,7 @@ impl ListingRepo for PgListingRepo {
               AND routine_minor < $3
               AND routine_id IS NOT NULL
               AND detached_at IS NULL
+              AND pinned_minor IS NULL
             "#,
             id.as_uuid(),
             version.major,
@@ -691,6 +697,45 @@ impl ListingRepo for PgListingRepo {
     }
 
     #[tracing::instrument(err, skip_all)]
+    async fn set_pinned(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        pinned: bool,
+    ) -> Result<bool, Self::Err> {
+        // A pin holds the version the install has: its routine's, or the
+        // newest minor of a page's major. Pinning again keeps the pin.
+        let found = sqlx::query_scalar!(
+            r#"
+            UPDATE marketplace_install i
+            SET pinned_minor = CASE
+                    WHEN $3 THEN COALESCE(
+                        i.pinned_minor,
+                        i.routine_minor,
+                        (
+                            SELECT max(v.minor)
+                            FROM marketplace_listing_version v
+                            WHERE v.listing_id = i.listing_id AND v.major = i.major
+                        )
+                    )
+                END,
+                updated_at = now()
+            WHERE i.listing_id = $1
+              AND i.user_id = $2
+              -- A claim still creating its routine isn't an install yet.
+              AND (i.routine_claimed_at IS NULL OR i.routine_id IS NOT NULL)
+            RETURNING i.listing_id
+            "#,
+            id.as_uuid(),
+            user.as_ref(),
+            pinned,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(found.is_some())
+    }
+
+    #[tracing::instrument(err, skip_all)]
     async fn remove_listing(&self, id: ListingId) -> Result<(), Self::Err> {
         sqlx::query!(
             r#"
@@ -719,7 +764,7 @@ impl ListingRepo for PgListingRepo {
             WHERE listing_id = $1
             HAVING max(major) IS NOT NULL
             ON CONFLICT (listing_id, user_id)
-            DO UPDATE SET major = EXCLUDED.major, updated_at = now()
+            DO UPDATE SET major = EXCLUDED.major, pinned_minor = NULL, updated_at = now()
             "#,
             id.as_uuid(),
             user.as_ref(),
@@ -750,13 +795,19 @@ impl ListingRepo for PgListingRepo {
     ) -> Result<Option<InstalledPage>, Self::Err> {
         let row = sqlx::query!(
             r#"
-            SELECT v.major AS "major!", v.minor AS "minor!", v.html AS "html!"
+            SELECT
+                v.major AS "major!",
+                v.minor AS "minor!",
+                v.html AS "html!",
+                (i.pinned_minor IS NOT NULL) AS "pinned!"
             FROM marketplace_install i
             JOIN marketplace_listing l ON l.id = i.listing_id
             CROSS JOIN LATERAL (
                 SELECT major, minor, html
                 FROM marketplace_listing_version
-                WHERE listing_id = i.listing_id AND major = i.major
+                WHERE listing_id = i.listing_id
+                  AND major = i.major
+                  AND (i.pinned_minor IS NULL OR minor = i.pinned_minor)
                 ORDER BY minor DESC
                 LIMIT 1
             ) v
@@ -778,6 +829,7 @@ impl ListingRepo for PgListingRepo {
                 minor: row.minor,
             },
             html: row.html,
+            pinned: row.pinned,
         }))
     }
 

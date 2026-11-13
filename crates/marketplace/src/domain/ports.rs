@@ -100,7 +100,7 @@ pub trait ListingRepo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Install the routine listing for `user`, or replace their install,
-    /// following updates again. Ends a claim.
+    /// following updates again, unpinned. Ends a claim.
     fn save_routine_install(
         &self,
         id: ListingId,
@@ -109,7 +109,7 @@ pub trait ListingRepo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Routine installs on `version`'s major, older than it, whose routine
-    /// still follows the listing.
+    /// still follows the listing: not detached, not pinned.
     fn installs_behind(
         &self,
         id: ListingId,
@@ -124,11 +124,20 @@ pub trait ListingRepo: Send + Sync + 'static {
         update: &InstallUpdate,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
+    /// Pin `user`'s install to the version it has, or unpin it. Pinning a
+    /// pinned install keeps its pin. `false` when they have no install.
+    fn set_pinned(
+        &self,
+        id: ListingId,
+        user: &MacroUserIdStr<'_>,
+        pinned: bool,
+    ) -> impl Future<Output = Result<bool, Self::Err>> + Send;
+
     /// Unlist a listing. Repeating it changes nothing.
     fn remove_listing(&self, id: ListingId) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// Put `user` on the listing's newest major version: installs it, or
-    /// moves their install.
+    /// moves their install, unpinning it.
     fn install_latest(
         &self,
         id: ListingId,
@@ -143,7 +152,8 @@ pub trait ListingRepo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send;
 
     /// The page `user`'s install shows, when they installed the listing and a
-    /// member of `team` may see it.
+    /// member of `team` may see it: the newest minor of its major, or the one
+    /// it is pinned to.
     fn installed_page(
         &self,
         id: ListingId,
@@ -308,6 +318,18 @@ pub trait MarketplaceService: Send + Sync + 'static {
         team: Option<&EntityAccessReceipt<MemberTeamRole>>,
         id: ListingId,
         request: InstallRequest,
+    ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
+
+    /// Pin the caller's install to the version it has, so newer minor
+    /// versions don't reach it, or unpin it. Unpinning a routine install
+    /// brings its routine to the newest minor of its major, unless its person
+    /// edited it, which detaches it as an automatic update would.
+    fn set_pinned(
+        &self,
+        user: &MacroUserIdStr<'static>,
+        team: Option<&EntityAccessReceipt<MemberTeamRole>>,
+        id: ListingId,
+        pinned: bool,
     ) -> impl Future<Output = Result<Listing, MarketplaceError>> + Send;
 
     /// Remove the caller's install. A routine it created stays theirs.
