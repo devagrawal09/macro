@@ -12,6 +12,7 @@
 //! and the other internal services the workers call ([`services`]).
 
 mod attachments;
+mod delivery;
 mod gmail;
 mod outlook;
 mod queues;

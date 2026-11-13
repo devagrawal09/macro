@@ -7,25 +7,18 @@
 //! then take them to the emulated Gmail. Those queues live on an SQS
 //! endpoint of their own, so the inbox's sync delivery never sees them.
 
+use super::super::delivery;
 use super::super::queues::{QueueSpec, Queues};
 use super::{GmailInbox, OWNER, Received};
 use crate::pubsub::gmail_ops::worker::GmailOpsContext;
 use crate::pubsub::scheduled::context::ScheduledContext;
 use crate::pubsub::test_support::{self, GmailEndpoints, fake_sqs};
-use email::domain::mailbox::credentials::MailboxCredentials;
 use email::domain::models::mailbox_action::MailboxAction;
 use email::domain::ports::EmailService;
-use email::domain::service::EmailServiceImpl;
-use email::outbound::EmailPgRepo;
-use email::outbound::mailbox_pg::PgMailboxSync;
-use frecency::domain::services::FrecencyQueryServiceImpl;
-use frecency::outbound::postgres::FrecencyPgStorage;
 use gmail_emulator::SeedMailbox;
 use macro_event_broker::{KafkaEventPublisher, MacroEventBrokerService};
-use macro_user_id::user_id::MacroUserIdStr;
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
@@ -46,23 +39,10 @@ const SCHEDULED_MAX_RECEIVES: u32 = 5;
 /// looping.
 const MAX_DELIVERIES: usize = 500;
 
-type EmailSvc = EmailServiceImpl<
-    EmailPgRepo,
-    FrecencyQueryServiceImpl<FrecencyPgStorage>,
-    sqs_client::SQS,
-    crm::domain::service::CrmServiceImpl<
-        crm::outbound::companies_repo::CompaniesRepositoryImpl,
-        crm::outbound::no_op_resolver::NoOpCompanyMetadataResolver,
-    >,
-    entity_access_management::domain::service::EntityAccessManagementServiceImpl<
-        entity_access_management::outbound::PgRepository,
-    >,
->;
-
 /// A Gmail inbox the owner also uses in Macro.
 pub struct GmailInboxInMacro {
     inbox: GmailInbox,
-    email: EmailSvc,
+    email: delivery::EmailSvc,
     queues: Queues,
     ops_queue: String,
     ops_retry_queue: String,
@@ -133,56 +113,25 @@ impl GmailInboxInMacro {
                 retry_worker,
             )
         };
-        let s3 = s3_client::S3::new(s3(&services_url));
-        let draft_content = Arc::new(
-            email::domain::mailbox::drafts::content::DraftContentService {
-                repository: EmailPgRepo::new(db.clone()),
-                bytes: crate::outbound::mailbox_drafts::MailboxDraftContent {
-                    provider: crate::outbound::attachment_access::ProviderAttachmentBytes {
-                        s3: s3.clone(),
-                        bucket: "attachments".to_string(),
-                        gmail: email_api.clone(),
-                        outlook: crate::outbound::email_api::ProviderMailboxGateway(
-                            unused_outlook_api(&db, &services_url),
-                        ),
-                    },
-                    s3: s3.clone(),
-                    bucket: "attachments".to_string(),
-                },
-                access: entity_access::domain::service::EntityAccessServiceImpl::new(
-                    entity_access::outbound::PgAccessRepository::new(db.clone()),
-                ),
-            },
-        );
         let scheduled = crate::pubsub::scheduled::worker::context(
             worker(&scheduled_queue),
             db.clone(),
             email_api.clone(),
-            draft_content,
-            s3,
-            "attachments".to_string(),
+            delivery::draft_content(
+                &db,
+                &services_url,
+                email_api.clone(),
+                delivery::outlook_api(&db, &services_url, &services_url),
+            ),
+            delivery::s3(&services_url),
+            delivery::bucket(),
             MacroEventBrokerService::new(
                 KafkaEventPublisher::new("127.0.0.1:9092").expect("kafka publisher"),
                 TaskTracker::new(),
             ),
-            email::domain::read_receipts::ReadReceiptService::new(
-                email::outbound::read_receipts_pg::ReadReceiptPgRepository(db.clone()),
-                email::domain::read_receipts::PixelUrlPrefix::new(&services_url),
-            ),
+            delivery::read_receipts(&db, &services_url),
         );
-        let email = EmailServiceImpl::new(
-            EmailPgRepo::new(db.clone()),
-            FrecencyQueryServiceImpl::new(FrecencyPgStorage::new(db.clone())),
-            sqs_client.clone(),
-            crm::domain::service::CrmServiceImpl::new(
-                crm::outbound::companies_repo::CompaniesRepositoryImpl::new(db.clone()),
-                crm::outbound::no_op_resolver::NoOpCompanyMetadataResolver,
-            ),
-            entity_access_management::domain::service::EntityAccessManagementServiceImpl::new(
-                entity_access_management::outbound::PgRepository::new(db.clone()),
-            ),
-            0,
-        );
+        let email = delivery::email_service(&db, sqs_client.clone());
         let queues = Queues::new(
             sqs,
             vec![
@@ -325,50 +274,8 @@ impl GmailInboxInMacro {
         .await
         .expect("Macro shows the mail");
         self.email
-            .change_thread_mailbox_state(owner(), thread, action)
+            .change_thread_mailbox_state(delivery::macro_user(OWNER), thread, action)
             .await
             .expect("the change is accepted");
     }
-}
-
-fn owner() -> MacroUserIdStr<'static> {
-    MacroUserIdStr::try_from_email(OWNER).unwrap()
-}
-
-/// An S3 client for the stand-in services; no spec sends attachments.
-fn s3(services_url: &str) -> aws_sdk_s3::Client {
-    aws_sdk_s3::Client::from_conf(
-        aws_sdk_s3::Config::builder()
-            .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
-            .region(aws_sdk_s3::config::Region::new("us-east-1"))
-            .credentials_provider(aws_sdk_s3::config::Credentials::new(
-                "test", "test", None, None, "harness",
-            ))
-            .endpoint_url(services_url)
-            .build(),
-    )
-}
-
-/// The Outlook half of the attachment reader, which Gmail sends never call.
-fn unused_outlook_api(
-    db: &sqlx::PgPool,
-    services_url: &str,
-) -> email_api_client::domain::service::mailbox::MailboxApiService<
-    email_api_client::OutlookApiClientRepository,
-    MailboxCredentials<PgMailboxSync, crate::outbound::email_api::MicrosoftCredentialsClient>,
-    email_api_client::domain::ports::AlwaysAllowRateLimiter,
-> {
-    email_api_client::domain::service::mailbox::MailboxApiService::new(
-        email_api_client::OutlookApiClientRepository::new().expect("outlook client"),
-        MailboxCredentials::new(
-            PgMailboxSync::new(db.clone()),
-            crate::outbound::email_api::MicrosoftCredentialsClient(
-                authentication_service_client::AuthServiceClient::new(
-                    "secret".to_string(),
-                    services_url.to_string(),
-                ),
-            ),
-        ),
-        email_api_client::domain::ports::AlwaysAllowRateLimiter,
-    )
 }
